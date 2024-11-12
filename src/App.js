@@ -1,7 +1,12 @@
 // import logo from './logo.svg';
-import './App.css';
 import ResponsiveFormikForm from './components/form';
 import 'bootstrap/dist/css/bootstrap.min.css';
+import 'bootstrap/dist/js/bootstrap.bundle.min.js';
+import './App.css';
+
+
+
+{/* <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js" /> */}
 
 // import { useAppDispatch, useAppSelector } from './redux/hooks';
 // import { increment ,decrement} from './redux/slices/counter';
