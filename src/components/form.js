@@ -11,7 +11,7 @@ const BootstrapForm = () => {
   } = useForm();
 
 
-  const creditorType = watch("creditorType"); // Watch the 'creditorType' field
+  const creditorType = watch("creditorType"); 
   const willAttend = watch("willAttend");
   const isRelatedParty = watch("isRelatedParty");
   const indianBanks = [
@@ -38,7 +38,7 @@ const BootstrapForm = () => {
     "South Indian Bank",
     "RBL Bank",
     "Karnataka Bank",
-    // Add more banks as needed
+   
   ];
 
 
