@@ -64,7 +64,7 @@ const BootstrapForm = () => {
 
     if (creditorType === "individual") {
       // Use individual name
-      name = data.name;
+      name = data.individualName;
     } else if (creditorType === "organization") {
       // Use organization name
       name = data.organizationName;
