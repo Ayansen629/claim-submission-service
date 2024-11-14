@@ -64,7 +64,7 @@ const BootstrapForm = () => {
 
     if (creditorType === "individual") {
       // Use individual name
-      name = data.name;
+      name = data.individualName;
     } else if (creditorType === "organization") {
       // Use organization name
       name = data.organizationName;
@@ -108,6 +108,9 @@ const BootstrapForm = () => {
           claimMst: "claim123",
           name: data.name,
           creditorAddress: data.address,
+          authorizedFirstName: data.firstIndividualName,
+          authorizedMiddleName: data.middleIndividualName,
+          authorizedLastName: data.lastIndividualName,
           emailId: data.emailAddress,
           auditDetails: {
             createdBy: "admin",
@@ -294,7 +297,7 @@ const BootstrapForm = () => {
 
               
               {/* Conditional Input for PAN or Aadhar Number */}
-              {creditorID && (
+              {/* {creditorID && (
                 <div className="mb-3">
                   <label htmlFor="idNumber" className="form-label text-muted">
                     {creditorID === "pan" ? "PAN Number" : "Aadhar Number"}
@@ -322,7 +325,7 @@ const BootstrapForm = () => {
                   )}
                 </div>
               )}
-            
+             */}
 
 
               
@@ -602,25 +605,24 @@ const BootstrapForm = () => {
 
       {/* Authorization Letter */}
       <div className="mb-4">
-                <label htmlFor="authorizationLetter" className="form-label text-muted">
-                  Authorization Letter
-                </label>
-                <input
-                  type="file"
-                  id="authorizationLetter"
-                  className={`form-control ${errors.authorizationLetter ? "is-invalid" : ""}`}
-                  multiple
-                  {...register("authorizationLetter", {
-                    required: "At least one authorization letter is required",
-                  })}
-                  onChange={onFileChange}
-                />
-                {errors.authorizationLetter && (
-                  <div className="invalid-feedback">
-                    {errors.authorizationLetter.message}
-                  </div>
-                )}
-              </div>
+  <label htmlFor="authorizationLetter" className="form-label text-muted">
+    Authorization Letter
+  </label>
+  <input
+    type="file"
+    id="authorizationLetter"
+    className={`form-control ${errors.authorizationLetter ? "is-invalid" : ""}`}
+    multiple
+    {...register("authorizationLetter")}
+    onChange={onFileChange}
+  />
+  {errors.authorizationLetter && (
+    <div className="invalid-feedback">
+      {errors.authorizationLetter.message}
+    </div>
+  )}
+</div>
+
     </div>
   </div>
 )}
@@ -682,6 +684,61 @@ const BootstrapForm = () => {
             <div className="invalid-feedback">{errors.address.message}</div>
           )}
         </div>
+
+        <div className="mb-4">
+        <label className="form-label text-muted">Name of Authorized Person</label>
+        <div className="row">
+          <div className="col">
+            <input
+              type="text"
+              id="firstIndividualName"
+              className={`form-control ${errors.firstIndividualName ? "is-invalid" : ""}`}
+              placeholder="First name"
+              {...register("firstIndividualName", {
+                required: "First name is required",
+                pattern: {
+                  value: /^[A-Za-z\s]+$/,
+                  message: "First name should not contain numbers or special characters",
+                },
+              })}
+            />
+            {errors.firstIndividualName && <div className="invalid-feedback">{errors.firstIndividualName.message}</div>}
+          </div>
+
+          <div className="col">
+            <input
+              type="text"
+              id="middleIndividualName"
+              className={`form-control ${errors.middleName ? "is-invalid" : ""}`}
+              placeholder="Middle name"
+              {...register("middleIndividualName", {
+                pattern: {
+                  value: /^[A-Za-z\s]+$/,
+                  message: "Middle name should not contain numbers or special characters",
+                },
+              })}
+            />
+            {errors.middleIndividualName && <div className="invalid-feedback">{errors.middleIndividualName.message}</div>}
+          </div>
+
+          <div className="col">
+            <input
+              type="text"
+              id="lastIndividualName"
+              className={`form-control ${errors.lastName ? "is-invalid" : ""}`}
+              placeholder="Last name"
+              {...register("lastIndividualName", {
+                required: "Last name is required",
+                pattern: {
+                  value: /^[A-Za-z\s]+$/,
+                  message: "Last name should not contain numbers or special characters",
+                },
+              })}
+            />
+            {errors.lastIndividualName && <div className="invalid-feedback">{errors.lastIndividualName.message}</div>}
+          </div>
+        </div>
+      </div>
 
         {/* Mobile Number Field */}
         <div className="mb-4">
@@ -849,13 +906,13 @@ const BootstrapForm = () => {
                   <label className="form-label text-muted mt-3">Authorization Letter (Attach a copy)</label>
                   <input
                     type="file"
-                    id="authorizationLetter"
+                    id="authorizationLetterCopy"
                     className={`form-control ${errors.authorizationLetter ? "is-invalid" : ""}`}
-                    {...register("authorizationLetter", { required: "Authorization letter is required" })}
+                    {...register("authorizationLetterCopy", { required: "Authorization letter is required" })}
                   />
-                  {errors.authorizationLetter && (
+                  {errors.authorizationLetterCopy && (
                     <div className="invalid-feedback">
-                      {errors.authorizationLetter.message}
+                      {errors.authorizationLetterCopy.message}
                     </div>
                   )}
                 </div>
@@ -1272,16 +1329,16 @@ const BootstrapForm = () => {
   <div className="mb-4">
     <label className="form-label text-muted">Remarks (if any)</label>
     <textarea
-      className={`form-control ${errors.remarks ? "is-invalid" : ""}`}
+      className={`form-control ${errors.assignmentRemarks ? "is-invalid" : ""}`}
       placeholder="Enter remarks"
-      {...register("remarks", {
+      {...register("assignmentRemarks", {
         maxLength: {
           value: 500,
           message: "Remarks should not exceed 500 characters",
         },
       })}
     />
-    {errors.remarks && <div className="invalid-feedback">{errors.remarks.message}</div>}
+    {errors.assignmentRemarks && <div className="invalid-feedback">{errors.assignmentRemarks.message}</div>}
   </div>
 </div>
 
