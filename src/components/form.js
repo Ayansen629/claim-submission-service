@@ -41,11 +41,147 @@ const BootstrapForm = () => {
    
   ];
 
+  const [pageNumber, setPageNumber] = React.useState(1); // Current page number
+  const userId = 1; // User ID, for the API call
+  const onSubmit = async (data) => {
+   
+    const requestData = {
+      RequestInfo: {},
+      claimMstDetailsModel: {
+        id: "claim123",
+        creditorId: "creditor123",
+        creditorIdType: data.creditorID,
+        typeOfCreditor: data.creditorType,
+        relatedParty: data.isRelatedParty,
+        remarks: data.remarks,
+        relationshipNature: data.natureOfRelationship,
+        claimAppNum: data.claimAppNum || "",
+        orgMstDetails: creditorType === "organization" ? {
+          id: "org123",
+          claimMst: "claim123",
+          organizationName: data.organizationName,
+          constitutionDetails: data.legalConstitution,
+          isCinOrLlp: data.isCinOrLlp,
+          registeredAddress: data.registeredAddress,
+          // contactNumber: data.mobileNumber,
+          emailId: data.emailAddress,
+          authorizedFirstName: data.firstName,
+          authorizedMiddleName: data.middleName,
+          authorizedLastName: data.lastName,
+          // authorizedPersonName: data.authorizedPersonName,
+          authorizedPersonDesignation: data.designation,
+          authorizedPersonContactNumber: data.mobileNumber,
+          authorizationLetter: data.authorizationLetter,
+          // documentRefId: data.documentRefId,
+          auditDetails: {
+            createdBy: "admin",
+            lastModifiedBy: "admin",
+            createdTime: Date.now(),
+            lastModifiedTime: Date.now(),
+          },
+        } : null,
+        individualCreditorMstDetails: creditorType === "individual" ? {
+          id: "indiv123",
+          claimMst: "claim123",
+          // firstName: data.firstName,
+          // middleName: data.middleName,
+          // lastName: data.lastName,
+          name:data.name,
+          creditorAddress: data.address,
+          emailId: data.emailAddress,
+          auditDetails: {
+            createdBy: "admin",
+            lastModifiedBy: "admin",
+            createdTime: Date.now(),
+            lastModifiedTime: Date.now(),
+          },
+        } : null,
+        bankMstDetails: {
+          id: "bank123",
+          claimMst: "claim123",
+          bankName: data.bankName,
+          accountNumber: data.accountNumber,
+          ifscCode: data.ifsc,
+          micrCode: data.micr,
+          branchName: data.branch,
+          swiftCode: data.swiftCode,
+          scannedDocumentId: "",
+          auditDetails: {
+            createdBy: "admin",
+            lastModifiedBy: "admin",
+            createdTime: Date.now(),
+            lastModifiedTime: Date.now(),
+          },
+        },
+        securityMstDetails: {
+          claimMst: "claim123",
+          id: "sec123",
+          securityType: data.securityType,
+          securityPersonName: data.securityPersonName,
+          securityPersonPan: data.securityPersonPan,
+          securityDetails: data.securityDetails,
+          rocChargeId: data.rocChargeId,
+          cersaiSecurityId: data.cersaiSecurityId,
+          priorityOfChange: data.priorityOfChange,
+          auditDetails: {
+            createdBy: "admin",
+            lastModifiedBy: "admin",
+            createdTime: Date.now(),
+            lastModifiedTime: Date.now(),
+          },
+        },
+        assignmentMstDetails: {
+          claimMst: "claim123",
+          id: "assign123",
+          assignorName: data.assignorName,
+          assignorPan: data.assignorPan,
+          assignmentDate: Date.now(),
+          assignedAmount: data.assignedAssigned,
+          remarks: data.assignmentRemarks,
+          auditDetails: {
+            createdBy: "admin",
+            lastModifiedBy: "admin",
+            createdTime: Date.now(),
+            lastModifiedTime: Date.now(),
+          },
+        },
+        auditDetails: {
+          createdBy: "admin",
+          createdTime: Date.now(),
+          lastModifiedBy: "admin",
+          lastModifiedTime: Date.now(),
+        },
+      },
+    };
 
-  const onSubmit = (data) => {
-    console.log("Form Data:", data);
-    // Add form submission logic here (e.g., API calls)
+    try {
+      const response = await fetch(
+        `https://localhost:8080/claim/step?userId=${userId}&pageNumber=${pageNumber}`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(requestData),
+        }
+      );
+
+      if (response.ok) {
+        // If data is saved successfully, move to the next page
+        console.log("Data saved successfully");
+        setPageNumber((prevPage) => prevPage + 1);
+      } else {
+        console.log("Error saving data:", response.status);
+      }
+    } catch (error) {
+      console.error("Error in API call:", error);
+    }
   };
+
+  // const onSubmit = (data) => {
+  //   console.log("Form Data:", data);
+  //   // Add form submission logic here (e.g., API calls)
+  // };
 
   return (
     <div className="container mt-5 bigForm">
