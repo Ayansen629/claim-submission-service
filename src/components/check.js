@@ -10,16 +10,17 @@ const BootstrapForm = () => {
     formState: { errors },
   } = useForm();
 
+  const [pageNumber, setPageNumber] = useState(1); // Current page number
   const [loading, setLoading] = useState(true); // Loader state
-  const userId = 18; // User ID for API call
+  const userId = 1; // Static user ID for API call as per requirements
 
-  // Recursive function to set values from nested data structure
+  // Recursive function to set form values dynamically
   const setFormValues = (data, prefix = "") => {
     Object.keys(data).forEach((key) => {
       const fieldName = prefix ? `${prefix}.${key}` : key;
       const value = data[key];
 
-      // Check if the value is an object and recurse
+      // If value is an object, call recursively
       if (value && typeof value === "object" && !Array.isArray(value)) {
         setFormValues(value, fieldName);
       } else {
@@ -29,12 +30,14 @@ const BootstrapForm = () => {
     });
   };
 
-  // Load data when component mounts
+  // Load data after a 5-second delay
   useEffect(() => {
-    const loadData = async () => {
+    const delayAndLoadData = async () => {
+      await new Promise((resolve) => setTimeout(resolve, 5000)); // Wait for 5 seconds
+
       try {
-        setLoading(true);
-        const response = await axios.post("https://localhost:8080/claim/load", { userId });
+        setLoading(true); // Show loader
+        const response = await axios.post(`https://localhost:8080/claim/load`, { userId });
 
         if (response.status === 200) {
           const data = response.data.claimMstDetailsModel;
@@ -45,17 +48,18 @@ const BootstrapForm = () => {
       } catch (error) {
         console.error("Error fetching data:", error);
       } finally {
-        setLoading(false);
+        setLoading(false); // Hide loader once done
       }
     };
 
-    loadData();
+    delayAndLoadData();
   }, [userId, setValue]);
 
+  // Function to handle form submission
   const onSubmit = async (data) => {
     try {
       const response = await axios.post(
-        `https://localhost:8080/claim/step?userId=${userId}`,
+        `https://localhost:8080/claim/step?userId=${userId}&pageNumber=${pageNumber}`,
         data,
         {
           headers: {
@@ -66,6 +70,7 @@ const BootstrapForm = () => {
 
       if (response.status === 200) {
         console.log("Data saved successfully");
+        setPageNumber((prevPage) => prevPage + 1);
       } else {
         console.log("Error saving data:", response.status);
       }
@@ -74,6 +79,7 @@ const BootstrapForm = () => {
     }
   };
 
+  // Validate and submit form on "Next" button click
   const handleNext = handleSubmit(onSubmit);
 
   return (
@@ -91,23 +97,25 @@ const BootstrapForm = () => {
               </div>
             ) : (
               <form onSubmit={handleNext}>
-                {/* Form Fields */}
+                {/* Display Name Field */}
                 <div className="mb-4">
-                  <label htmlFor="creditorId" className="form-label text-muted">
-                    Creditor ID
+                  <label htmlFor="displayName" className="form-label text-muted">
+                    Display Name
                   </label>
                   <input
                     type="text"
-                    id="creditorId"
-                    className={`form-control ${errors.creditorId ? "is-invalid" : ""}`}
-                    {...register("creditorId", { required: "Creditor ID is required" })}
+                    id="displayName"
+                    className={`form-control ${errors.displayName ? "is-invalid" : ""}`}
+                    {...register("displayName", {
+                      required: "Display name is required",
+                    })}
                   />
-                  {errors.creditorId && (
-                    <div className="invalid-feedback">{errors.creditorId.message}</div>
+                  {errors.displayName && (
+                    <div className="invalid-feedback">{errors.displayName.message}</div>
                   )}
                 </div>
-                
-                {/* Additional fields can be registered here based on form structure */}
+
+                {/* Additional fields based on structure */}
 
                 <div className="text-end">
                   <button type="submit" className="btn btn-lg btn-primary">
