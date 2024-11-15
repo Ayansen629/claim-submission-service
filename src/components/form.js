@@ -3,26 +3,55 @@ import React, { useState } from "react";
 import { Stepper, Step, StepLabel, Button } from "@mui/material";
 import PartAForm from "./partA";
 import PartBForm from "./partB";
+import axios from "axios";
 
 const BootstrapForm = () => {
   const [activeStep, setActiveStep] = useState(0);
+  const [loading, setLoading] = useState(false); // Loading state
 
-  const handleNext = (data) => {
-    console.log("Part A Data:", data);  // Optionally log Part A data
-    setActiveStep((prevStep) => prevStep + 1);
+  // API call to save Part A data and then move to next page
+  const handleNext = async (data) => {
+    setLoading(true); // Show loader
+
+    try {
+      const response = await axios.post("https://localhost:8080/api/submit", data);
+
+      if (response.status === 200) {
+        console.log("API call successful for Part A");
+        setActiveStep((prevStep) => prevStep + 1); // Move to next page (Part B)
+      } else {
+        console.error("API call failed:", response.status);
+        setActiveStep((prevStep) => prevStep + 1);
+
+      }
+    } catch (error) {
+      console.error("Error during API call:", error);
+      setActiveStep((prevStep) => prevStep + 1);
+    } finally {
+      setLoading(false); // Hide loader
+    }
   };
 
   const handleBack = () => {
-    setActiveStep((prevStep) => prevStep - 1);
+    setActiveStep((prevStep) => prevStep - 1); // Move to previous page (Part A)
   };
 
-  const handleFinalSubmit = (data) => {
-    console.log("Form Submitted:", data);
-    // Add form submission logic here
-  };
+  const handleFinalSubmit = async (data) => {
+    setLoading(true); // Show loader
 
-  const saveDraft = () => {
-    console.log("Form data saved as draft.");
+    try {
+      const response = await axios.post("https://localhost:8080/api/final-submit", data);
+
+      if (response.status === 200) {
+        console.log("Final form submitted successfully");
+      } else {
+        console.log("Error in final form submission");
+      }
+    } catch (error) {
+      console.error("Error in final form submission:", error);
+    } finally {
+      setLoading(false); // Hide loader
+    }
   };
 
   return (
@@ -34,10 +63,10 @@ const BootstrapForm = () => {
 
       <div className="form-content">
         {activeStep === 0 && (
-          <PartAForm onNext={handleNext} saveDraft={saveDraft} />
+          <PartAForm onNext={handleNext} loading={loading} />
         )}
         {activeStep === 1 && (
-          <PartBForm onPrevious={handleBack} onSubmit={handleFinalSubmit} />
+          <PartBForm onPrevious={handleBack} onSubmit={handleFinalSubmit} loading={loading} />
         )}
       </div>
     </div>
