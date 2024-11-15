@@ -3,7 +3,7 @@ import ResponsiveFormikForm from './components/form';
 import 'bootstrap/dist/css/bootstrap.min.css';
 import 'bootstrap/dist/js/bootstrap.bundle.min.js';
 import './App.css';
-
+import { SnackbarProvider } from 'notistack';
 
 
 {/* <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js" /> */}
@@ -19,17 +19,14 @@ function App() {
   // const dispatch=useAppDispatch(); // Accessing `value`
 
   return (
-    <div className="App ">
-      {/* <header className="App-header"> */}
-        {/* <img src={logo} className="App-logo" alt="logo" /> */}
+   
+     
+        <SnackbarProvider maxSnack={3}>
         <ResponsiveFormikForm/>
+        </SnackbarProvider>
+    
         
-        {/* <h1>Count is {count}</h1> */}
-        {/* <Counter/>
-        <button onClick={() => dispatch({type:'INCREMENT'})}>Increment</button>
-        <button onClick={() => dispatch({type:'DECREMENT'})}>Decrement</button> */}
-      {/* </header> */}
-    </div>
+    
   );
 }
 
