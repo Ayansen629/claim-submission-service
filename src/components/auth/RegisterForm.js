@@ -36,10 +36,12 @@ const RegisterForm = () => {
 
   return (
     <div className="container d-flex justify-content-center align-items-center min-vh-100">
-      <div className="card" style={{ width: "100%", maxWidth: "400px" }}>
+      <div className="card shadow-lg p-4" style={{ width: "100%", maxWidth: "450px", borderRadius: "12px" }}>
         <div className="card-body">
-          <h5 className="card-title text-center mb-4">Register</h5>
+          <h5 className="card-title text-center text-primary mb-4">Create an Account</h5>
+          
           {error && <div className="alert alert-danger">{error}</div>}
+
           <form onSubmit={handleRegister}>
             {/* Username field */}
             <div className="mb-3">
@@ -123,15 +125,20 @@ const RegisterForm = () => {
                 onChange={(e) => setPassword(e.target.value)}
                 required
               />
+              <small className="form-text text-muted">
+                Password must contain at least 8 characters, one uppercase, one lowercase, one number, and one special character.
+              </small>
             </div>
 
-            <button type="submit" className="btn btn-primary w-100">
+            <button type="submit" className="btn btn-primary w-100 mt-3">
               Register
             </button>
           </form>
 
           <div className="d-flex justify-content-center mt-3">
-            <Link to="/login" className="btn btn-link">Already have an account? Login</Link>
+            <Link to="/login" className="btn btn-link text-muted">
+              Already have an account? Login
+            </Link>
           </div>
         </div>
       </div>
