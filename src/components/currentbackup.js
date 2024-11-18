@@ -1,9 +1,11 @@
-import React, { useState } from "react";
+import React, { useState ,useEffect} from "react";
 import { useForm } from "react-hook-form";
 import axios from 'axios';
 import {  FaDownload } from "react-icons/fa";
+import ClaimFormPartB from "./partBForm";
+import { Stepper, Step, StepLabel, Button } from "@mui/material";
 
-const BootstrapForm = () => {
+const ClaimForm = () => {
   const {
     register,
     handleSubmit,
@@ -16,6 +18,7 @@ const BootstrapForm = () => {
   const [displayName, setDisplayName] = useState(""); // state to hold the display name
   const creditorType = watch("creditorType"); 
   const creditorID = watch("creditorID"); // Observe the selected value of creditorID
+  const[formPart,setFormPart] = useState("A");
   const willAttend = watch("willAttend");
   const isRelatedParty = watch("isRelatedParty");
   const indianBanks = [
@@ -48,6 +51,51 @@ const BootstrapForm = () => {
   const [pageNumber, setPageNumber] = React.useState(1); // Current page number
   const userId = 1; // User ID, for the API call
   const [uploadedFiles, setUploadedFiles] = useState([]);
+  const [loading, setLoading] = useState(true); // Loader state
+
+
+ // Recursive function to set values from nested data structure
+ const setFormValues = (data, prefix = "") => {
+  Object.keys(data).forEach((key) => {
+    const fieldName = prefix ? `${prefix}.${key}` : key;
+    const value = data[key];
+
+    // Check if the value is an object and recurse
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      setFormValues(value, fieldName);
+    } else {
+      // Set value if it's a simple field
+      setValue(fieldName, value);
+    }
+  });
+};
+
+
+   // Load data after a 3-second delay
+   useEffect(() => {
+    const delayAndLoadData = async () => {
+      await new Promise((resolve) => setTimeout(resolve, 3000)); // Wait for 5 seconds
+
+      try {
+        setLoading(true); // Show loader
+        const response = await axios.post(`http://localhost:8080/claim/loadUserDetails`, { userId });
+
+        if (response.status === 200) {
+          const data = response.data.claimMstDetailsModel;
+          setFormValues(data); // Populate form fields
+        } else {
+          console.error("Error loading data:", response.status);
+        }
+      } catch (error) {
+        console.error("Error fetching data:", error);
+      } finally {
+        setLoading(false); // Hide loader once done
+      }
+    };
+
+    delayAndLoadData();
+  }, [userId, setValue]);
+ 
 
   // Handle file input change
   const onFileChange = (e) => {
@@ -108,6 +156,9 @@ const BootstrapForm = () => {
           claimMst: "claim123",
           name: data.name,
           creditorAddress: data.address,
+          authorizedFirstName: data.firstIndividualName,
+          authorizedMiddleName: data.middleIndividualName,
+          authorizedLastName: data.lastIndividualName,
           emailId: data.emailAddress,
           auditDetails: {
             createdBy: "admin",
@@ -177,7 +228,7 @@ const BootstrapForm = () => {
   
     try {
       const response = await axios.post(
-        `https://localhost:8080/claim/step?userId=${userId}&pageNumber=${pageNumber}`,
+        `http://localhost:8080/claim/step?userId=${userId}&pageNumber=${pageNumber}`,
         requestData,
         {
           headers: {
@@ -197,8 +248,19 @@ const BootstrapForm = () => {
     }
   };
   
+  const saveDraft=()=>{
+    console.log("save draft");
+  }
 
- 
+ const showNextPart=(data)=>{
+  console.log(data,"part A dATA")
+  setPageNumber(prevPage => prevPage+1)
+
+
+ }
+ const showPreviousPart=()=>{
+  setPageNumber(prevPage => prevPage-1)
+ }
 
   return (
     <div className="container mt-5 bigForm">
@@ -248,7 +310,18 @@ const BootstrapForm = () => {
             <h2 className="text-center text-primary mb-5">
               Creditor Information Form
             </h2>
+            {loading ? (
+              <div className="text-center">
+                <div className="spinner-border text-primary" role="status">
+                  <span className="visually-hidden">Loading...</span>
+                </div>
+              </div>
+            ) : (
+              <>
+            {pageNumber===1 && (
+              <>
             <h5 className="mb-4">PART A- DETAILS OF CREDITOR</h5>
+      
             <form onSubmit={handleSubmit(onSubmit)}>
               {/* Display Name Field */}
 
@@ -279,9 +352,9 @@ const BootstrapForm = () => {
                       required: "Creditor ID is required",
                     })}
                   >
-                    <option value="">Select ID Type</option>
+                    <option value="">Select Id Type</option>
                     <option value="pan">PAN</option>
-                    <option value="aadhar">Aadhar</option>
+                    <option value="aadhar">Aadhaar</option>
                   </select>
                 </div>
                 {errors.creditorID && (
@@ -294,7 +367,7 @@ const BootstrapForm = () => {
 
               
               {/* Conditional Input for PAN or Aadhar Number */}
-              {creditorID && (
+              {/* {creditorID && (
                 <div className="mb-3">
                   <label htmlFor="idNumber" className="form-label text-muted">
                     {creditorID === "pan" ? "PAN Number" : "Aadhar Number"}
@@ -322,7 +395,7 @@ const BootstrapForm = () => {
                   )}
                 </div>
               )}
-            
+             */}
 
 
               
@@ -407,6 +480,7 @@ const BootstrapForm = () => {
         >
           <option value="">Select Type</option>
           <option value="privateLtd">Private Ltd. Company</option>
+          
           {/* Add more options as needed */}
         </select>
         {errors.legalConstruction && (
@@ -602,25 +676,24 @@ const BootstrapForm = () => {
 
       {/* Authorization Letter */}
       <div className="mb-4">
-                <label htmlFor="authorizationLetter" className="form-label text-muted">
-                  Authorization Letter
-                </label>
-                <input
-                  type="file"
-                  id="authorizationLetter"
-                  className={`form-control ${errors.authorizationLetter ? "is-invalid" : ""}`}
-                  multiple
-                  {...register("authorizationLetter", {
-                    required: "At least one authorization letter is required",
-                  })}
-                  onChange={onFileChange}
-                />
-                {errors.authorizationLetter && (
-                  <div className="invalid-feedback">
-                    {errors.authorizationLetter.message}
-                  </div>
-                )}
-              </div>
+  <label htmlFor="authorizationLetter" className="form-label text-muted">
+    Authorization Letter
+  </label>
+  <input
+    type="file"
+    id="authorizationLetter"
+    className={`form-control ${errors.authorizationLetter ? "is-invalid" : ""}`}
+    multiple
+    {...register("authorizationLetter")}
+    onChange={onFileChange}
+  />
+  {errors.authorizationLetter && (
+    <div className="invalid-feedback">
+      {errors.authorizationLetter.message}
+    </div>
+  )}
+</div>
+
     </div>
   </div>
 )}
@@ -682,6 +755,61 @@ const BootstrapForm = () => {
             <div className="invalid-feedback">{errors.address.message}</div>
           )}
         </div>
+
+        <div className="mb-4">
+        <label className="form-label text-muted">Name of Authorized Person</label>
+        <div className="row">
+          <div className="col">
+            <input
+              type="text"
+              id="firstIndividualName"
+              className={`form-control ${errors.firstIndividualName ? "is-invalid" : ""}`}
+              placeholder="First name"
+              {...register("firstIndividualName", {
+                required: "First name is required",
+                pattern: {
+                  value: /^[A-Za-z\s]+$/,
+                  message: "First name should not contain numbers or special characters",
+                },
+              })}
+            />
+            {errors.firstIndividualName && <div className="invalid-feedback">{errors.firstIndividualName.message}</div>}
+          </div>
+
+          <div className="col">
+            <input
+              type="text"
+              id="middleIndividualName"
+              className={`form-control ${errors.middleName ? "is-invalid" : ""}`}
+              placeholder="Middle name"
+              {...register("middleIndividualName", {
+                pattern: {
+                  value: /^[A-Za-z\s]+$/,
+                  message: "Middle name should not contain numbers or special characters",
+                },
+              })}
+            />
+            {errors.middleIndividualName && <div className="invalid-feedback">{errors.middleIndividualName.message}</div>}
+          </div>
+
+          <div className="col">
+            <input
+              type="text"
+              id="lastIndividualName"
+              className={`form-control ${errors.lastName ? "is-invalid" : ""}`}
+              placeholder="Last name"
+              {...register("lastIndividualName", {
+                required: "Last name is required",
+                pattern: {
+                  value: /^[A-Za-z\s]+$/,
+                  message: "Last name should not contain numbers or special characters",
+                },
+              })}
+            />
+            {errors.lastIndividualName && <div className="invalid-feedback">{errors.lastIndividualName.message}</div>}
+          </div>
+        </div>
+      </div>
 
         {/* Mobile Number Field */}
         <div className="mb-4">
@@ -749,10 +877,10 @@ const BootstrapForm = () => {
                       id="attendYes"
                       value="yes"
                       className="form-check-input"
-                      {...register("willAttend", { required: "Please select YES or NO" })}
+                      {...register("willAttend", { required: "Please select Yes or NO" })}
                     />
                     <label className="form-check-label" htmlFor="attendYes">
-                      YES
+                      Yes
                     </label>
                   </div>
 
@@ -763,10 +891,10 @@ const BootstrapForm = () => {
                       id="attendNo"
                       value="no"
                       className="form-check-input"
-                      {...register("willAttend", { required: "Please select YES or NO" })}
+                      {...register("willAttend", { required: "Please select Yes or NO" })}
                     />
                     <label className="form-check-label" htmlFor="attendNo">
-                      NO
+                      No
                     </label>
                   </div>
                 </div>
@@ -780,8 +908,10 @@ const BootstrapForm = () => {
 
               {/* Conditional Fields for Proposed Member Details */}
               {willAttend === "no" && (
-                <div className="mt-3">
-                  <label className="form-label text-muted">Details of Proposed Member</label>
+                <div className="border p-3 rounded bg-light mb-4">
+    <h5 className="text-muted" data-bs-toggle="collapse" data-bs-target="#organization" aria-expanded="false" aria-controls="organization">Details of Proposed Member</h5>
+                {/* <div className="mt-3"> */}
+                  {/* <label className="form-label text-muted">Details of Proposed Member</label> */}
 
                   {/* Name Field */}
                   <input
@@ -849,13 +979,13 @@ const BootstrapForm = () => {
                   <label className="form-label text-muted mt-3">Authorization Letter (Attach a copy)</label>
                   <input
                     type="file"
-                    id="authorizationLetter"
+                    id="authorizationLetterCopy"
                     className={`form-control ${errors.authorizationLetter ? "is-invalid" : ""}`}
-                    {...register("authorizationLetter", { required: "Authorization letter is required" })}
+                    {...register("authorizationLetterCopy", { required: "Authorization letter is required" })}
                   />
-                  {errors.authorizationLetter && (
+                  {errors.authorizationLetterCopy && (
                     <div className="invalid-feedback">
-                      {errors.authorizationLetter.message}
+                      {errors.authorizationLetterCopy.message}
                     </div>
                   )}
                 </div>
@@ -876,7 +1006,7 @@ const BootstrapForm = () => {
                       {...register("isRelatedParty", { required: "Please select YES or NO" })}
                     />
                     <label className="form-check-label" htmlFor="relatedPartyYes">
-                      YES
+                      Yes
                     </label>
                   </div>
 
@@ -890,7 +1020,7 @@ const BootstrapForm = () => {
                       {...register("isRelatedParty", { required: "Please select YES or NO" })}
                     />
                     <label className="form-check-label" htmlFor="relatedPartyNo">
-                      NO
+                      No
                     </label>
                   </div>
                 </div>
@@ -1272,22 +1402,25 @@ const BootstrapForm = () => {
   <div className="mb-4">
     <label className="form-label text-muted">Remarks (if any)</label>
     <textarea
-      className={`form-control ${errors.remarks ? "is-invalid" : ""}`}
+      className={`form-control ${errors.assignmentRemarks ? "is-invalid" : ""}`}
       placeholder="Enter remarks"
-      {...register("remarks", {
+      {...register("assignmentRemarks", {
         maxLength: {
           value: 500,
           message: "Remarks should not exceed 500 characters",
         },
       })}
     />
-    {errors.remarks && <div className="invalid-feedback">{errors.remarks.message}</div>}
+    {errors.assignmentRemarks && <div className="invalid-feedback">{errors.assignmentRemarks.message}</div>}
   </div>
 </div>
 
 
               <div className="text-end">
-                <button type="submit" className=" btn btn-lg btn-primary"  >
+              <button type="button" className=" btn btn-secondary me-2" >
+               Save as Draft
+                </button>
+                <button type="submit" className=" btn btn-primary"   >
                   Next
                 </button>
 
@@ -1295,6 +1428,17 @@ const BootstrapForm = () => {
               
 
             </form>
+            </>
+           )} 
+           </>
+          )}
+
+           {pageNumber === 2 && ( 
+
+            <>
+            <ClaimFormPartB showPreviousPart={showPreviousPart} onSubmit={onSubmit}/>
+            </>
+           )}
           </div>
         </div>
       </div>
@@ -1304,4 +1448,4 @@ const BootstrapForm = () => {
   );
 };
 
-export default BootstrapForm;
+export default ClaimForm;

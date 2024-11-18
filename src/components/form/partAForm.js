@@ -4,21 +4,24 @@ import axios from 'axios';
 import {  FaDownload } from "react-icons/fa";
 // import ClaimFormPartB from "./partBForm";
 import { Stepper, Step, StepLabel, Button } from "@mui/material";
-
-const ClaimForm = () => {
+import { useSnackbar } from 'notistack';
+const ClaimForm = ({onNext, onSaveDraft, loading,displayName,creditorType,register,errors}) => {
+    console.log(creditorType,"creditorType")
   const {
-    register,
+    
     handleSubmit,
-    formState: { errors },
+    // formState: { errors },
     setValue,
+    getValues ,
     watch,
   
   } = useForm();
 
-  const [displayName, setDisplayName] = useState(""); // state to hold the display name
-  const creditorType = watch("creditorType"); 
+
+
+
   const creditorID = watch("creditorID"); // Observe the selected value of creditorID
-  const[formPart,setFormPart] = useState("A");
+ 
   const willAttend = watch("willAttend");
   const isRelatedParty = watch("isRelatedParty");
   const indianBanks = [
@@ -48,54 +51,49 @@ const ClaimForm = () => {
    
   ];
 
-  const [pageNumber, setPageNumber] = React.useState(1); // Current page number
-  const userId = 1; // User ID, for the API call
+
   const [uploadedFiles, setUploadedFiles] = useState([]);
-  const [loading, setLoading] = useState(true); // Loader state
+  
+  const { enqueueSnackbar } = useSnackbar(); // To show notifications
 
+  const onSubmit = (data) => {
+    onNext(data); // Pass data to parent component to trigger API call and page change
+  };
 
- // Recursive function to set values from nested data structure
- const setFormValues = (data, prefix = "") => {
-  Object.keys(data).forEach((key) => {
-    const fieldName = prefix ? `${prefix}.${key}` : key;
-    const value = data[key];
+  // const handleSaveDraft = async (data) => {
+  //   // Trigger save draft logic in the parent component
+  //   try {
+  //     await onSaveDraft(data);
+  //     enqueueSnackbar("Draft saved successfully!", { variant: 'success' }); // Show success notification
+  //   } catch (error) {
+  //     enqueueSnackbar("Error saving draft!", { variant: 'error' }); // Show error notification
+  //   }
+  // };
 
-    // Check if the value is an object and recurse
-    if (value && typeof value === "object" && !Array.isArray(value)) {
-      setFormValues(value, fieldName);
-    } else {
-      // Set value if it's a simple field
-      setValue(fieldName, value);
+  const handleSaveDraft = async () => {
+    // Collect current form data using FormData
+    const formElement = document.querySelector("form");
+    const formData = Object.fromEntries(new FormData(formElement)); // Convert FormData to plain object
+
+    // Check if at least one field is filled
+    const isAnyFieldFilled = Object.values(formData).some(
+      (value) => value && value.trim() !== ""
+    );
+
+    if (!isAnyFieldFilled) {
+      enqueueSnackbar("Please fill at least one field before saving as draft!", {
+        variant: "warning",
+      });
+      return;
     }
-  });
-};
 
-
-   // Load data after a 3-second delay
-   useEffect(() => {
-    const delayAndLoadData = async () => {
-      await new Promise((resolve) => setTimeout(resolve, 3000)); // Wait for 5 seconds
-
-      try {
-        setLoading(true); // Show loader
-        const response = await axios.post(`http://localhost:8080/claim/loadUserDetails`, { userId });
-
-        if (response.status === 200) {
-          const data = response.data.claimMstDetailsModel;
-          setFormValues(data); // Populate form fields
-        } else {
-          console.error("Error loading data:", response.status);
-        }
-      } catch (error) {
-        console.error("Error fetching data:", error);
-      } finally {
-        setLoading(false); // Hide loader once done
-      }
-    };
-
-    delayAndLoadData();
-  }, [userId, setValue]);
- 
+    try {
+      await onSaveDraft(formData); // Pass formData to parent component
+      enqueueSnackbar("Draft saved successfully!", { variant: "success" });
+    } catch (error) {
+      enqueueSnackbar("Error saving draft!", { variant: "error" });
+    }
+  };
 
   // Handle file input change
   const onFileChange = (e) => {
@@ -107,160 +105,8 @@ const ClaimForm = () => {
     setUploadedFiles(filePreviews);
   }
 
-  const onSubmit = async (data) => {
-    let name = "";
-
-    if (creditorType === "individual") {
-      // Use individual name
-      name = data.individualName;
-    } else if (creditorType === "organization") {
-      // Use organization name
-      name = data.organizationName;
-    }
-    
-    setDisplayName(name); // Update the display name state
-    const requestData = {
-      RequestInfo: {},
-      claimMstDetailsModel: {
-        id: "claim123",
-        creditorId: "creditor123",
-        creditorIdType: data.creditorID,
-        typeOfCreditor: data.creditorType,
-        relatedParty: data.isRelatedParty,
-        remarks: data.remarks,
-        relationshipNature: data.natureOfRelationship,
-        claimAppNum: data.claimAppNum || "",
-        orgMstDetails: data.creditorType === "organization" ? {
-          id: "org123",
-          claimMst: "claim123",
-          organizationName: data.organizationName,
-          constitutionDetails: data.legalConstitution,
-          isCinOrLlp: data.isCinOrLlp,
-          registeredAddress: data.registeredAddress,
-          emailId: data.emailAddress,
-          authorizedFirstName: data.firstName,
-          authorizedMiddleName: data.middleName,
-          authorizedLastName: data.lastName,
-          authorizedPersonDesignation: data.designation,
-          authorizedPersonContactNumber: data.mobileNumber,
-          authorizationLetter: data.authorizationLetter,
-          auditDetails: {
-            createdBy: "admin",
-            lastModifiedBy: "admin",
-            createdTime: Date.now(),
-            lastModifiedTime: Date.now(),
-          },
-        } : null,
-        individualCreditorMstDetails: data.creditorType === "individual" ? {
-          id: "indiv123",
-          claimMst: "claim123",
-          name: data.name,
-          creditorAddress: data.address,
-          authorizedFirstName: data.firstIndividualName,
-          authorizedMiddleName: data.middleIndividualName,
-          authorizedLastName: data.lastIndividualName,
-          emailId: data.emailAddress,
-          auditDetails: {
-            createdBy: "admin",
-            lastModifiedBy: "admin",
-            createdTime: Date.now(),
-            lastModifiedTime: Date.now(),
-          },
-        } : null,
-        bankMstDetails: {
-          id: "bank123",
-          claimMst: "claim123",
-          bankName: data.bankName,
-          accountNumber: data.accountNumber,
-          ifscCode: data.ifsc,
-          micrCode: data.micr,
-          branchName: data.branch,
-          swiftCode: data.swiftCode,
-          scannedDocumentId: "",
-          auditDetails: {
-            createdBy: "admin",
-            lastModifiedBy: "admin",
-            createdTime: Date.now(),
-            lastModifiedTime: Date.now(),
-          },
-        },
-        securityMstDetails: {
-          claimMst: "claim123",
-          id: "sec123",
-          securityType: data.securityType,
-          securityPersonName: data.securityPersonName,
-          securityPersonPan: data.securityPersonPan,
-          securityDetails: data.securityDetails,
-          rocChargeId: data.rocChargeId,
-          cersaiSecurityId: data.cersaiSecurityId,
-          priorityOfChange: data.priorityOfChange,
-          auditDetails: {
-            createdBy: "admin",
-            lastModifiedBy: "admin",
-            createdTime: Date.now(),
-            lastModifiedTime: Date.now(),
-          },
-        },
-        assignmentMstDetails: {
-          claimMst: "claim123",
-          id: "assign123",
-          assignorName: data.assignorName,
-          assignorPan: data.assignorPan,
-          assignmentDate: Date.now(),
-          assignedAmount: data.assignedAssigned,
-          remarks: data.assignmentRemarks,
-          auditDetails: {
-            createdBy: "admin",
-            lastModifiedBy: "admin",
-            createdTime: Date.now(),
-            lastModifiedTime: Date.now(),
-          },
-        },
-        auditDetails: {
-          createdBy: "admin",
-          createdTime: Date.now(),
-          lastModifiedBy: "admin",
-          lastModifiedTime: Date.now(),
-        },
-      },
-    };
-    
   
-    try {
-      const response = await axios.post(
-        `http://localhost:8080/claim/step?userId=${userId}&pageNumber=${pageNumber}`,
-        requestData,
-        {
-          headers: {
-            "Content-Type": "application/json",
-          },
-        }
-      );
-  
-      if (response.status === 200) {
-        console.log("Data saved successfully");
-        setPageNumber((prevPage) => prevPage + 1);
-      } else {
-        console.log("Error saving data:", response.status);
-      }
-    } catch (error) {
-      console.error("Error in API call:", error);
-    }
-  };
-  
-  const saveDraft=()=>{
-    console.log("save draft");
-  }
-
- const showNextPart=(data)=>{
-  console.log(data,"part A dATA")
-  setPageNumber(prevPage => prevPage+1)
-
-
- }
- const showPreviousPart=()=>{
-  setPageNumber(prevPage => prevPage-1)
- }
+ 
 
   return (
     <div className="container mt-5 bigForm">
@@ -310,15 +156,9 @@ const ClaimForm = () => {
             <h2 className="text-center text-primary mb-5">
               Creditor Information Form
             </h2>
-            {loading ? (
-              <div className="text-center">
-                <div className="spinner-border text-primary" role="status">
-                  <span className="visually-hidden">Loading...</span>
-                </div>
-              </div>
-            ) : (
-              <>
-            {pageNumber===1 && (
+           
+          
+          
               <>
             <h5 className="mb-4">PART A- DETAILS OF CREDITOR</h5>
       
@@ -329,10 +169,8 @@ const ClaimForm = () => {
             
               <div className="mb-4">
                 <label htmlFor="displayName" className="form-label text-muted">
-                  Display Name  :
-                  {displayName && (
-                   <p>{displayName}</p>
-                )}
+                  Display Name  : {displayName || "Not Set"}
+                 
                 </label>
 
               
@@ -1417,9 +1255,19 @@ const ClaimForm = () => {
 
 
               <div className="text-end">
-              <button type="button" className=" btn btn-secondary me-2" >
+              {/* <button type="button" className=" btn btn-secondary me-2" >
                Save as Draft
-                </button>
+                </button> */}
+                <Button
+  variant="outlined"
+  color="primary"
+  onClick={handleSaveDraft}
+  disabled={loading}
+  className="me-2"
+>
+  {loading ? "Saving Draft..." : "Save as Draft"}
+</Button>
+
                 <button type="submit" className=" btn btn-primary"   >
                   Next
                 </button>
@@ -1429,16 +1277,11 @@ const ClaimForm = () => {
 
             </form>
             </>
-           )} 
-           </>
-          )}
+        
+           
+          
 
-           {/* {pageNumber === 2 && ( 
-
-            <>
-            <ClaimFormPartB showPreviousPart={showPreviousPart} onSubmit={onSubmit}/>
-            </>
-           )} */}
+           
           </div>
         </div>
       </div>
