@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useNavigate, Link } from "react-router-dom";
 
 const LoginForm = ({ setIsAuthenticated }) => {
@@ -9,6 +9,14 @@ const LoginForm = ({ setIsAuthenticated }) => {
 
   // Dummy credentials for demonstration
   const validCredentials = { username: "admin", password: "password123" };
+
+  // Check if user is already authenticated from localStorage
+  useEffect(() => {
+    const storedAuthStatus = localStorage.getItem("isAuthenticated");
+    if (storedAuthStatus === "true") {
+      navigate("/dashboard"); // Redirect to dashboard if already logged in
+    }
+  }, [navigate]);
 
   // Function to handle login
   const handleLogin = (e) => {
@@ -22,9 +30,9 @@ const LoginForm = ({ setIsAuthenticated }) => {
 
     // Check if credentials are correct
     if (username === validCredentials.username && password === validCredentials.password) {
-      // Set authentication state
+      // Set authentication state and persist login status
       setIsAuthenticated(true);
-      localStorage.setItem("isAuthenticated", "true"); // Persist login status
+      localStorage.setItem("isAuthenticated", "true"); // Store authentication status
       navigate("/dashboard"); // Redirect to dashboard on successful login
     } else {
       setError("Invalid username or password.");
@@ -36,14 +44,16 @@ const LoginForm = ({ setIsAuthenticated }) => {
       <div className="card" style={{ width: "100%", maxWidth: "400px" }}>
         <div className="card-body">
           <h5 className="card-title text-center mb-4">Login</h5>
-          
+
           {/* Error message display */}
           {error && <div className="alert alert-danger">{error}</div>}
-          
+
           <form onSubmit={handleLogin}>
             {/* Username field */}
             <div className="mb-3">
-              <label htmlFor="username" className="form-label">Username</label>
+              <label htmlFor="username" className="form-label">
+                Username
+              </label>
               <input
                 type="text"
                 className="form-control"
@@ -57,7 +67,9 @@ const LoginForm = ({ setIsAuthenticated }) => {
 
             {/* Password field */}
             <div className="mb-3">
-              <label htmlFor="password" className="form-label">Password</label>
+              <label htmlFor="password" className="form-label">
+                Password
+              </label>
               <input
                 type="password"
                 className="form-control"
@@ -77,8 +89,12 @@ const LoginForm = ({ setIsAuthenticated }) => {
 
           {/* Links to Register and Forgot Password */}
           <div className="d-flex justify-content-between mt-3">
-            <Link to="/forgot-password" className="btn btn-link">Forgot Password?</Link>
-            <Link to="/register" className="btn btn-link">Register</Link>
+            <Link to="/forgot-password" className="btn btn-link">
+              Forgot Password?
+            </Link>
+            <Link to="/register" className="btn btn-link">
+              Register
+            </Link>
           </div>
         </div>
       </div>

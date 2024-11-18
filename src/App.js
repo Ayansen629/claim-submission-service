@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { BrowserRouter as Router, Route, Routes } from "react-router-dom";
+import { BrowserRouter as Router, Route, Routes, Navigate } from "react-router-dom";
 import LoginForm from "./components/auth/LoginForm";
 import RegisterForm from "./components/auth/RegisterForm";
 import ForgotPasswordForm from "./components/auth/ForgotPasswordForm";
@@ -15,19 +15,31 @@ const App = () => {
   useEffect(() => {
     const storedAuthStatus = localStorage.getItem("isAuthenticated");
     if (storedAuthStatus === "true") {
-      setIsAuthenticated(true);
+      setIsAuthenticated(true);  // User is authenticated
     }
   }, []);
+
+  // To handle login action and set the isAuthenticated state
+  const handleLogin = () => {
+    setIsAuthenticated(true);
+    localStorage.setItem("isAuthenticated", "true");  // Store in localStorage
+  };
+
+  const handleLogout = () => {
+    setIsAuthenticated(false);
+    localStorage.setItem("isAuthenticated", "false"); // Remove authentication state
+  };
 
   return (
     <Router>
       <Routes>
+        {/* Main Route (Redirect to login if not authenticated) */}
+        <Route path="/" element={isAuthenticated ? <Navigate to="/dashboard" /> : <Navigate to="/login" />} />
+
         {/* Login Route */}
         <Route
           path="/login"
-          element={
-            <LoginForm setIsAuthenticated={setIsAuthenticated} />
-          }
+          element={<LoginForm setIsAuthenticated={handleLogin} />}
         />
 
         {/* Register Route */}
@@ -41,9 +53,9 @@ const App = () => {
           path="/dashboard"
           element={
             isAuthenticated ? (
-              <Dashboard />
+              <Dashboard onLogout={handleLogout} />
             ) : (
-              <LoginForm setIsAuthenticated={setIsAuthenticated} />
+              <Navigate to="/login" />
             )
           }
         />

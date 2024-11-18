@@ -1,7 +1,6 @@
 import React, { useState } from "react";
 import { Link } from "react-router-dom";
-// import ClaimSubmissionForm from "./ClaimSubmissionForm"; // Import the claim form component
-import MainForm from "../form/claimForm";
+import MainForm from "../form/claimForm"; // Ensure this is the correct path
 
 const AdminPanel = ({ onLogout }) => {
   const [showClaimForm, setShowClaimForm] = useState(false); // State to control form visibility
@@ -85,7 +84,7 @@ const AdminPanel = ({ onLogout }) => {
         </button>
 
         {/* Conditionally Render the Claim Submission Form */}
-        {showClaimForm && <MainForm/>}
+        {showClaimForm && <MainForm />}
       </div>
     </div>
   );
