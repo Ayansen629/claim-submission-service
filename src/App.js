@@ -1,34 +1,58 @@
-// import logo from './logo.svg';
-import ResponsiveFormikForm from './components/form';
-import 'bootstrap/dist/css/bootstrap.min.css';
-import 'bootstrap/dist/js/bootstrap.bundle.min.js';
-import './App.css';
-import { SnackbarProvider } from 'notistack';
-import MainForm from './components/form/claimForm';
+import React, { useState, useEffect } from "react";
+import { BrowserRouter as Router, Route, Routes } from "react-router-dom";
+import LoginForm from "./components/auth/LoginForm";
+import RegisterForm from "./components/auth/RegisterForm";
+import ForgotPasswordForm from "./components/auth/ForgotPasswordForm";
+import Dashboard from "./components/auth/Dashboard";
+import NotFound from "./components/auth/NotFound";
+import "bootstrap/dist/css/bootstrap.min.css";
+import "bootstrap/dist/js/bootstrap.bundle.min.js";
 
+const App = () => {
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
 
-{/* <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js" /> */}
-
-// import { useAppDispatch, useAppSelector } from './redux/hooks';
-// import { increment ,decrement} from './redux/slices/counter';
-// import Counter from './components/count';
-// import { useDispatch } from 'react-redux';
-
-function App() {
-  // const dispatch = useDispatch();
-  // const count = useAppSelector((state) => state.counter.value); 
-  // const dispatch=useAppDispatch(); // Accessing `value`
+  // Check for authentication status when the app loads
+  useEffect(() => {
+    const storedAuthStatus = localStorage.getItem("isAuthenticated");
+    if (storedAuthStatus === "true") {
+      setIsAuthenticated(true);
+    }
+  }, []);
 
   return (
-   
-     
-        <SnackbarProvider maxSnack={3}>
-    <MainForm/>
-        </SnackbarProvider>
-    
-        
-    
+    <Router>
+      <Routes>
+        {/* Login Route */}
+        <Route
+          path="/login"
+          element={
+            <LoginForm setIsAuthenticated={setIsAuthenticated} />
+          }
+        />
+
+        {/* Register Route */}
+        <Route path="/register" element={<RegisterForm />} />
+
+        {/* Forgot Password Route */}
+        <Route path="/forgot-password" element={<ForgotPasswordForm />} />
+
+        {/* Dashboard Route (Only accessible after login) */}
+        <Route
+          path="/dashboard"
+          element={
+            isAuthenticated ? (
+              <Dashboard />
+            ) : (
+              <LoginForm setIsAuthenticated={setIsAuthenticated} />
+            )
+          }
+        />
+
+        {/* Catch-all Route for 404 Page Not Found */}
+        <Route path="*" element={<NotFound />} />
+      </Routes>
+    </Router>
   );
-}
+};
 
 export default App;
