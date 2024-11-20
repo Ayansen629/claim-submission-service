@@ -22,7 +22,7 @@ const AssignmentDetailsForm = ({ onNext, onPrevious }) => {
     console.log("Assignment Details:", data);
     // Save form data in a cookie (convert to JSON string)
     Cookies.set(COOKIE_KEY, JSON.stringify(data), { expires: 7 }); // Expires in 7 days
-    onNext(); // Proceed to the next step
+    onNext(data); // Proceed to the next step
   };
 
   // Load saved data from cookies when the form loads

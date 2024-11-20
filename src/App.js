@@ -7,6 +7,7 @@ import Dashboard from "./components/auth/Dashboard";
 import NotFound from "./components/auth/NotFound";
 import "bootstrap/dist/css/bootstrap.min.css";
 import "bootstrap/dist/js/bootstrap.bundle.min.js";
+import Cookies from "js-cookie"; // Import js-cookie to handle cookies
 
 const App = () => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -23,11 +24,20 @@ const App = () => {
   const handleLogin = () => {
     setIsAuthenticated(true);
     localStorage.setItem("isAuthenticated", "true");  // Store in localStorage
+
+    // Optionally, set cookies related to the user session here
+    Cookies.set("userSession", "active", { expires: 7 }); // Set a cookie for the session
   };
 
   const handleLogout = () => {
     setIsAuthenticated(false);
     localStorage.setItem("isAuthenticated", "false"); // Remove authentication state
+
+    // Clear cookies on logout
+    Cookies.remove("userSession"); // Remove the session cookie
+    Cookies.remove("formData");
+    Cookies.remove("assignmentDetailsFormData"); 
+    Cookies.remove("bankDetailsFormData"); 
   };
 
   return (

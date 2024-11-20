@@ -5,7 +5,7 @@ import {  FaDownload } from "react-icons/fa";
 // import ClaimFormPartB from "./partBForm";
 import { Stepper, Step, StepLabel, Button } from "@mui/material";
 import { useSnackbar } from 'notistack';
-const ClaimDetails = ({onNext, onSaveDraft, loading,displayName,creditorType,register,errors,watch}) => {
+const ClaimDetails = ({onNext, onSaveDraft, loading,creditorType,register,errors,watch}) => {
     console.log(creditorType,"creditorType")
   const {
     
@@ -18,7 +18,18 @@ const ClaimDetails = ({onNext, onSaveDraft, loading,displayName,creditorType,reg
   } = useForm();
 
 
+ // Watch for individual name fields to dynamically show the display name
+ const firstName = watch("firstIndividualName");
+ const middleName = watch("middleIndividualName");
+ const lastName = watch("lastIndividualName");
+ const organizationName = watch("organizationName");
 
+ // Combine the first, middle, and last name to display as full name
+//  const displayName = `${firstName || ""} ${middleName || ""} ${lastName || ""}`.trim();
+ const displayName =
+    creditorType === 'individual'
+      ? `${firstName} ${middleName || ''} ${lastName}`.trim()
+      : organizationName
 
   // const creditorID = watch("creditorID"); // Observe the selected value of creditorID
  
@@ -36,30 +47,6 @@ const ClaimDetails = ({onNext, onSaveDraft, loading,displayName,creditorType,reg
 
   
 
-  // const handleSaveDraft = async () => {
-  //   // Collect current form data using FormData
-  //   const formElement = document.querySelector("form");
-  //   const formData = Object.fromEntries(new FormData(formElement)); // Convert FormData to plain object
-
-  //   // Check if at least one field is filled
-  //   const isAnyFieldFilled = Object.values(formData).some(
-  //     (value) => value && value.trim() !== ""
-  //   );
-
-  //   if (!isAnyFieldFilled) {
-  //     enqueueSnackbar("Please fill at least one field before saving as draft!", {
-  //       variant: "warning",
-  //     });
-  //     return;
-  //   }
-
-  //   try {
-  //     await onSaveDraft(formData); // Pass formData to parent component
-  //     enqueueSnackbar("Draft saved successfully!", { variant: "success" });
-  //   } catch (error) {
-  //     enqueueSnackbar("Error saving draft!", { variant: "error" });
-  //   }
-  // };
 
   // Handle file input change
   const onFileChange = (e) => {
@@ -133,7 +120,7 @@ const ClaimDetails = ({onNext, onSaveDraft, loading,displayName,creditorType,reg
 
               <div className="mb-4">
                 <label htmlFor="displayName" className="form-label text-muted">
-                  Display Name  : {displayName || "Not Set"}
+                Display Name: {displayName || "Not Set"}
                  
                 </label>
 
@@ -520,29 +507,61 @@ const ClaimDetails = ({onNext, onSaveDraft, loading,displayName,creditorType,reg
         Individual Details
       </h5>
       <div id="individual" className="collapse">
-        {/* Name Field */}
-        <div className="mb-4">
-          <label htmlFor="name" className="form-label text-muted">
-            Name
-          </label>
-          <input
-            type="text"
-            id="name"
-            className={`form-control ${errors.name ? "is-invalid" : ""}`}
-            placeholder="Enter name"
-            {...register("name", {
-              required: "Name is required",
-              pattern: {
-                value: /^[A-Za-z\s]+$/, // Only allows letters and spaces
-                message: "Name must not contain numbers or special characters",
-              },
-            })}
-          />
-          {errors.name && (
-            <div className="invalid-feedback">{errors.name.message}</div>
-          )}
-        </div>
+       
+      <div className="mb-4">
+        <label className="form-label text-muted">Name of Authorized Person</label>
+        <div className="row">
+          <div className="col">
+            <input
+              type="text"
+              id="firstIndividualName"
+              className={`form-control ${errors.firstIndividualName ? "is-invalid" : ""}`}
+              placeholder="First name"
+              {...register("firstIndividualName", {
+                required: "First name is required",
+                pattern: {
+                  value: /^[A-Za-z\s]+$/,
+                  message: "First name should not contain numbers or special characters",
+                },
+              })}
+            />
+            {errors.firstIndividualName && <div className="invalid-feedback">{errors.firstIndividualName.message}</div>}
+          </div>
 
+          <div className="col">
+            <input
+              type="text"
+              id="middleIndividualName"
+              className={`form-control ${errors.middleName ? "is-invalid" : ""}`}
+              placeholder="Middle name"
+              {...register("middleIndividualName", {
+                pattern: {
+                  value: /^[A-Za-z\s]+$/,
+                  message: "Middle name should not contain numbers or special characters",
+                },
+              })}
+            />
+            {errors.middleIndividualName && <div className="invalid-feedback">{errors.middleIndividualName.message}</div>}
+          </div>
+
+          <div className="col">
+            <input
+              type="text"
+              id="lastIndividualName"
+              className={`form-control ${errors.lastName ? "is-invalid" : ""}`}
+              placeholder="Last name"
+              {...register("lastIndividualName", {
+                required: "Last name is required",
+                pattern: {
+                  value: /^[A-Za-z\s]+$/,
+                  message: "Last name should not contain numbers or special characters",
+                },
+              })}
+            />
+            {errors.lastIndividualName && <div className="invalid-feedback">{errors.lastIndividualName.message}</div>}
+          </div>
+        </div>
+      </div>
         {/* Address Field */}
         <div className="mb-4">
           <label htmlFor="address" className="form-label text-muted">

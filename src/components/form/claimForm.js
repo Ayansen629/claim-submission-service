@@ -54,6 +54,7 @@ const MainForm = () => {
   const handleNextPartA = async (data) => {
     // Save the current data to cookies before moving to the next step
     const savedData = Cookies.get(COOKIE_KEY) ? JSON.parse(Cookies.get(COOKIE_KEY)) : {};
+    console.log(savedData,"handleSubmit");
     const updatedData = { ...savedData, ...data };
     Cookies.set(COOKIE_KEY, JSON.stringify(updatedData), { expires: 7 });
 
@@ -79,64 +80,137 @@ const MainForm = () => {
   };
 
   const handleFinalSubmit = async (data) => {
-    setLoading(true); // Indicate loading for API call
-
-    // Construct the request data based on form input
+    setLoading(true); // Start the loading indicator
+    
+    // Get saved data from both cookies
+    const assignmentData = Cookies.get("assignmentDetailsFormData")
+      ? JSON.parse(Cookies.get("assignmentDetailsFormData"))
+      : {};
+    const bankData = Cookies.get("bankDetailsFormData")
+      ? JSON.parse(Cookies.get("bankDetailsFormData"))
+      : {};
+    const generalData = Cookies.get(COOKIE_KEY)
+      ? JSON.parse(Cookies.get(COOKIE_KEY))
+      : {}; // General form data cookie (if applicable)
+  
+    // Combine all the form data into one object
+    const combinedData = {
+      ...generalData,   // General form data
+      ...assignmentData, // Assignment form data
+      ...bankData,       // Bank form data
+      ...data,           // Latest data passed into handleFinalSubmit
+    };
+  
+    // Construct the request data based on combined data
     const requestData = {
       RequestInfo: {},
       claimMstDetailsModel: {
         id: "claim123",
         creditorId: "creditor123",
-        creditorIdType: data.creditorID,
-        typeOfCreditor: data.creditorType,
-        relatedParty: data.isRelatedParty,
-        remarks: data.remarks,
-        relationshipNature: data.natureOfRelationship,
-        claimAppNum: data.claimAppNum || "",
-        orgMstDetails: data.creditorType === "organization"
-          ? {
-              id: "org123",
-              claimMst: "claim123",
-              organizationName: data.organizationName,
-              constitutionDetails: data.legalConstitution,
-              isCinOrLlp: data.isCinOrLlp,
-              registeredAddress: data.registeredAddress,
-              emailId: data.emailAddress,
-              authorizedFirstName: data.firstName,
-              authorizedMiddleName: data.middleName,
-              authorizedLastName: data.lastName,
-              authorizedPersonDesignation: data.designation,
-              authorizedPersonContactNumber: data.mobileNumber,
-              authorizationLetter: data.authorizationLetter,
-              auditDetails: {
-                createdBy: "admin",
-                lastModifiedBy: "admin",
-                createdTime: Date.now(),
-                lastModifiedTime: Date.now(),
-              },
-            }
-          : null,
-        individualCreditorMstDetails: data.creditorType === "individual"
-          ? {
-              id: "indiv123",
-              claimMst: "claim123",
-              name: data.name,
-              creditorAddress: data.address,
-              authorizedFirstName: data.firstIndividualName,
-              authorizedMiddleName: data.middleIndividualName,
-              authorizedLastName: data.lastIndividualName,
-              emailId: data.emailAddress,
-              auditDetails: {
-                createdBy: "admin",
-                lastModifiedBy: "admin",
-                createdTime: Date.now(),
-                lastModifiedTime: Date.now(),
-              },
-            }
-          : null,
+        creditorIdType: combinedData.creditorID,
+        typeOfCreditor: combinedData.creditorType,
+        relatedParty: combinedData.isRelatedParty,
+        remarks: combinedData.remarks,
+        relationshipNature: combinedData.natureOfRelationship,
+        claimAppNum: combinedData.claimAppNum || "",
+        orgMstDetails: combinedData.creditorType === "organization" ? {
+          id: "org123",
+          claimMst: "claim123",
+          organizationName: combinedData.organizationName,
+          constitutionDetails: combinedData.legalConstitution,
+          isCinOrLlp: combinedData.isCinOrLlp,
+          registeredAddress: combinedData.registeredAddress,
+          emailId: combinedData.emailAddress,
+          authorizedFirstName: combinedData.firstName,
+          authorizedMiddleName: combinedData.middleName,
+          authorizedLastName: combinedData.lastName,
+          authorizedPersonDesignation: combinedData.designation,
+          authorizedPersonContactNumber: combinedData.mobileNumber,
+          authorizationLetter: combinedData.authorizationLetter,
+          auditDetails: {
+            createdBy: "admin",
+            lastModifiedBy: "admin",
+            createdTime: Date.now(),
+            lastModifiedTime: Date.now(),
+          },
+        } : null,
+        individualCreditorMstDetails: combinedData.creditorType === "individual" ? {
+          id: "indiv123",
+          claimMst: "claim123",
+          name: combinedData.name,
+          creditorAddress: combinedData.address,
+          authorizedFirstName: combinedData.firstIndividualName,
+          authorizedMiddleName: combinedData.middleIndividualName,
+          authorizedLastName: combinedData.lastIndividualName,
+          emailId: combinedData.emailAddress,
+          auditDetails: {
+            createdBy: "admin",
+            lastModifiedBy: "admin",
+            createdTime: Date.now(),
+            lastModifiedTime: Date.now(),
+          },
+        } : null,
+        // Include Bank Details if available
+        bankMstDetails: bankData && {
+          id: "bank123",
+          claimMst: "claim123",
+          bankName: bankData.bankName,
+          accountNumber: bankData.accountNumber,
+          ifscCode: bankData.ifsc,
+          micrCode: bankData.micr,
+          branchName: bankData.branch,
+          swiftCode: bankData.swiftCode,
+          scannedDocumentId: "",
+          auditDetails: {
+            createdBy: "admin",
+            lastModifiedBy: "admin",
+            createdTime: Date.now(),
+            lastModifiedTime: Date.now(),
+          },
+        },
+        // Include Security Details if available
+        securityMstDetails: combinedData.securityMstDetails || {
+          claimMst: "claim123",
+          id: "sec123",
+          securityType: combinedData.securityType,
+          securityPersonName: combinedData.securityPersonName,
+          securityPersonPan: combinedData.securityPersonPan,
+          securityDetails: combinedData.securityDetails,
+          rocChargeId: combinedData.rocChargeId,
+          cersaiSecurityId: combinedData.cersaiSecurityId,
+          priorityOfChange: combinedData.priorityOfChange,
+          auditDetails: {
+            createdBy: "admin",
+            lastModifiedBy: "admin",
+            createdTime: Date.now(),
+            lastModifiedTime: Date.now(),
+          },
+        },
+        // Include Assignment Details if available
+        assignmentMstDetails: assignmentData && {
+          claimMst: "claim123",
+          id: "assign123",
+          assignorName: assignmentData.assignorName,
+          assignorPan: assignmentData.assignorPan,
+          assignmentDate: Date.now(),
+          assignedAmount: assignmentData.assignedAssigned,
+          remarks: assignmentData.assignmentRemarks,
+          auditDetails: {
+            createdBy: "admin",
+            lastModifiedBy: "admin",
+            createdTime: Date.now(),
+            lastModifiedTime: Date.now(),
+          },
+        },
+        auditDetails: {
+          createdBy: "admin",
+          createdTime: Date.now(),
+          lastModifiedBy: "admin",
+          lastModifiedTime: Date.now(),
+        },
       },
     };
-
+  
     try {
       // Perform API call
       const response = await axios.post(
@@ -144,7 +218,7 @@ const MainForm = () => {
         requestData,
         { headers: { "Content-Type": "application/json" } }
       );
-
+  
       if (response.status === 200) {
         console.log("Data saved successfully");
         enqueueSnackbar("Data saved successfully", { variant: "success" });
@@ -159,6 +233,8 @@ const MainForm = () => {
       setLoading(false); // Stop loading indicator
     }
   };
+  
+  
 
   const handleTabChange = (event, newTabIndex) => {
     setActiveTab(newTabIndex);

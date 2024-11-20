@@ -9,7 +9,7 @@ const SecurityForm = ({ onNext, onPrevious }) => {
     formState: { errors, isValid },
     setValue,
     trigger, // Added trigger function
-  } = useForm();
+  } = useForm({ mode: "onChange" }); // Added mode: onChange for immediate validation
 
   const COOKIE_KEY = "formData"; // Key for storing data in cookies
 
