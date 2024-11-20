@@ -1,113 +1,87 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect } from "react";
 import PartBForm from "./partBForm";
 import ClaimDetails from "./steeperform/claimdetails";
 import AssignmentDetails from "./steeperform/AssignmentDetails";
 import BankDetails from "./steeperform/BankDetails";
 import SecurityDetails from "./steeperform/SecurityDetails";
-import axios from "axios";
-import { useSnackbar } from "notistack";
 import { useForm } from "react-hook-form";
 import Stepper from "react-stepper-horizontal";
+import Box from "@mui/material/Box";
+import Tabs from "@mui/material/Tabs";
+import Tab from "@mui/material/Tab";
+import Cookies from "js-cookie";  // Import js-cookie to manage cookies
+import axios from "axios"; // Import axios for the API calls
+import { useSnackbar } from "notistack"; // Import useSnackbar for notifications
 
 const MainForm = () => {
+  const { enqueueSnackbar } = useSnackbar(); // Hook to show notifications
   const {
     register,
     handleSubmit,
     formState: { errors },
     setValue,
     watch,
+    trigger,
   } = useForm();
   const creditorType = watch("creditorType");
-  const dataLoaded = useRef(false);
-
-  const { enqueueSnackbar } = useSnackbar();
-  const userId = 1;
-  const [loading, setLoading] = useState(true);
+  const COOKIE_KEY = "formData"; // Key for storing data in cookies
   const [activePartAStep, setActivePartAStep] = useState(0); // Track current step in Part A
-  const [activeTab, setActiveTab] = useState("partA"); // Track active tab
-  const [displayName, setDisplayName] = useState(""); 
+  const [activeTab, setActiveTab] = useState(0); // Tab index
+  const [loading, setLoading] = useState(false);
+  const userId = 1;
+
+  // Load data from cookies when the component mounts
+  useEffect(() => {
+    const savedData = Cookies.get(COOKIE_KEY);
+    if (savedData) {
+      const parsedData = JSON.parse(savedData);
+      setFormValues(parsedData); // Prefill form with saved data
+    }
+  }, []);
 
   const setFormValues = (data, prefix = "") => {
     Object.keys(data).forEach((key) => {
       const fieldName = prefix ? `${prefix}.${key}` : key;
       const value = data[key];
       if (value && typeof value === "object" && !Array.isArray(value)) {
-        setFormValues(value, fieldName);
+        setFormValues(value, fieldName); // Handle nested objects
       } else {
-        setValue(fieldName, value);
+        setValue(fieldName, value); // Set form field value
       }
     });
   };
 
-  useEffect(() => {
-    const loadUserData = async () => {
-      if (dataLoaded.current) return;
-
-      try {
-        setLoading(true);
-        const response = await axios.post(
-          `http://localhost:8080/claim/loadUserDetails`,
-          { userId }
-        );
-
-        if (response.status === 200) {
-          const data = response.data.claimMstDetailsModel;
-          setFormValues(data);
-          dataLoaded.current = true;
-        } else {
-          console.error("Error loading data:", response.status);
-        }
-      } catch (error) {
-        console.error("Error fetching data:", error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    loadUserData();
-  }, [userId]);
-
   const handleNextPartA = async (data) => {
+    // Save the current data to cookies before moving to the next step
+    const savedData = Cookies.get(COOKIE_KEY) ? JSON.parse(Cookies.get(COOKIE_KEY)) : {};
+    const updatedData = { ...savedData, ...data };
+    Cookies.set(COOKIE_KEY, JSON.stringify(updatedData), { expires: 7 });
+
+    // Move to the next step or switch to Part B
     if (activePartAStep < 3) {
       setActivePartAStep((prevStep) => prevStep + 1);
     } else {
-      setActiveTab("partB"); // Switch to Part B after completing Part A
+      setActiveTab(1); // Switch to Part B after completing Part A
     }
 
-    // Log the data to check what is passed to the handleNext function
-    console.log("Form Data:", data);
-    console.log("creditorType:", data.creditorType);
+    console.log("Form Data Saved to Cookies:", updatedData);
 
-    // Handle name based on creditorType
-    let name = "";
-    if (data.creditorType === "individual") {
-      name = data.name || "";
-    } else if (data.creditorType === "organization") {
-      name = data.organizationName || "";
+    // Handle the final API call if this is the last step (AssignmentDetails)
+    if (activePartAStep === 3) {
+      await handleFinalSubmit(updatedData);
     }
+  };
 
-    setDisplayName(name); // Update the display name state
-    console.log("Display Name Set To:", name);
-
-    // Data validation before sending the request
-    if (!data.creditorType) {
-      enqueueSnackbar("Creditor type is required!", { variant: "error" });
-      setLoading(false);
-      return;
+  const handlePreviousPartA = () => {
+    if (activePartAStep > 0) {
+      setActivePartAStep((prevStep) => prevStep - 1);
     }
+  };
 
-    if (data.creditorType === "individual" && (!data.name || !data.address)) {
-      enqueueSnackbar("Name and Address are required for individual creditor!", { variant: "error" });
-      setLoading(false);
-      return;
-    }
+  const handleFinalSubmit = async (data) => {
+    setLoading(true); // Indicate loading for API call
 
-    if (data.creditorType === "organization" && (!data.organizationName || !data.registeredAddress)) {
-      enqueueSnackbar("Organization name and Registered address are required for organization creditor!", { variant: "error" });
-      setLoading(false);
-      return;
-    }
-
+    // Construct the request data based on form input
     const requestData = {
       RequestInfo: {},
       claimMstDetailsModel: {
@@ -164,6 +138,7 @@ const MainForm = () => {
     };
 
     try {
+      // Perform API call
       const response = await axios.post(
         `http://localhost:8080/claim/step?userId=${userId}&pageNumber=${activePartAStep + 1}`,
         requestData,
@@ -181,112 +156,75 @@ const MainForm = () => {
       console.error("Error in API call:", error);
       enqueueSnackbar("Error in API call. Please try again.", { variant: "error" });
     } finally {
-      setLoading(false);
+      setLoading(false); // Stop loading indicator
     }
   };
 
-  const handlePreviousPartA = () => {
-    if (activePartAStep > 0) {
-      setActivePartAStep((prevStep) => prevStep - 1);
-    }
-  };
-
-  const handleFinalSubmit = async (data) => {
-    console.log("Final Submit:", data);
+  const handleTabChange = (event, newTabIndex) => {
+    setActiveTab(newTabIndex);
   };
 
   const partASteps = [
     <ClaimDetails
-      onNext={handleSubmit((data) => handleNextPartA({ ...data, creditorType }))}
-      loading={loading}
+      onNext={handleSubmit((data) => handleNextPartA({ ...data, creditorType }))} // Pass creditorType
       creditorType={creditorType}
       register={register}
       errors={errors}
       watch={watch}
-      displayName={displayName}
-      setLoading={setLoading}
-      
     />,
     <SecurityDetails
       register={register}
       errors={errors}
-      onNext={handleSubmit(handleNextPartA)}
+      onNext={handleSubmit((data) => handleNextPartA(data))}
       onPrevious={handlePreviousPartA}
-      setLoading={setLoading}
     />,
     <BankDetails
       register={register}
       errors={errors}
-      onNext={handleSubmit(handleNextPartA)}
+      onNext={handleSubmit((data) => handleNextPartA(data))}
       onPrevious={handlePreviousPartA}
     />,
     <AssignmentDetails
       register={register}
       errors={errors}
-      onNext={handleSubmit(handleNextPartA)}
+      onNext={handleSubmit((data) => handleNextPartA(data))}
       onPrevious={handlePreviousPartA}
     />,
   ];
 
   return (
-    <div className="container mt-5">
-      <ul className="nav nav-tabs">
-        <li className="nav-item">
-          <button
-            className={`nav-link ${activeTab === "partA" ? "active" : ""}`}
-            onClick={() => setActiveTab("partA")}
-          >
-            Part A
-          </button>
-        </li>
-        <li className="nav-item">
-          <button
-            className={`nav-link ${activeTab === "partB" ? "active" : ""}`}
-            onClick={() => setActiveTab("partB")}
-            disabled={activeTab !== "partB"} // Enable Part B only after Part A is completed
-          >
-            Part B
-          </button>
-        </li>
-      </ul>
+    <Box sx={{ width: "100%", bgcolor: "background.paper" }}>
+      <Tabs value={activeTab} onChange={handleTabChange} centered>
+        <Tab label="Part A" />
+        <Tab label="Part B" disabled={activeTab === 0} />
+      </Tabs>
       <div className="tab-content mt-3">
-        {loading ? (
-          <div className="text-center">
-            <div className="spinner-border text-primary" role="status">
-              <span className="visually-hidden">Loading...</span>
-            </div>
+        {activeTab === 0 && (
+          <div>
+            <Stepper
+              steps={[
+                { title: "Claim Details" },
+                { title: "Security Details" },
+                { title: "Bank Details" },
+                { title: "Assignment Details" },
+              ]}
+              activeStep={activePartAStep}
+              activeColor="blue"
+              completeColor="green"
+            />
+            <div className="mt-3">{partASteps[activePartAStep]}</div>
           </div>
-        ) : (
-          <>
-            {activeTab === "partA" && (
-              <div className="tab-pane fade show active">
-                <Stepper
-                  steps={[
-                    { title: "Claim Details" },
-                    { title: "Security Details" },
-                    { title: "Bank Details" },
-                    { title: "Assignment Details" },
-                  ]}
-                  activeStep={activePartAStep}
-                  activeColor="blue"
-                  completeColor="green"
-                />
-                <div className="mt-3">{partASteps[activePartAStep]}</div>
-              </div>
-            )}
-            {activeTab === "partB" && (
-              <div className="tab-pane fade show active">
-                <PartBForm
-                  onPrevious={() => setActiveTab("partA")}
-                  onSubmit={handleFinalSubmit}
-                  loading={loading}
-                />
-              </div>
-            )}
-          </>
+        )}
+        {activeTab === 1 && (
+          <div>
+            <PartBForm
+              onPrevious={() => setActiveTab(0)}
+              onSubmit={handleFinalSubmit}
+            />
+          </div>
         )}
       </div>
-    </div>
+    </Box>
   );
 };
 

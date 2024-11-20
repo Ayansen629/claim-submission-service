@@ -36,30 +36,30 @@ const ClaimDetails = ({onNext, onSaveDraft, loading,displayName,creditorType,reg
 
   
 
-  const handleSaveDraft = async () => {
-    // Collect current form data using FormData
-    const formElement = document.querySelector("form");
-    const formData = Object.fromEntries(new FormData(formElement)); // Convert FormData to plain object
+  // const handleSaveDraft = async () => {
+  //   // Collect current form data using FormData
+  //   const formElement = document.querySelector("form");
+  //   const formData = Object.fromEntries(new FormData(formElement)); // Convert FormData to plain object
 
-    // Check if at least one field is filled
-    const isAnyFieldFilled = Object.values(formData).some(
-      (value) => value && value.trim() !== ""
-    );
+  //   // Check if at least one field is filled
+  //   const isAnyFieldFilled = Object.values(formData).some(
+  //     (value) => value && value.trim() !== ""
+  //   );
 
-    if (!isAnyFieldFilled) {
-      enqueueSnackbar("Please fill at least one field before saving as draft!", {
-        variant: "warning",
-      });
-      return;
-    }
+  //   if (!isAnyFieldFilled) {
+  //     enqueueSnackbar("Please fill at least one field before saving as draft!", {
+  //       variant: "warning",
+  //     });
+  //     return;
+  //   }
 
-    try {
-      await onSaveDraft(formData); // Pass formData to parent component
-      enqueueSnackbar("Draft saved successfully!", { variant: "success" });
-    } catch (error) {
-      enqueueSnackbar("Error saving draft!", { variant: "error" });
-    }
-  };
+  //   try {
+  //     await onSaveDraft(formData); // Pass formData to parent component
+  //     enqueueSnackbar("Draft saved successfully!", { variant: "success" });
+  //   } catch (error) {
+  //     enqueueSnackbar("Error saving draft!", { variant: "error" });
+  //   }
+  // };
 
   // Handle file input change
   const onFileChange = (e) => {
