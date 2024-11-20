@@ -5,7 +5,7 @@ import {  FaDownload } from "react-icons/fa";
 // import ClaimFormPartB from "./partBForm";
 import { Stepper, Step, StepLabel, Button } from "@mui/material";
 import { useSnackbar } from 'notistack';
-const ClaimForm = ({onNext, onSaveDraft, loading,displayName,creditorType,register,errors}) => {
+const ClaimDetails = ({onNext, onSaveDraft, loading,displayName,creditorType,register,errors,watch}) => {
     console.log(creditorType,"creditorType")
   const {
     
@@ -13,43 +13,17 @@ const ClaimForm = ({onNext, onSaveDraft, loading,displayName,creditorType,regist
     // formState: { errors },
     setValue,
     getValues ,
-    watch,
+    // watch,
   
   } = useForm();
 
 
 
 
-  const creditorID = watch("creditorID"); // Observe the selected value of creditorID
+  // const creditorID = watch("creditorID"); // Observe the selected value of creditorID
  
   const willAttend = watch("willAttend");
   const isRelatedParty = watch("isRelatedParty");
-  const indianBanks = [
-    "State Bank of India",
-    "HDFC Bank",
-    "ICICI Bank",
-    "Axis Bank",
-    "Kotak Mahindra Bank",
-    "Punjab National Bank",
-    "Bank of Baroda",
-    "Canara Bank",
-    "IndusInd Bank",
-    "Yes Bank",
-    "Union Bank of India",
-    "IDFC First Bank",
-    "Indian Bank",
-    "Central Bank of India",
-    "Bank of India",
-    "UCO Bank",
-    "Indian Overseas Bank",
-    "Bank of Maharashtra",
-    "Punjab & Sind Bank",
-    "Federal Bank",
-    "South Indian Bank",
-    "RBL Bank",
-    "Karnataka Bank",
-   
-  ];
 
 
   const [uploadedFiles, setUploadedFiles] = useState([]);
@@ -157,8 +131,6 @@ const ClaimForm = ({onNext, onSaveDraft, loading,displayName,creditorType,regist
             <form onSubmit={handleSubmit(onSubmit)}>
               {/* Display Name Field */}
 
-              
-            
               <div className="mb-4">
                 <label htmlFor="displayName" className="form-label text-muted">
                   Display Name  : {displayName || "Not Set"}
@@ -226,6 +198,10 @@ const ClaimForm = ({onNext, onSaveDraft, loading,displayName,creditorType,regist
                 </div>
               )}
              */}
+
+              
+            
+      
 
 
               
@@ -905,363 +881,14 @@ const ClaimForm = ({onNext, onSaveDraft, loading,displayName,creditorType,regist
                 )}
               </div>
 
-              {/* Bank Details Section Heading */}
-              <h4 className="mb-3 text-muted" data-bs-toggle="collapse" data-bs-target="#bank" aria-expanded="false" aria-controls="bank">Bank Details</h4>
-              <div className="p-3 rounded bg-light mb-4 collapse" id="bank">
-  {/* IFSC Code */}
-  <div className="mb-4">
-    <label className="form-label text-muted">IFSC Code</label>
-    <input
-      type="text"
-      className={`form-control ${errors.ifsc ? "is-invalid" : ""}`}
-      placeholder="Enter IFSC Code"
-      {...register("ifsc", {
-        required: "IFSC code is required",
-        pattern: {
-          value: /^[A-Z]{4}0[A-Z0-9]{6}$/, // IFSC code format: 4 letters, '0', 6 alphanumeric characters
-          message: "Invalid IFSC code format",
-        },
-      })}
-    />
-    {errors.ifsc && <div className="invalid-feedback">{errors.ifsc.message}</div>}
-  </div>
-
-  {/* MICR Code */}
-  <div className="mb-4">
-    <label className="form-label text-muted">MICR Code</label>
-    <input
-      type="text"
-      className={`form-control ${errors.micr ? "is-invalid" : ""}`}
-      placeholder="Enter MICR Code"
-      {...register("micr", {
-        required: "MICR code is required",
-        pattern: {
-          value: /^\d{9}$/, // MICR code format: 9-digit numeric
-          message: "MICR code must be a 9-digit number",
-        },
-      })}
-    />
-    {errors.micr && <div className="invalid-feedback">{errors.micr.message}</div>}
-  </div>
-
-  {/* Bank Name Dropdown */}
-  <div className="mb-4">
-    <label className="form-label text-muted">Bank Name</label>
-    <select
-      className={`form-control ${errors.bankName ? "is-invalid" : ""}`}
-      {...register("bankName", { required: "Bank name is required" })}
-    >
-      <option value="">Select Bank</option>
-      {indianBanks.map((bank, index) => (
-        <option key={index} value={bank}>
-          {bank}
-        </option>
-      ))}
-    </select>
-    {errors.bankName && <div className="invalid-feedback">{errors.bankName.message}</div>}
-  </div>
-
-  {/* Branch */}
-  <div className="mb-4">
-    <label className="form-label text-muted">Branch</label>
-    <input
-      type="text"
-      className={`form-control ${errors.branch ? "is-invalid" : ""}`}
-      placeholder="Enter Branch Name"
-      {...register("branch", {
-        required: "Branch name is required",
-        pattern: {
-          value: /^[A-Za-z\s]+$/, // Allows only letters and spaces
-          message: "Branch name must not contain numbers or special characters",
-        },
-      })}
-    />
-    {errors.branch && <div className="invalid-feedback">{errors.branch.message}</div>}
-  </div>
-
-  {/* Account Number */}
-  <div className="mb-4">
-    <label className="form-label text-muted">Account Number</label>
-    <input
-      type="text"
-      className={`form-control ${errors.accountNumber ? "is-invalid" : ""}`}
-      placeholder="Enter Account Number"
-      {...register("accountNumber", {
-        required: "Account number is required",
-        pattern: {
-          value: /^\d{9,18}$/, // Common length for account numbers is between 9 and 18 digits
-          message: "Account number must be 9 to 18 digits",
-        },
-      })}
-    />
-    {errors.accountNumber && <div className="invalid-feedback">{errors.accountNumber.message}</div>}
-  </div>
-
-  {/* SWIFT Code (only for foreign accounts) */}
-  <div className="mb-4">
-    <label className="form-label text-muted">SWIFT Code (for foreign accounts)</label>
-    <input
-      type="text"
-      className={`form-control ${errors.swiftCode ? "is-invalid" : ""}`}
-      placeholder="Enter SWIFT Code"
-      {...register("swiftCode", {
-        pattern: {
-          value: /^[A-Z0-9]{8,11}$/, // SWIFT code is typically 8 or 11 alphanumeric characters
-          message: "Invalid SWIFT code format",
-        },
-      })}
-    />
-    {errors.swiftCode && <div className="invalid-feedback">{errors.swiftCode.message}</div>}
-  </div>
-</div>
-
-              {/* Security Section */}
-              <h4 className="mb-3 text-muted" data-bs-toggle="collapse" data-bs-target="#security" aria-expanded="false" aria-controls="security"> Security</h4>
-              <div className="p-3 rounded bg-light mb-4 collapse" id="security">
-  {/* Type of Security */}
-  <div className="mb-4">
-    <label className="form-label text-muted">Type of Security</label>
-    <select
-      className={`form-control ${errors.securityType ? "is-invalid" : ""}`}
-      {...register("securityType", { required: "Please select type of security" })}
-    >
-      <option value="">Select Type of Security</option>
-      <option value="Mortgage">Mortgage</option>
-      <option value="Pledge">Pledge</option>
-      <option value="Lien">Lien</option>
-      <option value="Hypothecation">Hypothecation</option>
-      <option value="Assignment">Assignment</option>
-      <option value="Other">Other</option>
-    </select>
-    {errors.securityType && <div className="invalid-feedback">{errors.securityType.message}</div>}
-  </div>
-
-  {/* Name and PAN of the person (if security given by a person other than CD) */}
-  <div className="mb-4">
-    <label className="form-label text-muted">
-      Name and PAN of the person (if security given by a person other than CD)
-    </label>
-    <div className="row">
-      {/* Name Field */}
-      <div className="col-md-6 mb-3">
-        <input
-          type="text"
-          className={`form-control ${errors.securityPersonName ? "is-invalid" : ""}`}
-          placeholder="Enter Name"
-          {...register("securityPersonName", {
-            pattern: {
-              value: /^[A-Za-z\s]+$/, // Allows only letters and spaces
-              message: "Name must only contain letters and spaces",
-            },
-          })}
-        />
-        {errors.securityPersonName && (
-          <div className="invalid-feedback">{errors.securityPersonName.message}</div>
-        )}
-      </div>
-
-      {/* PAN Field */}
-      <div className="col-md-6 mb-3">
-        <input
-          type="text"
-          className={`form-control ${errors.securityPersonPan ? "is-invalid" : ""}`}
-          placeholder="Enter PAN"
-          {...register("securityPersonPan", {
-            pattern: {
-              value: /^[A-Z]{5}[0-9]{4}[A-Z]$/, // Standard 10-character PAN format
-              message: "Invalid PAN format",
-            },
-          })}
-        />
-        {errors.securityPersonPan && (
-          <div className="invalid-feedback">{errors.securityPersonPan.message}</div>
-        )}
-      </div>
-    </div>
-  </div>
-
-  {/* Details of Security */}
-  <div className="mb-4">
-    <label className="form-label text-muted">Details of Security</label>
-    <textarea
-      className={`form-control ${errors.securityDetails ? "is-invalid" : ""}`}
-      placeholder="Enter details of security"
-      {...register("securityDetails", {
-        required: "Details of security are required",
-        minLength: {
-          value: 10,
-          message: "Details should be at least 10 characters long",
-        },
-      })}
-    />
-    {errors.securityDetails && (
-      <div className="invalid-feedback">{errors.securityDetails.message}</div>
-    )}
-  </div>
-
-  {/* ROC Charge ID */}
-  <div className="mb-4">
-    <label className="form-label text-muted">ROC Charge ID (Asset-wise or Contract-wise)</label>
-    <input
-      type="text"
-      className={`form-control ${errors.rocChargeId ? "is-invalid" : ""}`}
-      placeholder="Enter ROC Charge ID"
-      {...register("rocChargeId", {
-        pattern: {
-          value: /^\d+$/, // Numeric values only
-          message: "ROC Charge ID must be a number",
-        },
-      })}
-    />
-    {errors.rocChargeId && (
-      <div className="invalid-feedback">{errors.rocChargeId.message}</div>
-    )}
-  </div>
-
-  {/* CERSAI Security Interest ID */}
-  <div className="mb-4">
-    <label className="form-label text-muted">CERSAI Security Interest ID</label>
-    <input
-      type="text"
-      className={`form-control ${errors.cersaiSecurityId ? "is-invalid" : ""}`}
-      placeholder="Enter CERSAI Security Interest ID"
-      {...register("cersaiSecurityId", {
-        pattern: {
-          value: /^\d+$/, // Numeric values only
-          message: "CERSAI Security Interest ID must be a number",
-        },
-      })}
-    />
-    {errors.cersaiSecurityId && (
-      <div className="invalid-feedback">{errors.cersaiSecurityId.message}</div>
-    )}
-  </div>
-
-  {/* Priority of Charge */}
-  <div className="mb-4">
-    <label className="form-label text-muted">Priority of Charge</label>
-    <select
-      className={`form-control ${errors.priorityOfCharge ? "is-invalid" : ""}`}
-      {...register("priorityOfCharge", { required: "Please select priority of charge" })}
-    >
-      <option value="">Select Priority</option>
-      <option value="Exclusive">Exclusive</option>
-      <option value="First">First</option>
-      <option value="Second">Second</option>
-      <option value="Third">Third</option>
-      <option value="Other">Other</option>
-    </select>
-    {errors.priorityOfCharge && (
-      <div className="invalid-feedback">{errors.priorityOfCharge.message}</div>
-    )}
-  </div>
-</div>
-
-              {/* Assignment Details Section */}
-              <h4 className="mb-3 text-muted" data-bs-toggle="collapse" data-bs-target="#assignment" aria-expanded="false" aria-controls="assignment" >Assignment Details</h4>
-              <div className="p-3 rounded bg-light mb-4 collapse" id="assignment">
-  {/* Name of Assignor */}
-  <div className="mb-4">
-    <label className="form-label text-muted">Name of Assignor</label>
-    <input
-      type="text"
-      className={`form-control ${errors.assignorName ? "is-invalid" : ""}`}
-      placeholder="Enter Name of Assignor"
-      {...register("assignorName", {
-        required: "Name of Assignor is required",
-        pattern: {
-          value: /^[A-Za-z\s]+$/, // Allows only letters and spaces
-          message: "Name must only contain letters and spaces",
-        },
-      })}
-    />
-    {errors.assignorName && <div className="invalid-feedback">{errors.assignorName.message}</div>}
-  </div>
-
-  {/* PAN of Assignor */}
-  <div className="mb-4">
-    <label className="form-label text-muted">PAN of Assignor</label>
-    <input
-      type="text"
-      className={`form-control ${errors.assignorPan ? "is-invalid" : ""}`}
-      placeholder="Enter PAN of Assignor"
-      {...register("assignorPan", {
-        required: "PAN of Assignor is required",
-        pattern: {
-          value: /^[A-Z]{5}[0-9]{4}[A-Z]$/, // Standard 10-character PAN format
-          message: "Invalid PAN format",
-        },
-      })}
-    />
-    {errors.assignorPan && <div className="invalid-feedback">{errors.assignorPan.message}</div>}
-  </div>
-
-  {/* Date of Assignment */}
-  <div className="mb-4">
-    <label className="form-label text-muted">Date of Assignment</label>
-    <input
-      type="date"
-      className={`form-control ${errors.dateOfAssignment ? "is-invalid" : ""}`}
-      {...register("dateOfAssignment", {
-        required: "Date of assignment is required",
-        validate: {
-          isFutureDate: (value) =>
-            new Date(value) <= new Date() || "Date cannot be in the future",
-        },
-      })}
-    />
-    {errors.dateOfAssignment && <div className="invalid-feedback">{errors.dateOfAssignment.message}</div>}
-  </div>
-
-  {/* Amount Assigned */}
-  <div className="mb-4">
-    <label className="form-label text-muted">Amount Assigned</label>
-    <input
-      type="number"
-      className={`form-control ${errors.amountAssigned ? "is-invalid" : ""}`}
-      placeholder="Enter Amount Assigned"
-      {...register("amountAssigned", {
-        required: "Amount assigned is required",
-        min: { value: 0.01, message: "Amount must be greater than 0" },
-      })}
-    />
-    {errors.amountAssigned && <div className="invalid-feedback">{errors.amountAssigned.message}</div>}
-  </div>
-
-  {/* Remarks */}
-  <div className="mb-4">
-    <label className="form-label text-muted">Remarks (if any)</label>
-    <textarea
-      className={`form-control ${errors.assignmentRemarks ? "is-invalid" : ""}`}
-      placeholder="Enter remarks"
-      {...register("assignmentRemarks", {
-        maxLength: {
-          value: 500,
-          message: "Remarks should not exceed 500 characters",
-        },
-      })}
-    />
-    {errors.assignmentRemarks && <div className="invalid-feedback">{errors.assignmentRemarks.message}</div>}
-  </div>
-</div>
-
+      
 
               <div className="text-end">
-              {/* <button type="button" className=" btn btn-secondary me-2" >
-               Save as Draft
-                </button> */}
-                <Button
-  variant="outlined"
-  color="primary"
-  onClick={handleSaveDraft}
-  disabled={loading}
-  className="me-2"
->
-  {loading ? "Saving Draft..." : "Save as Draft"}
-</Button>
+             
+               
 
                 <button type="submit" className=" btn btn-primary"   >
-                  Next
+                  Save & Next
                 </button>
 
               </div>
@@ -1283,4 +910,4 @@ const ClaimForm = ({onNext, onSaveDraft, loading,displayName,creditorType,regist
   );
 };
 
-export default ClaimForm;
+export default ClaimDetails;
