@@ -1,6 +1,6 @@
-import React, { useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
-import Cookies from "js-cookie"; // Import js-cookie
+import Cookies from "js-cookie";
 
 const SecurityForm = ({ onNext, onPrevious }) => {
   const {
@@ -8,52 +8,130 @@ const SecurityForm = ({ onNext, onPrevious }) => {
     handleSubmit,
     formState: { errors, isValid },
     setValue,
-    trigger, // Added trigger function
-  } = useForm({ mode: "onChange" }); // Added mode: onChange for immediate validation
+    trigger,
+  } = useForm({ mode: "onChange" });
 
-  const COOKIE_KEY = "formData"; // Key for storing data in cookies
+  const COOKIE_KEY = "formData";
+  const [fields, setFields] = useState([]);
 
-  // Save form data to cookies
+  // JSON schema for dynamic fields
+  const fieldSchema = [
+    {
+      key: "securityType",
+      label: "Type of Security",
+      type: "select",
+      options: [
+        "Mortgage",
+        "Pledge",
+        "Lien",
+        "Hypothecation",
+        "Assignment",
+        "Other",
+      ],
+      validation: { required: "Please select type of security" },
+    },
+    {
+      key: "securityPersonName",
+      label: "Name of Person",
+      type: "text",
+      placeholder: "Enter Name",
+      validation: {
+        pattern: {
+          value: /^[A-Za-z\s]+$/,
+          message: "Name must only contain letters and spaces",
+        },
+      },
+    },
+    {
+      key: "securityPersonPan",
+      label: "PAN of Person",
+      type: "text",
+      placeholder: "Enter PAN",
+      validation: {
+        pattern: {
+          value: /^[A-Z]{5}[0-9]{4}[A-Z]$/,
+          message: "Invalid PAN format",
+        },
+      },
+    },
+    {
+      key: "securityDetails",
+      label: "Details of Security",
+      type: "textarea",
+      placeholder: "Enter details of security",
+      validation: {
+        required: "Details of security are required",
+        minLength: {
+          value: 10,
+          message: "Details should be at least 10 characters long",
+        },
+      },
+    },
+    {
+      key: "rocChargeId",
+      label: "ROC Charge ID",
+      type: "text",
+      placeholder: "Enter ROC Charge ID",
+      validation: {
+        pattern: {
+          value: /^\d+$/,
+          message: "ROC Charge ID must be a number",
+        },
+      },
+    },
+    {
+      key: "cersaiSecurityId",
+      label: "CERSAI Security Interest ID",
+      type: "text",
+      placeholder: "Enter CERSAI Security Interest ID",
+      validation: {
+        pattern: {
+          value: /^\d+$/,
+          message: "CERSAI Security Interest ID must be a number",
+        },
+      },
+    },
+    {
+      key: "priorityOfCharge",
+      label: "Priority of Charge",
+      type: "select",
+      options: ["Exclusive", "First", "Second", "Third", "Other"],
+      validation: { required: "Please select priority of charge" },
+    },
+  ];
+
+  // Add or remove fields dynamically based on checkboxes
+  const toggleField = (key) => {
+    if (fields.includes(key)) {
+      setFields(fields.filter((field) => field !== key));
+    } else {
+      setFields([...fields, key]);
+    }
+  };
+
   const onSubmit = (data) => {
     console.log("Form Data:", data);
 
-    // Get existing data from cookies (if any) and merge with the new data
-    const savedData = Cookies.get(COOKIE_KEY) ? JSON.parse(Cookies.get(COOKIE_KEY)) : {};
+    const savedData = Cookies.get(COOKIE_KEY)
+      ? JSON.parse(Cookies.get(COOKIE_KEY))
+      : {};
     const updatedData = { ...savedData, ...data };
 
-    // Store the updated data back to cookies (expires in 7 days)
     Cookies.set(COOKIE_KEY, JSON.stringify(updatedData), { expires: 7 });
-
-    // Proceed to next step
     onNext();
   };
 
-  // Load data from cookies when the form is loaded or when it becomes active
   useEffect(() => {
-    const savedData = Cookies.get(COOKIE_KEY) ? JSON.parse(Cookies.get(COOKIE_KEY)) : {};
+    const savedData = Cookies.get(COOKIE_KEY)
+      ? JSON.parse(Cookies.get(COOKIE_KEY))
+      : {};
     if (savedData) {
-      // Set the saved data in the form
       Object.keys(savedData).forEach((key) => {
         setValue(key, savedData[key]);
       });
-
-      // Trigger validation after setting the values
       trigger();
     }
   }, [setValue, trigger]);
-
-  // Ensure the "Security" section is visible when this form is active
-  useEffect(() => {
-    const securitySection = document.getElementById("security");
-    if (securitySection) {
-      securitySection.classList.add("show"); // Force the collapse to expand
-    }
-    return () => {
-      if (securitySection) {
-        securitySection.classList.remove("show"); // Clean up when unmounting
-      }
-    };
-  }, []);
 
   return (
     <div className="d-flex justify-content-center align-items-center min-vh-100">
@@ -61,161 +139,93 @@ const SecurityForm = ({ onNext, onPrevious }) => {
         onSubmit={handleSubmit(onSubmit)}
         className="bg-light p-4 rounded shadow-sm w-75"
       >
-        <h4
-          className="mb-3 text-muted"
-          data-bs-toggle="collapse"
-          data-bs-target="#security"
-          aria-expanded="true"
-          aria-controls="security"
-        >
-          Security
-        </h4>
-        <div className="p-3 rounded bg-light mb-4 collapse show" id="security">
-          {/* Type of Security */}
-          <div className="mb-3">
-            <label className="form-label text-muted">Type of Security</label>
-            <select
-              className={`form-control ${errors.securityType ? "is-invalid" : ""}`}
-              {...register("securityType", { required: "Please select type of security" })}
-            >
-              <option value="">Select Type of Security</option>
-              <option value="Mortgage">Mortgage</option>
-              <option value="Pledge">Pledge</option>
-              <option value="Lien">Lien</option>
-              <option value="Hypothecation">Hypothecation</option>
-              <option value="Assignment">Assignment</option>
-              <option value="Other">Other</option>
-            </select>
-            {errors.securityType && (
-              <div className="invalid-feedback">{errors.securityType.message}</div>
-            )}
-          </div>
+        <h4 className="mb-3 text-muted">Dynamic Security Form</h4>
 
-          {/* Name and PAN of the person */}
-          <div className="mb-3">
-            <label className="form-label text-muted">
-              Name and PAN of the person (if security given by a person other than CD)
-            </label>
-            <div className="row">
-              {/* Name Field */}
-              <div className="col-12 col-md-6 mb-3">
-                <input
-                  type="text"
-                  className={`form-control ${errors.securityPersonName ? "is-invalid" : ""}`}
-                  placeholder="Enter Name"
-                  {...register("securityPersonName", {
-                    pattern: {
-                      value: /^[A-Za-z\s]+$/,
-                      message: "Name must only contain letters and spaces",
-                    },
-                  })}
-                />
-                {errors.securityPersonName && (
-                  <div className="invalid-feedback">{errors.securityPersonName.message}</div>
-                )}
-              </div>
-
-              {/* PAN Field */}
-              <div className="col-12 col-md-6 mb-3">
-                <input
-                  type="text"
-                  className={`form-control ${errors.securityPersonPan ? "is-invalid" : ""}`}
-                  placeholder="Enter PAN"
-                  {...register("securityPersonPan", {
-                    pattern: {
-                      value: /^[A-Z]{5}[0-9]{4}[A-Z]$/,
-                      message: "Invalid PAN format",
-                    },
-                  })}
-                />
-                {errors.securityPersonPan && (
-                  <div className="invalid-feedback">{errors.securityPersonPan.message}</div>
-                )}
-              </div>
+        {/* Checkboxes for adding fields */}
+        <div className="mb-3">
+          {fieldSchema.map((field) => (
+            <div key={field.key} className="form-check mb-2">
+              <input
+                type="checkbox"
+                className="form-check-input"
+                id={field.key}
+                onChange={() => toggleField(field.key)}
+              />
+              <label className="form-check-label" htmlFor={field.key}>
+                Add {field.label}
+              </label>
             </div>
-          </div>
-
-          {/* Details of Security */}
-          <div className="mb-3">
-            <label className="form-label text-muted">Details of Security</label>
-            <textarea
-              className={`form-control ${errors.securityDetails ? "is-invalid" : ""}`}
-              placeholder="Enter details of security"
-              {...register("securityDetails", {
-                required: "Details of security are required",
-                minLength: {
-                  value: 10,
-                  message: "Details should be at least 10 characters long",
-                },
-              })}
-              rows={3}
-            />
-            {errors.securityDetails && (
-              <div className="invalid-feedback">{errors.securityDetails.message}</div>
-            )}
-          </div>
-
-          {/* ROC Charge ID */}
-          <div className="mb-3">
-            <label className="form-label text-muted">ROC Charge ID (Asset-wise or Contract-wise)</label>
-            <input
-              type="text"
-              className={`form-control ${errors.rocChargeId ? "is-invalid" : ""}`}
-              placeholder="Enter ROC Charge ID"
-              {...register("rocChargeId", {
-                pattern: {
-                  value: /^\d+$/,
-                  message: "ROC Charge ID must be a number",
-                },
-              })}
-            />
-            {errors.rocChargeId && (
-              <div className="invalid-feedback">{errors.rocChargeId.message}</div>
-            )}
-          </div>
-
-          {/* CERSAI Security Interest ID */}
-          <div className="mb-3">
-            <label className="form-label text-muted">CERSAI Security Interest ID</label>
-            <input
-              type="text"
-              className={`form-control ${errors.cersaiSecurityId ? "is-invalid" : ""}`}
-              placeholder="Enter CERSAI Security Interest ID"
-              {...register("cersaiSecurityId", {
-                pattern: {
-                  value: /^\d+$/,
-                  message: "CERSAI Security Interest ID must be a number",
-                },
-              })}
-            />
-            {errors.cersaiSecurityId && (
-              <div className="invalid-feedback">{errors.cersaiSecurityId.message}</div>
-            )}
-          </div>
-
-          {/* Priority of Charge */}
-          <div className="mb-3">
-            <label className="form-label text-muted">Priority of Charge</label>
-            <select
-              className={`form-control ${errors.priorityOfCharge ? "is-invalid" : ""}`}
-              {...register("priorityOfCharge", { required: "Please select priority of charge" })}
-            >
-              <option value="">Select Priority</option>
-              <option value="Exclusive">Exclusive</option>
-              <option value="First">First</option>
-              <option value="Second">Second</option>
-              <option value="Third">Third</option>
-              <option value="Other">Other</option>
-            </select>
-            {errors.priorityOfCharge && (
-              <div className="invalid-feedback">{errors.priorityOfCharge.message}</div>
-            )}
-          </div>
+          ))}
         </div>
 
-        {/* Buttons */}
+        {/* Render dynamic fields */}
+        {fields.map((key) => {
+          const field = fieldSchema.find((f) => f.key === key);
+          if (!field) return null;
+
+          if (field.type === "select") {
+            return (
+              <div className="mb-3" key={field.key}>
+                <label className="form-label">{field.label}</label>
+                <select
+                  className={`form-control ${
+                    errors[key] ? "is-invalid" : ""
+                  }`}
+                  {...register(key, field.validation)}
+                >
+                  <option value="">Select {field.label}</option>
+                  {field.options.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
+                {errors[key] && (
+                  <div className="invalid-feedback">
+                    {errors[key]?.message}
+                  </div>
+                )}
+              </div>
+            );
+          }
+
+          return (
+            <div className="mb-3" key={field.key}>
+              <label className="form-label">{field.label}</label>
+              {field.type === "textarea" ? (
+                <textarea
+                  className={`form-control ${
+                    errors[key] ? "is-invalid" : ""
+                  }`}
+                  placeholder={field.placeholder}
+                  {...register(key, field.validation)}
+                  rows={3}
+                />
+              ) : (
+                <input
+                  type={field.type}
+                  className={`form-control ${
+                    errors[key] ? "is-invalid" : ""
+                  }`}
+                  placeholder={field.placeholder}
+                  {...register(key, field.validation)}
+                />
+              )}
+              {errors[key] && (
+                <div className="invalid-feedback">
+                  {errors[key]?.message}
+                </div>
+              )}
+            </div>
+          );
+        })}
+
         <div className="d-flex justify-content-between">
-          <button type="button" className="btn btn-secondary btn-sm" onClick={onPrevious}>
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={onPrevious}
+          >
             Previous
           </button>
           <button

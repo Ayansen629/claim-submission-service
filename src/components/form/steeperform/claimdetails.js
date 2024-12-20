@@ -581,61 +581,7 @@ const ClaimDetails = ({onNext, onSaveDraft, loading,creditorType,register,errors
           )}
         </div>
 
-        <div className="mb-4">
-        <label className="form-label text-muted">Name of Authorized Person</label>
-        <div className="row">
-          <div className="col">
-            <input
-              type="text"
-              id="firstIndividualName"
-              className={`form-control ${errors.firstIndividualName ? "is-invalid" : ""}`}
-              placeholder="First name"
-              {...register("firstIndividualName", {
-                required: "First name is required",
-                pattern: {
-                  value: /^[A-Za-z\s]+$/,
-                  message: "First name should not contain numbers or special characters",
-                },
-              })}
-            />
-            {errors.firstIndividualName && <div className="invalid-feedback">{errors.firstIndividualName.message}</div>}
-          </div>
-
-          <div className="col">
-            <input
-              type="text"
-              id="middleIndividualName"
-              className={`form-control ${errors.middleName ? "is-invalid" : ""}`}
-              placeholder="Middle name"
-              {...register("middleIndividualName", {
-                pattern: {
-                  value: /^[A-Za-z\s]+$/,
-                  message: "Middle name should not contain numbers or special characters",
-                },
-              })}
-            />
-            {errors.middleIndividualName && <div className="invalid-feedback">{errors.middleIndividualName.message}</div>}
-          </div>
-
-          <div className="col">
-            <input
-              type="text"
-              id="lastIndividualName"
-              className={`form-control ${errors.lastName ? "is-invalid" : ""}`}
-              placeholder="Last name"
-              {...register("lastIndividualName", {
-                required: "Last name is required",
-                pattern: {
-                  value: /^[A-Za-z\s]+$/,
-                  message: "Last name should not contain numbers or special characters",
-                },
-              })}
-            />
-            {errors.lastIndividualName && <div className="invalid-feedback">{errors.lastIndividualName.message}</div>}
-          </div>
-        </div>
-      </div>
-
+       
         {/* Mobile Number Field */}
         <div className="mb-4">
           <label htmlFor="mobileNumber" className="form-label text-muted">
