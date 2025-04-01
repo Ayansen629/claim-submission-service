@@ -1,4 +1,3 @@
-// Stepper.js
 import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { toast } from "react-toastify";
@@ -6,7 +5,7 @@ import { Modal, Button, Form } from "react-bootstrap";
 import "./Stepper.css";
 import { useRegistration } from "../../context/ApplicationContext";
 import ReviewStep from "./ReviewStep";
-import { FormDataProvider } from "../../context/FormDataContext"; // Import the context
+import { FormDataProvider } from "../../context/FormDataContext";
 
 const deepEqual = (obj1, obj2) => {
   return JSON.stringify(obj1) === JSON.stringify(obj2);
@@ -18,8 +17,6 @@ const Stepper = ({ stepsConfig = [], formAllData }) => {
   const [currentStep, setCurrentStep] = useState(1);
   const [isConfirmed, setIsConfirmed] = useState(false);
   const [isComplete, setIsComplete] = useState(false);
-  const [isViewModalOpen, setIsViewModalOpen] = useState(false);
-  const [hasPreviewed, setHasPreviewed] = useState(false);
   const [formData, setFormData] = useState({});
   const [margins, setMargins] = useState({ marginLeft: 0, marginRight: 0 });
   const stepRef = useRef([]);
@@ -28,14 +25,14 @@ const Stepper = ({ stepsConfig = [], formAllData }) => {
   const [showModal, setShowModal] = useState(false);
   const [comments, setComments] = useState("");
   const [actionType, setActionType] = useState("");
-  const [flattenedData, setFlattenedData] = useState({});
+  const [isSavingDraft, setIsSavingDraft] = useState(false);
 
   const {
     registrationData,
-    handleStepDataFetch,
     updateRegistrationData,
     loadDataFromLocalStorage,
     isDataLoaded,
+    saveDraft,
   } = useRegistration();
 
   const userFormData = JSON.parse(localStorage.getItem("userFormData"));
@@ -139,10 +136,38 @@ const Stepper = ({ stepsConfig = [], formAllData }) => {
     }
   };
 
+  const handleSaveDraft = async () => {
+    setIsSavingDraft(true);
+    try {
+      const currentStepData = currentSubmitHandler ? await currentSubmitHandler() : {};
+      
+      const draftData = {
+        ...formData,
+        [`step${currentStep}`]: { 
+          ...formData[`step${currentStep}`], 
+          ...currentStepData 
+        },
+        status: "draft",
+        lastSaved: new Date().toISOString(),
+        currentStep,
+      };
+
+      await saveDraft(draftData);
+      toast.success("Draft saved successfully");
+      navigate("/drafts"); // Or wherever you want to redirect after saving
+    } catch (error) {
+      console.error("Error saving draft:", error);
+      toast.error("Failed to save draft");
+    } finally {
+      setIsSavingDraft(false);
+    }
+  };
+
   const handleActionClick = (action) => {
     setActionType(action);
     setShowModal(true);
   };
+
   const handleModalClose = () => {
     setShowModal(false);
     setComments("");
@@ -153,6 +178,7 @@ const Stepper = ({ stepsConfig = [], formAllData }) => {
     toast.success(`${actionType} submitted successfully`);
     navigate("/dashboard");
   };
+
   const handlePrevious = () => {
     setCurrentStep((prevStep) => Math.max(1, prevStep - 1));
     setIsConfirmed(false);
@@ -178,20 +204,8 @@ const Stepper = ({ stepsConfig = [], formAllData }) => {
     };
   };
 
-//  console.log(formData, "formDataStepper");
- 
-
-  // useEffect(() => {
-  //   if (formData && Object.keys(formData).length > 0) {
-  //     // localStorage.setItem("formData", JSON.stringify(formData));
-  //     setFlattenedData(flattenFormData(formData));
-  //   }
-  // }, []);
-  // console.log(flattenedData, "flattenFormData");
-
-
   return (
-    <FormDataProvider formData={flattenFormData(formData)}> {/* Wrap with FormDataProvider */}
+    <FormDataProvider formData={flattenFormData(formData)}>
       <div className="stepper">
         {filteredStepsConfig.map((step, index) => (
           <div
@@ -234,7 +248,7 @@ const Stepper = ({ stepsConfig = [], formAllData }) => {
         />
       )}
 
-      {shouldRenderReviewStep && Object.keys(flattenedData).length > 0 && !isCRPUser && (
+      {shouldRenderReviewStep && !isCRPUser && (
         <ReviewStep />
       )}
 
@@ -272,6 +286,12 @@ const Stepper = ({ stepsConfig = [], formAllData }) => {
               Accept
             </button>
             <button
+              className="buttonplus accept-contingent-button"
+              onClick={() => handleActionClick("Accept as Contingent")}
+            >
+              Accept as Contingent
+            </button>
+            <button
               className="buttonplus reject-button"
               onClick={() => handleActionClick("Reject")}
             >
@@ -284,24 +304,31 @@ const Stepper = ({ stepsConfig = [], formAllData }) => {
               Sendback To Claimants
             </button>
           </>
-        ) : (
-          currentStep === filteredStepsConfig.length ? (
+        ) : currentStep === filteredStepsConfig.length ? (
+          <>
             <button
-              className="buttonplus next-button"
+              className="buttonplus draft-button"
+              onClick={handleSaveDraft}
+              disabled={isSavingDraft}
+            >
+              {isSavingDraft ? "Saving..." : "Save as Draft"}
+            </button>
+            <button
+              className="buttonplus submit-button"
               onClick={handleNext}
               disabled={!isConfirmed || isComplete}
             >
               Submit
             </button>
-          ) : (
-            <button
-              className="buttonplus next-button"
-              onClick={handleNext}
-              disabled={isComplete}
-            >
-              Next
-            </button>
-          )
+          </>
+        ) : (
+          <button
+            className="buttonplus next-button"
+            onClick={handleNext}
+            disabled={isComplete}
+          >
+            Next
+          </button>
         )}
       </div>
 
@@ -324,11 +351,11 @@ const Stepper = ({ stepsConfig = [], formAllData }) => {
           </Form>
         </Modal.Body>
         <Modal.Footer>
-          <Button className="modal-close-button" onClick={handleModalClose}>
+          <Button variant="secondary" onClick={handleModalClose}>
             Close
           </Button>
           <Button
-            className="modal-submit-button"
+            variant="primary"
             onClick={handleActionSubmit}
             disabled={!comments.trim()}
           >
@@ -341,3 +368,25 @@ const Stepper = ({ stepsConfig = [], formAllData }) => {
 };
 
 export default Stepper;
+
+
+
+.draft-button {
+  background-color: #6c757d;
+  color: white;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 5px;
+  cursor: pointer;
+  margin-right: 10px;
+  transition: background-color 0.3s;
+}
+
+.draft-button:hover {
+  background-color: #5a6268;
+}
+
+.draft-button:disabled {
+  background-color: #cccccc;
+  cursor: not-allowed;
+}
