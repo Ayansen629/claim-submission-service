@@ -1,187 +1,343 @@
-import React, { useState, useRef, useEffect, useContext } from "react";
-import { useNavigate, Link } from "react-router-dom";
-import "./Header.css";
-import Logo from "../../assests/images/Logo.png";
-import Profile from "../../assests/images/Profile.png";
-import { UserContext } from "../../components/context/UserContext.js";
+// Stepper.js
+import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { useNavigate, useParams } from "react-router-dom";
+import { toast } from "react-toastify";
+import { Modal, Button, Form } from "react-bootstrap";
+import "./Stepper.css";
+import { useRegistration } from "../../context/ApplicationContext";
+import ReviewStep from "./ReviewStep";
+import { FormDataProvider } from "../../context/FormDataContext"; // Import the context
 
-const Header = () => {
-  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
-  const [isCreateClaimDropdownOpen, setIsCreateClaimDropdownOpen] = useState(false);
-  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const userMenuRef = useRef(null);
+const deepEqual = (obj1, obj2) => {
+  return JSON.stringify(obj1) === JSON.stringify(obj2);
+};
+
+const Stepper = ({ stepsConfig = [], formAllData }) => {
+  const { id } = useParams();
+  const isEditMode = !!id;
+  const [currentStep, setCurrentStep] = useState(1);
+  const [isConfirmed, setIsConfirmed] = useState(false);
+  const [isComplete, setIsComplete] = useState(false);
+  const [isViewModalOpen, setIsViewModalOpen] = useState(false);
+  const [hasPreviewed, setHasPreviewed] = useState(false);
+  const [formData, setFormData] = useState({});
+  const [margins, setMargins] = useState({ marginLeft: 0, marginRight: 0 });
+  const stepRef = useRef([]);
   const navigate = useNavigate();
-  const { userData, updateFormType } = useContext(UserContext);
+  const [currentSubmitHandler, setCurrentSubmitHandler] = useState(null);
+  const [showModal, setShowModal] = useState(false);
+  const [comments, setComments] = useState("");
+  const [actionType, setActionType] = useState("");
+  const [flattenedData, setFlattenedData] = useState({});
 
-  const selectedRadio = userData || {};
+  const {
+    registrationData,
+    handleStepDataFetch,
+    updateRegistrationData,
+    loadDataFromLocalStorage,
+    isDataLoaded,
+  } = useRegistration();
 
-  const toggleUserMenu = () => {
-    setIsUserMenuOpen(!isUserMenuOpen);
-  };
+  const userFormData = JSON.parse(localStorage.getItem("userFormData"));
+  const isCRPUser = userFormData?.userType === "CRP";
 
-  const toggleCreateClaimDropdown = () => {
-    setIsCreateClaimDropdownOpen(!isCreateClaimDropdownOpen);
-  };
-
-  const toggleMobileMenu = () => {
-    setIsMobileMenuOpen(!isMobileMenuOpen);
-  };
+  const filteredStepsConfig = useMemo(() => {
+    if (isCRPUser) {
+      return stepsConfig.filter((step) => step.name !== "Review & Submit");
+    }
+    return stepsConfig;
+  }, [stepsConfig, isCRPUser]);
 
   useEffect(() => {
-    const handleClickOutside = (event) => {
-      if (userMenuRef.current && !userMenuRef.current.contains(event.target)) {
-        setIsUserMenuOpen(false);
-      }
-    };
+    if (id) {
+      loadDataFromLocalStorage(id);
+    }
+  }, [id, loadDataFromLocalStorage]);
 
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => {
-      document.removeEventListener("mousedown", handleClickOutside);
-    };
+  useEffect(() => {
+    if (isEditMode && registrationData && !deepEqual(formData, registrationData)) {
+      setFormData(registrationData);
+    }
+  }, [isEditMode, registrationData, formData]);
+
+  useEffect(() => {
+    const savedIsConfirmed = localStorage.getItem("isConfirmed");
+    if (savedIsConfirmed) {
+      setIsConfirmed(JSON.parse(savedIsConfirmed));
+    }
   }, []);
 
-  const handleLogout = () => {
-    localStorage.clear();
-    navigate("/login");
-  };
+  useEffect(() => {
+    localStorage.setItem("isConfirmed", JSON.stringify(isConfirmed));
+  }, [isConfirmed]);
 
-  const handleMyProfileClick = () => {
-    navigate("/my-profile");
-    setIsUserMenuOpen(false);
-  };
+  useEffect(() => {
+    const newSubmitHandler = filteredStepsConfig[currentStep - 1]?.submitHandler;
+    if (newSubmitHandler && newSubmitHandler !== currentSubmitHandler) {
+      setCurrentSubmitHandler(() => newSubmitHandler);
+    }
+  }, [currentStep, filteredStepsConfig]);
 
-  const handleChangePasswordClick = () => {
-    navigate("/change-password");
-    setIsUserMenuOpen(false);
-  };
+  const updateSubmitHandler = useCallback((submitHandler) => {
+    setCurrentSubmitHandler(() => submitHandler);
+  }, []);
 
-  const getFormPath = () => {
-    const { claimantType, claimantCategoryType } = selectedRadio;
-    let formType = "";
+  useEffect(() => {
+    if (stepRef.current.length > 0) {
+      const firstStep = stepRef.current[0]?.offsetWidth || 0;
+      const lastStep = stepRef.current[filteredStepsConfig.length - 1]?.offsetWidth || 0;
+      setMargins({
+        marginLeft: firstStep / 2,
+        marginRight: lastStep / 2,
+      });
+    }
+  }, [filteredStepsConfig.length]);
 
-    if (claimantType === "Financial Creditors") {
-      if (
-        claimantCategoryType === "Secured Financial Creditors (Banks/ARCs/NBFCs/FIs)" ||
-        claimantCategoryType === "Unsecured Financial Creditors (Banks/ARCs/NBFCs/FIs)" ||
-        claimantCategoryType === "Unsecured Financial Creditors – (Other than Banks / ARCs / NBFCs)"
-      ) {
-        formType = "Form C";
-      } else if (claimantCategoryType === "Unsecured Financial Creditors in Class of Creditors (Homebuyers)") {
-        formType = "Form CA";
+  const validateStepData = (step, data) => {
+    const requiredFields = filteredStepsConfig[step - 1]?.requiredFields || [];
+    for (let field of requiredFields) {
+      if (!data[field]) {
+        toast.error(`${field} is required.`);
+        return false;
       }
-    } else if (claimantType === "Operational Creditors") {
-      formType = "Form B";
-    } else if (claimantType === "Employees and Workmen") {
-      formType = "Form D";
-    } else if (claimantType === "Employees and Workmen – Through Authorised Representative") {
-      formType = "Form E";
-    } else if (claimantType === "Other Creditors (other than financial and operational creditors)") {
-      formType = "Form F";
+    }
+    return true;
+  };
+
+  const handleNext = async () => {
+    if (!currentSubmitHandler) {
+      console.error("No submit handler available.");
+      return;
     }
 
-    if (formType) {
-      updateFormType(formType);
-      return "/apply-claim";
+    const currentStepData = await currentSubmitHandler();
+    if (!currentStepData) {
+      console.error("Form validation failed.");
+      return;
     }
-    return "#";
+
+    if (!validateStepData(currentStep, currentStepData)) {
+      return;
+    }
+
+    const updatedFormData = {
+      ...formData,
+      [`step${currentStep}`]: { ...formData[`step${currentStep}`], ...currentStepData },
+    };
+
+    if (!deepEqual(updatedFormData, formData)) {
+      setFormData(updatedFormData);
+      updateRegistrationData(`step${currentStep}`, updatedFormData[`step${currentStep}`], id);
+    }
+
+    if (currentStep === filteredStepsConfig.length) {
+      setIsComplete(true);
+      toast.success("Form submitted successfully");
+      navigate("/dashboard");
+    } else {
+      setCurrentStep((prevStep) => prevStep + 1);
+    }
   };
+
+  const handleActionClick = (action) => {
+    setActionType(action);
+    setShowModal(true);
+  };
+  const handleModalClose = () => {
+    setShowModal(false);
+    setComments("");
+  };
+
+  const handleActionSubmit = () => {
+    console.log(`Action: ${actionType}, Comments: ${comments}`);
+    toast.success(`${actionType} submitted successfully`);
+    navigate("/dashboard");
+  };
+  const handlePrevious = () => {
+    setCurrentStep((prevStep) => Math.max(1, prevStep - 1));
+    setIsConfirmed(false);
+    localStorage.removeItem("isConfirmed");
+  };
+
+  const handleCancel = () => {
+    navigate("/dashboard");
+  };
+
+  const calculateProgressBarWidth = () => {
+    return ((currentStep - 1) / (filteredStepsConfig.length - 1)) * 100;
+  };
+
+  const ActiveComponent = filteredStepsConfig[currentStep - 1]?.Component;
+  const shouldRenderReviewStep = currentStep === filteredStepsConfig.length && isDataLoaded;
+
+  const flattenFormData = (formData) => {
+    return {
+      ...formData.step1,
+      ...formData.step2,
+      ...formData.step3,
+    };
+  };
+
+//  console.log(formData, "formDataStepper");
+ 
+
+  // useEffect(() => {
+  //   if (formData && Object.keys(formData).length > 0) {
+  //     // localStorage.setItem("formData", JSON.stringify(formData));
+  //     setFlattenedData(flattenFormData(formData));
+  //   }
+  // }, []);
+  // console.log(flattenedData, "flattenFormData");
+
 
   return (
-    <header className="app-header">
-      <div className="header-left">
-        <div className="logo-container">
-          <img src={Logo} alt="Logo" className="logo" />
-        </div>
-        <div className="header-title">
-          <h4>Claim Submission</h4>
-          <p>Service</p>
+    <FormDataProvider formData={flattenFormData(formData)}> {/* Wrap with FormDataProvider */}
+      <div className="stepper">
+        {filteredStepsConfig.map((step, index) => (
+          <div
+            key={step.name}
+            ref={(el) => (stepRef.current[index] = el)}
+            className={`step ${
+              currentStep > index + 1 || isComplete ? "complete" : ""
+            } ${currentStep === index + 1 ? "active" : ""}`}
+          >
+            <div className="step-number">
+              {currentStep > index + 1 || isComplete ? (
+                <span>✓</span>
+              ) : (
+                index + 1
+              )}
+            </div>
+            <div className="step-name">{step.name}</div>
+          </div>
+        ))}
+
+        <div
+          className="progress-bar"
+          style={{
+            marginLeft: margins.marginLeft,
+            marginRight: margins.marginRight,
+          }}
+        >
+          <div
+            className="progress"
+            style={{ width: `${calculateProgressBarWidth()}%` }}
+          ></div>
         </div>
       </div>
 
-      <div className="hamburger-menu" onClick={toggleMobileMenu}>
-        <div></div>
-        <div></div>
-        <div></div>
-      </div>
-
-      <nav className={`header-nav ${isMobileMenuOpen ? "active" : ""}`}>
-        <ul className="nav-list">
-          <li className="nav-item">
-            <Link to="/dashboard" className="nav-link" onClick={toggleMobileMenu}>
-              Home
-            </Link>
-          </li>
-          <li className="nav-item">
-            <Link to="/about" className="nav-link" onClick={toggleMobileMenu}>
-              About Us
-            </Link>
-          </li>
-          <li className="nav-item">
-            {selectedRadio.userType === "CRP" ? (
-              <Link to="/create-claim" className="nav-link" onClick={toggleMobileMenu}>
-                Claim Management
-              </Link>
-            ) : (
-              <div className="dropdown">
-                <a
-                  href="#"
-                  className="nav-link dropdown-toggle"
-                  onClick={toggleCreateClaimDropdown}
-                >
-                  Claim Management
-                </a>
-                <ul className="dropdown-createmenu">
-                  <li>
-                    <Link
-                      to={getFormPath()}
-                      className="dropdown-item-header"
-                      onClick={(e) => {
-                        if (getFormPath() === "#") {
-                          e.preventDefault();
-                          alert("Could not determine the appropriate form for your claimant type. Please contact support.");
-                        }
-                        toggleMobileMenu();
-                      }}
-                    >
-                      Apply for Claim
-                    </Link>
-                  </li>
-                </ul>
-              </div>
-            )}
-          </li>
-        </ul>
-      </nav>
-
-      <div className="user-menu" ref={userMenuRef}>
-        <img
-          src={Profile}
-          alt="User"
-          className="user-profile"
-          onClick={toggleUserMenu}
+      {ActiveComponent && (
+        <ActiveComponent
+          formData={formData[`step${currentStep}`] || {}}
+          provideSubmitHandler={updateSubmitHandler}
+          setFormData={setFormData}
         />
-        {isUserMenuOpen && (
-          <ul className="dropdown-menu dropdown-menu-end">
-            <li>
-              <button className="dropdown-rightheader" onClick={handleMyProfileClick}>
-                My Profile
-              </button>
-            </li>
-            <li>
-              <button className="dropdown-rightheader" onClick={handleChangePasswordClick}>
-                Change Password
-              </button>
-            </li>
-            <li>
-              <button className="dropdown-rightheader" onClick={handleLogout}>
-                Logout
-              </button>
-            </li>
-          </ul>
+      )}
+
+      {shouldRenderReviewStep && Object.keys(flattenedData).length > 0 && !isCRPUser && (
+        <ReviewStep />
+      )}
+
+      {currentStep === filteredStepsConfig.length && !isCRPUser && (
+        <div className="confirmation-container">
+          <Form.Group controlId="formConfirmation" className="mt-3 confirmation-checkbox">
+            <Form.Check
+              type="checkbox"
+              label="I confirm that the information provided is correct."
+              checked={isConfirmed}
+              onChange={(e) => setIsConfirmed(e.target.checked)}
+            />
+          </Form.Group>
+        </div>
+      )}
+
+      <div className="stepper-buttons">
+        {currentStep > 1 && (
+          <button className="buttonplus previous-button" onClick={handlePrevious}>
+            Previous
+          </button>
+        )}
+        {currentStep === 1 && (
+          <button className="buttonplus cancel-button" onClick={handleCancel}>
+            Cancel
+          </button>
+        )}
+
+        {currentStep === filteredStepsConfig.length && isCRPUser ? (
+          <>
+            <button
+              className="buttonplus accept-button"
+              onClick={() => handleActionClick("Accept")}
+            >
+              Accept
+            </button>
+            <button
+              className="buttonplus reject-button"
+              onClick={() => handleActionClick("Reject")}
+            >
+              Reject
+            </button>
+            <button
+              className="buttonplus sendback-button"
+              onClick={() => handleActionClick("Sendback To Claimants")}
+            >
+              Sendback To Claimants
+            </button>
+          </>
+        ) : (
+          currentStep === filteredStepsConfig.length ? (
+            <button
+              className="buttonplus next-button"
+              onClick={handleNext}
+              disabled={!isConfirmed || isComplete}
+            >
+              Submit
+            </button>
+          ) : (
+            <button
+              className="buttonplus next-button"
+              onClick={handleNext}
+              disabled={isComplete}
+            >
+              Next
+            </button>
+          )
         )}
       </div>
-    </header>
+
+      <Modal show={showModal} onHide={handleModalClose} centered>
+        <Modal.Header closeButton>
+          <Modal.Title>{actionType} Form</Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          <Form>
+            <Form.Group controlId="comments">
+              <Form.Label>Comments</Form.Label>
+              <Form.Control
+                as="textarea"
+                rows={3}
+                value={comments}
+                onChange={(e) => setComments(e.target.value)}
+                placeholder="Enter your comments..."
+              />
+            </Form.Group>
+          </Form>
+        </Modal.Body>
+        <Modal.Footer>
+          <Button className="modal-close-button" onClick={handleModalClose}>
+            Close
+          </Button>
+          <Button
+            className="modal-submit-button"
+            onClick={handleActionSubmit}
+            disabled={!comments.trim()}
+          >
+            Submit
+          </Button>
+        </Modal.Footer>
+      </Modal>
+    </FormDataProvider>
   );
 };
 
-export default Header;
+export default Stepper;
