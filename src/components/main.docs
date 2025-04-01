@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { Table, Button, Modal, Alert } from "react-bootstrap";
+import { Table, Button, Modal, Alert, Spinner } from "react-bootstrap";
 import { toast } from "react-toastify";
 import "./DraftsPage.css";
 
@@ -8,18 +8,48 @@ const DraftsPage = () => {
   const [drafts, setDrafts] = useState([]);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [draftToDelete, setDraftToDelete] = useState(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState({
+    page: true,
+    delete: false
+  });
   const navigate = useNavigate();
 
-  // Load drafts from localStorage
+  // Load and validate drafts from localStorage
   useEffect(() => {
     const loadDrafts = () => {
       try {
-        const savedDrafts = JSON.parse(localStorage.getItem('formDrafts')) || [];
-        setDrafts(savedDrafts);
+        setLoading(prev => ({...prev, page: true}));
+        const savedDrafts = JSON.parse(localStorage.getItem('formDrafts') || '[]');
+        
+        // Validate and clean draft data
+        const validDrafts = savedDrafts
+          .filter(draft => 
+            draft?.id && 
+            draft?.lastSaved && 
+            draft?.formType && 
+            draft?.currentStep
+          )
+          .map(draft => ({
+            ...draft,
+            // Ensure all required fields exist
+            id: draft.id,
+            formType: draft.formType || 'Unknown Form',
+            lastSaved: draft.lastSaved,
+            currentStep: draft.currentStep || 1,
+            // Add any other required fields
+          }));
+
+        setDrafts(validDrafts);
+        
+        // Update localStorage if we filtered out invalid drafts
+        if (validDrafts.length !== savedDrafts.length) {
+          localStorage.setItem('formDrafts', JSON.stringify(validDrafts));
+        }
       } catch (error) {
         console.error("Error loading drafts:", error);
         toast.error("Failed to load drafts");
+      } finally {
+        setLoading(prev => ({...prev, page: false}));
       }
     };
     
@@ -27,43 +57,85 @@ const DraftsPage = () => {
   }, []);
 
   const handleEditDraft = (draftId) => {
-    navigate(`/apply-claim/${draftId}`); // Or your form route
+    // Find the specific draft by ID
+    const draftToEdit = drafts.find(draft => draft.id === draftId);
+    if (draftToEdit) {
+      navigate(`/apply-claim/${draftId}`, {
+        state: { 
+          draftData: draftToEdit,
+          isDraft: true 
+        }
+      });
+    } else {
+      toast.error("Draft not found");
+    }
   };
 
   const handleDeleteDraft = (draft) => {
+    if (!draft?.id) {
+      toast.error("Invalid draft selected");
+      return;
+    }
     setDraftToDelete(draft);
     setShowDeleteModal(true);
   };
 
-  const confirmDelete = () => {
-    setLoading(true);
+  const confirmDelete = async () => {
+    if (!draftToDelete?.id) {
+      toast.error("No draft selected for deletion");
+      setShowDeleteModal(false);
+      return;
+    }
+
+    setLoading(prev => ({...prev, delete: true}));
+
     try {
-      const updatedDrafts = drafts.filter(draft => draft.id !== draftToDelete.id);
-      localStorage.setItem('formDrafts', JSON.stringify(updatedDrafts));
+      // Create a new array without the deleted draft
+      const updatedDrafts = drafts.filter(draft => 
+        draft.id !== draftToDelete.id
+      );
+      
+      // Update state and localStorage
       setDrafts(updatedDrafts);
-      toast.success("Draft deleted successfully");
+      localStorage.setItem('formDrafts', JSON.stringify(updatedDrafts));
+      
+      toast.success(`Draft "${draftToDelete.formType}" deleted successfully`);
     } catch (error) {
       console.error("Error deleting draft:", error);
       toast.error("Failed to delete draft");
     } finally {
-      setLoading(false);
+      setLoading(prev => ({...prev, delete: false}));
       setShowDeleteModal(false);
+      setDraftToDelete(null);
     }
   };
 
   const formatDate = (dateString) => {
-    return new Date(dateString).toLocaleString();
+    try {
+      return new Date(dateString).toLocaleString();
+    } catch {
+      return "Unknown date";
+    }
   };
 
   const getFormTitle = (draft) => {
-    return draft.formType || `Draft ${drafts.indexOf(draft) + 1}`;
+    return draft?.formType || `Draft (${draft.id.slice(0, 8)}...)`;
   };
+
+  if (loading.page) {
+    return (
+      <div className="drafts-loading">
+        <Spinner animation="border" variant="primary" />
+        <p>Loading your drafts...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="drafts-container">
       <div className="drafts-header">
         <h2>Saved Drafts</h2>
-        {drafts.length === 0 && (
+        {drafts.length === 0 && !loading.page && (
           <Alert variant="info">
             You don't have any saved drafts yet.
           </Alert>
@@ -71,67 +143,100 @@ const DraftsPage = () => {
       </div>
 
       {drafts.length > 0 && (
-        <Table striped bordered hover responsive className="drafts-table">
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>Form Type</th>
-              <th>Last Saved</th>
-              <th>Progress</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {drafts.map((draft, index) => (
-              <tr key={draft.id}>
-                <td>{index + 1}</td>
-                <td>{getFormTitle(draft)}</td>
-                <td>{formatDate(draft.lastSaved)}</td>
-                <td>
-                  Step {draft.currentStep || 1} of{" "}
-                  {draft.formType === "Form CA" ? 3 : 4} {/* Adjust based on your form steps */}
-                </td>
-                <td>
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    onClick={() => handleEditDraft(draft.id)}
-                    className="me-2"
-                  >
-                    Continue
-                  </Button>
-                  <Button
-                    variant="danger"
-                    size="sm"
-                    onClick={() => handleDeleteDraft(draft)}
-                  >
-                    Delete
-                  </Button>
-                </td>
+        <>
+          <Table striped bordered hover responsive className="drafts-table">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Form Type</th>
+                <th>Last Saved</th>
+                <th>Progress</th>
+                <th>Actions</th>
               </tr>
-            ))}
-          </tbody>
-        </Table>
+            </thead>
+            <tbody>
+              {drafts.map((draft, index) => (
+                <tr key={draft.id}>
+                  <td>{index + 1}</td>
+                  <td>{getFormTitle(draft)}</td>
+                  <td>{formatDate(draft.lastSaved)}</td>
+                  <td>
+                    Step {draft.currentStep} of{" "}
+                    {draft.formType === "Form CA" ? 3 : 4}
+                  </td>
+                  <td className="actions-column">
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      onClick={() => handleEditDraft(draft.id)}
+                      className="me-2 action-btn"
+                    >
+                      Continue
+                    </Button>
+                    <Button
+                      variant="danger"
+                      size="sm"
+                      onClick={() => handleDeleteDraft(draft)}
+                      className="action-btn"
+                      disabled={loading.delete}
+                    >
+                      Delete
+                    </Button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+          <p className="draft-count">Showing {drafts.length} saved draft(s)</p>
+        </>
       )}
 
       {/* Delete Confirmation Modal */}
-      <Modal show={showDeleteModal} onHide={() => setShowDeleteModal(false)} centered>
+      <Modal 
+        show={showDeleteModal} 
+        onHide={() => setShowDeleteModal(false)} 
+        centered
+        backdrop="static"
+      >
         <Modal.Header closeButton>
           <Modal.Title>Confirm Delete</Modal.Title>
         </Modal.Header>
         <Modal.Body>
-          Are you sure you want to delete this draft? This action cannot be undone.
+          {draftToDelete && (
+            <>
+              <p>
+                Are you sure you want to delete this draft?
+              </p>
+              <div className="draft-delete-info">
+                <p><strong>Form Type:</strong> {draftToDelete.formType}</p>
+                <p><strong>Last Saved:</strong> {formatDate(draftToDelete.lastSaved)}</p>
+                <p><strong>Progress:</strong> Step {draftToDelete.currentStep}</p>
+              </div>
+              <p className="text-danger mt-2">
+                This action cannot be undone.
+              </p>
+            </>
+          )}
         </Modal.Body>
         <Modal.Footer>
-          <Button variant="secondary" onClick={() => setShowDeleteModal(false)}>
+          <Button 
+            variant="secondary" 
+            onClick={() => setShowDeleteModal(false)}
+            disabled={loading.delete}
+          >
             Cancel
           </Button>
           <Button
             variant="danger"
             onClick={confirmDelete}
-            disabled={loading}
+            disabled={loading.delete}
           >
-            {loading ? "Deleting..." : "Delete"}
+            {loading.delete ? (
+              <>
+                <Spinner animation="border" size="sm" className="me-2" />
+                Deleting...
+              </>
+            ) : "Delete"}
           </Button>
         </Modal.Footer>
       </Modal>
@@ -140,7 +245,6 @@ const DraftsPage = () => {
 };
 
 export default DraftsPage;
-
 .drafts-container {
   padding: 20px;
   max-width: 1200px;
@@ -149,24 +253,59 @@ export default DraftsPage;
 
 .drafts-header {
   margin-bottom: 30px;
+}
+
+.drafts-loading {
   display: flex;
   flex-direction: column;
-  gap: 15px;
+  align-items: center;
+  justify-content: center;
+  height: 200px;
+}
+
+.drafts-loading p {
+  margin-top: 15px;
 }
 
 .drafts-table {
   margin-top: 20px;
 }
 
-/* Responsive table */
+.draft-count {
+  text-align: right;
+  font-style: italic;
+  color: #666;
+  margin-top: 10px;
+}
+
+.actions-column {
+  white-space: nowrap;
+}
+
+.action-btn {
+  min-width: 80px;
+}
+
+.draft-delete-info {
+  background-color: #f8f9fa;
+  padding: 10px;
+  border-radius: 5px;
+  margin: 10px 0;
+}
+
+.draft-delete-info p {
+  margin-bottom: 5px;
+}
+
+/* Responsive styles */
 @media (max-width: 768px) {
   .drafts-table {
     font-size: 14px;
   }
   
-  .drafts-table .btn {
+  .action-btn {
+    padding: 5px 8px;
     font-size: 12px;
-    padding: 5px 10px;
+    min-width: 70px;
   }
 }
-<Route path="/drafts" element={<DraftsPage />} />
