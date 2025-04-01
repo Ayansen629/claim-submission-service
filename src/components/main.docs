@@ -2,51 +2,6 @@ import React, { createContext, useContext, useState, useEffect } from "react";
 import { toast } from "react-toastify";
 import { APP_MESSAGES } from "../../utils/constants.ts";
 
-// Static JSON data with file paths
-const staticFormData = {
-  step1: {
-    CreditorName: "AYAN",
-    totalClaimAmount: "87888",
-    debtDetails: "FOR TEST",
-    mutualCreditDetails: "332323",
-    identificationType: "Aadhar",
-    identificationNumber: "213456785436",
-    identificationDocument: {
-      path: "/uploads/identificationDocument.pdf", 
-    },
-  },
-  step2: {
-    securityInterestAmount: "323223",
-    guaranteeAmount: "232332",
-    guarantorName: "AYAN",
-    guarantorAddress: "KOLKATA",
-    creditorAddress: "KOLKATA",
-    creditorEmail: "ayan@gmail.com",
-    beneficiaryClaimAmount: "22222",
-    beneficiaryName: "ayan",
-    beneficiaryAddress: "kolkata",
-    corporateDebtorClaimAmount: "2112",
-    corporateDebtorSecurityAmount: "1221",
-    corporateDebtorGuaranteeAmount: "212121",
-    principalBorrowerName: "ayan",
-    principalBorrowerAddress: "kolkata",
-    accountNumber: "212121212121",
-    ifscCode: "BKID8377D",
-    branchName: "KOLKATA",
-    addressProof: {
-      path: "/uploads/addressProof.pdf", 
-    },
-  },
-  step3: {
-    signatoryName: "AYAN",
-    signatoryPosition: "FRIEND",
-    signatoryAddress: "KOLKATA",
-    signatoryDocument: {
-      path: "/uploads/signatoryDocument.pdf", 
-    },
-  },
-};
-
 // Create the Registration Context
 const RegistrationContext = createContext();
 
@@ -61,42 +16,68 @@ export const ApplicationContextProvider = ({ children }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
-  const [isDataLoaded, setIsDataLoaded] = useState(false); // Track if data is loaded
+  const [isDataLoaded, setIsDataLoaded] = useState(false);
 
   const getLocalStorageKey = (id) => `registrationData-${id}`;
 
   const loadDataFromLocalStorage = (id) => {
-    const savedData = localStorage.getItem(getLocalStorageKey(id));
-    if (savedData) {
-      setRegistrationData(JSON.parse(savedData));
-    } else {
-      // If no data exists in localStorage, initialize with static data
-      setRegistrationData(staticFormData);
+    try {
+      setLoading(true);
+      
+      // First check if this is a draft
+      if (id && id.startsWith('draft-')) {
+        const drafts = JSON.parse(localStorage.getItem('formDrafts') || '[]');
+        const draftData = drafts.find(draft => draft.id === id);
+        if (draftData) {
+          setRegistrationData(draftData);
+          setIsDataLoaded(true);
+          return;
+        }
+      }
+      
+      // Otherwise check regular saved data
+      const savedData = localStorage.getItem(getLocalStorageKey(id));
+      if (savedData) {
+        setRegistrationData(JSON.parse(savedData));
+      }
+      setIsDataLoaded(true);
+    } catch (err) {
+      toast.error(APP_MESSAGES.API_ERR, { position: "top-right" });
+      setError(err.message || "Error loading data");
+    } finally {
+      setLoading(false);
     }
-    setIsDataLoaded(true); // Mark data as loaded
   };
 
-  const saveDataToLocalStorage = (id) => {
-    localStorage.setItem(getLocalStorageKey(id), JSON.stringify(registrationData));
+  const saveDataToLocalStorage = (id, data) => {
+    localStorage.setItem(getLocalStorageKey(id), JSON.stringify(data));
   };
 
   const handleStepDataFetch = (stepId, id) => {
     try {
       setLoading(true);
+      
+      // For drafts, use the draft data directly
+      if (id && id.startsWith('draft-')) {
+        const drafts = JSON.parse(localStorage.getItem('formDrafts') || [];
+        const draftData = drafts.find(draft => draft.id === id);
+        if (draftData && draftData[stepId]) {
+          setRegistrationData(prev => ({
+            ...prev,
+            [stepId]: draftData[stepId]
+          }));
+          return;
+        }
+      }
+      
+      // For regular data
       const savedData = localStorage.getItem(getLocalStorageKey(id));
-      const registrationDataFromStorage = savedData ? JSON.parse(savedData) : {};
-
-      if (registrationDataFromStorage[stepId]) {
-        setRegistrationData((prevData) => ({
-          ...prevData,
-          [stepId]: registrationDataFromStorage[stepId],
-        }));
-      } else {
-        const stepData = staticFormData[stepId];
-        if (stepData) {
-          setRegistrationData((prevData) => ({
-            ...prevData,
-            [stepId]: stepData,
+      if (savedData) {
+        const parsedData = JSON.parse(savedData);
+        if (parsedData[stepId]) {
+          setRegistrationData(prev => ({
+            ...prev,
+            [stepId]: parsedData[stepId]
           }));
         }
       }
@@ -109,39 +90,49 @@ export const ApplicationContextProvider = ({ children }) => {
   };
 
   const updateRegistrationData = (stepId, updatedData, id) => {
-    setRegistrationData((prev) => ({
+    setRegistrationData(prev => ({
       ...prev,
-      [stepId]: updatedData,
+      [stepId]: updatedData
     }));
-    saveDataToLocalStorage(id);
+    
+    if (id) {
+      if (id.startsWith('draft-')) {
+        // Update draft data
+        const drafts = JSON.parse(localStorage.getItem('formDrafts') || [];
+        const draftIndex = drafts.findIndex(draft => draft.id === id);
+        
+        if (draftIndex >= 0) {
+          const updatedDraft = {
+            ...drafts[draftIndex],
+            [stepId]: updatedData,
+            lastSaved: new Date().toISOString()
+          };
+          
+          drafts[draftIndex] = updatedDraft;
+          localStorage.setItem('formDrafts', JSON.stringify(drafts));
+        }
+      } else {
+        // Update regular data
+        saveDataToLocalStorage(id, {
+          ...registrationData,
+          [stepId]: updatedData
+        });
+      }
+    }
   };
 
   const handleFileUpload = (stepId, fieldName, file, id) => {
     const filePath = URL.createObjectURL(file);
-    setRegistrationData((prev) => ({
-      ...prev,
-      [stepId]: {
-        ...prev[stepId],
-        [fieldName]: {
-          path: filePath,
-          file,
-        },
-      },
-    }));
-    saveDataToLocalStorage(id);
+    const updatedData = {
+      ...registrationData[stepId],
+      [fieldName]: {
+        path: filePath,
+        file
+      }
+    };
+    
+    updateRegistrationData(stepId, updatedData, id);
   };
-
-  // const saveDraft=async(draftData)=>{
-  //   try {
-  //     const existingDraft =JSON.parse(localStorage.getItem('draft') ||'[]') ;
-
-  //     const updatedDraft = [...existingDraft, draftData];
-  //     localStorage.setItem('draft', JSON.stringify(updatedDraft));
-  //     toast.success('Draft saved successfully!');
-  //   } catch (error) {
-  //     toast.error('Error saving draft: ' + error.message);
-  //   }
-  // }
 
   return (
     <RegistrationContext.Provider
@@ -156,8 +147,7 @@ export const ApplicationContextProvider = ({ children }) => {
         handleFileUpload,
         setRegistrationData,
         loadDataFromLocalStorage,
-      // saveDraft,
-        isDataLoaded, // Provide isDataLoaded to consumers
+        isDataLoaded,
       }}
     >
       {children}
@@ -166,7 +156,9 @@ export const ApplicationContextProvider = ({ children }) => {
 };
 
 
-// Stepper.js
+
+
+
 import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { toast } from "react-toastify";
@@ -174,30 +166,27 @@ import { Modal, Button, Form } from "react-bootstrap";
 import "./Stepper.css";
 import { useRegistration } from "../../context/ApplicationContext";
 import ReviewStep from "./ReviewStep";
-import { FormDataProvider } from "../../context/FormDataContext"; // Import the context
+import { FormDataProvider } from "../../context/FormDataContext";
 
 const deepEqual = (obj1, obj2) => {
   return JSON.stringify(obj1) === JSON.stringify(obj2);
 };
 
-const Stepper = ({ stepsConfig = [], formAllData }) => {
+const Stepper = ({ stepsConfig = [] }) => {
   const { id } = useParams();
   const isEditMode = !!id;
   const [currentStep, setCurrentStep] = useState(1);
   const [isConfirmed, setIsConfirmed] = useState(false);
   const [isComplete, setIsComplete] = useState(false);
-  const [isViewModalOpen, setIsViewModalOpen] = useState(false);
-  const [hasPreviewed, setHasPreviewed] = useState(false);
   const [formData, setFormData] = useState({});
   const [margins, setMargins] = useState({ marginLeft: 0, marginRight: 0 });
-  const stepRef = useRef([]);
-  const navigate = useNavigate();
-  const [currentSubmitHandler, setCurrentSubmitHandler] = useState(null);
   const [showModal, setShowModal] = useState(false);
   const [comments, setComments] = useState("");
   const [actionType, setActionType] = useState("");
-  const [flattenedData, setFlattenedData] = useState({});
   const [isSavingDraft, setIsSavingDraft] = useState(false);
+  const stepRef = useRef([]);
+  const navigate = useNavigate();
+  const [currentSubmitHandler, setCurrentSubmitHandler] = useState(null);
 
   const {
     registrationData,
@@ -205,42 +194,39 @@ const Stepper = ({ stepsConfig = [], formAllData }) => {
     updateRegistrationData,
     loadDataFromLocalStorage,
     isDataLoaded,
-
   } = useRegistration();
 
   const userFormData = JSON.parse(localStorage.getItem("userFormData"));
   const isCRPUser = userFormData?.userType === "CRP";
 
+  // Filter steps based on user type
   const filteredStepsConfig = useMemo(() => {
     if (isCRPUser) {
-      return stepsConfig.filter((step) => step.name !== "Review & Submit");
+      return stepsConfig.filter(step => step.name !== "Review & Submit");
     }
     return stepsConfig;
   }, [stepsConfig, isCRPUser]);
 
+  // Load data when component mounts or id changes
   useEffect(() => {
     if (id) {
       loadDataFromLocalStorage(id);
     }
   }, [id, loadDataFromLocalStorage]);
 
+  // Update form data when registration data changes
   useEffect(() => {
     if (isEditMode && registrationData && !deepEqual(formData, registrationData)) {
       setFormData(registrationData);
+      
+      // Set current step for drafts
+      if (id.startsWith('draft-') && registrationData.currentStep) {
+        setCurrentStep(registrationData.currentStep);
+      }
     }
-  }, [isEditMode, registrationData, formData]);
+  }, [isEditMode, registrationData, formData, id]);
 
-  useEffect(() => {
-    const savedIsConfirmed = localStorage.getItem("isConfirmed");
-    if (savedIsConfirmed) {
-      setIsConfirmed(JSON.parse(savedIsConfirmed));
-    }
-  }, []);
-
-  useEffect(() => {
-    localStorage.setItem("isConfirmed", JSON.stringify(isConfirmed));
-  }, [isConfirmed]);
-
+  // Handle step submit handlers
   useEffect(() => {
     const newSubmitHandler = filteredStepsConfig[currentStep - 1]?.submitHandler;
     if (newSubmitHandler && newSubmitHandler !== currentSubmitHandler) {
@@ -248,10 +234,7 @@ const Stepper = ({ stepsConfig = [], formAllData }) => {
     }
   }, [currentStep, filteredStepsConfig]);
 
-  const updateSubmitHandler = useCallback((submitHandler) => {
-    setCurrentSubmitHandler(() => submitHandler);
-  }, []);
-
+  // Calculate progress bar margins
   useEffect(() => {
     if (stepRef.current.length > 0) {
       const firstStep = stepRef.current[0]?.offsetWidth || 0;
@@ -303,9 +286,28 @@ const Stepper = ({ stepsConfig = [], formAllData }) => {
     if (currentStep === filteredStepsConfig.length) {
       setIsComplete(true);
       toast.success("Form submitted successfully");
+      
+      // Remove draft if this was a draft submission
+      if (id && id.startsWith('draft-')) {
+        const drafts = JSON.parse(localStorage.getItem('formDrafts') || '[]');
+        const updatedDrafts = drafts.filter(draft => draft.id !== id);
+        localStorage.setItem('formDrafts', JSON.stringify(updatedDrafts));
+      }
+      
       navigate("/dashboard");
     } else {
-      setCurrentStep((prevStep) => prevStep + 1);
+      setCurrentStep(prev => prev + 1);
+      
+      // Update current step in draft if this is a draft
+      if (id && id.startsWith('draft-')) {
+        const drafts = JSON.parse(localStorage.getItem('formDrafts') || '[]');
+        const draftIndex = drafts.findIndex(draft => draft.id === id);
+        
+        if (draftIndex >= 0) {
+          drafts[draftIndex].currentStep = currentStep + 1;
+          localStorage.setItem('formDrafts', JSON.stringify(drafts));
+        }
+      }
     }
   };
 
@@ -313,7 +315,7 @@ const Stepper = ({ stepsConfig = [], formAllData }) => {
     setIsSavingDraft(true);
     try {
       const currentStepData = currentSubmitHandler ? await currentSubmitHandler() : {};
-      const draftId=id || `draft-${Date.now()}-${Math.random()}.toString(36).substring(2, 9)}`;
+      const draftId = id || `draft-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
       
       const draftData = {
         ...formData,
@@ -325,22 +327,23 @@ const Stepper = ({ stepsConfig = [], formAllData }) => {
         status: "draft",
         lastSaved: new Date().toISOString(),
         currentStep,
-        formType:userFormData?.formType,
+        formType: userFormData?.formType,
         userType: userFormData?.userType,
       };
-      const existingDraft = JSON.parse(localStorage.getItem("formDrafts") || "[]");
- 
-     const updatedDrafts=[
-      ...existingDraft.filter((draft) => draft.id !== draftId), 
-      draftData
-     ]
-      localStorage.setItem("formDrafts", JSON.stringify(updatedDrafts));
-      
 
-      // await saveDraft(draftData);
-     
+      const existingDrafts = JSON.parse(localStorage.getItem("formDrafts") || "[]");
+      const updatedDrafts = [
+        ...existingDrafts.filter(draft => draft.id !== draftId), 
+        draftData
+      ];
+      
+      localStorage.setItem("formDrafts", JSON.stringify(updatedDrafts));
+      setFormData(draftData);
+      
       toast.success("Draft saved successfully");
-      navigate("/drafts"); 
+      if (!id) {
+        navigate(`/drafts/${draftId}`); // Navigate to the draft view
+      }
     } catch (error) {
       console.error("Error saving draft:", error);
       toast.error("Failed to save draft");
@@ -353,6 +356,7 @@ const Stepper = ({ stepsConfig = [], formAllData }) => {
     setActionType(action);
     setShowModal(true);
   };
+
   const handleModalClose = () => {
     setShowModal(false);
     setComments("");
@@ -363,10 +367,10 @@ const Stepper = ({ stepsConfig = [], formAllData }) => {
     toast.success(`${actionType} submitted successfully`);
     navigate("/dashboard");
   };
+
   const handlePrevious = () => {
-    setCurrentStep((prevStep) => Math.max(1, prevStep - 1));
+    setCurrentStep(prev => Math.max(1, prev - 1));
     setIsConfirmed(false);
-    localStorage.removeItem("isConfirmed");
   };
 
   const handleCancel = () => {
@@ -380,28 +384,18 @@ const Stepper = ({ stepsConfig = [], formAllData }) => {
   const ActiveComponent = filteredStepsConfig[currentStep - 1]?.Component;
   const shouldRenderReviewStep = currentStep === filteredStepsConfig.length && isDataLoaded;
 
-  const flattenFormData = (formData) => {
+  const flattenFormData = (data) => {
+    if (!data) return {};
+    
     return {
-      ...formData.step1,
-      ...formData.step2,
-      ...formData.step3,
+      ...(data.step1 || {}),
+      ...(data.step2 || {}),
+      ...(data.step3 || {}),
     };
   };
 
-//  console.log(formData, "formDataStepper");
- 
-
-  // useEffect(() => {
-  //   if (formData && Object.keys(formData).length > 0) {
-  //     // localStorage.setItem("formData", JSON.stringify(formData));
-  //     setFlattenedData(flattenFormData(formData));
-  //   }
-  // }, []);
-  // console.log(flattenedData, "flattenFormData");
-
-
   return (
-    <FormDataProvider formData={flattenFormData(formData)}> {/* Wrap with FormDataProvider */}
+    <FormDataProvider formData={flattenFormData(formData)}>
       <div className="stepper">
         {filteredStepsConfig.map((step, index) => (
           <div
@@ -439,13 +433,13 @@ const Stepper = ({ stepsConfig = [], formAllData }) => {
       {ActiveComponent && (
         <ActiveComponent
           formData={formData[`step${currentStep}`] || {}}
-          provideSubmitHandler={updateSubmitHandler}
+          provideSubmitHandler={setCurrentSubmitHandler}
           setFormData={setFormData}
         />
       )}
 
-      {shouldRenderReviewStep && Object.keys(flattenedData).length > 0 && !isCRPUser && (
-        <ReviewStep />
+      {shouldRenderReviewStep && !isCRPUser && (
+        <ReviewStep formData={flattenFormData(formData)} />
       )}
 
       {currentStep === filteredStepsConfig.length && !isCRPUser && (
@@ -475,7 +469,7 @@ const Stepper = ({ stepsConfig = [], formAllData }) => {
 
         {currentStep === filteredStepsConfig.length && isCRPUser ? (
           <>
-           <button
+            <button
               className="buttonplus sendback-button"
               onClick={() => handleActionClick("Sendback To Claimants")}
             >
@@ -487,27 +481,21 @@ const Stepper = ({ stepsConfig = [], formAllData }) => {
             >
               Accept as Contingent
             </button>
-
             <button
               className="buttonplus accept-button"
               onClick={() => handleActionClick("Accept")}
             >
               Accept
             </button>
-           
-            
             <button
               className="buttonplus reject-button"
               onClick={() => handleActionClick("Reject")}
             >
               Reject
             </button>
-           
           </>
-        ) : (
-          currentStep === filteredStepsConfig.length ? (
-            <div className="last-step-buttons">
-             
+        ) : currentStep === filteredStepsConfig.length ? (
+          <div className="last-step-buttons">
             <button
               className="buttonplus draft-button"
               onClick={handleSaveDraft}
@@ -515,26 +503,22 @@ const Stepper = ({ stepsConfig = [], formAllData }) => {
             >
               {isSavingDraft ? "Saving..." : "Save as Draft"}
             </button>
-
-<button
+            <button
               className="buttonplus next-button"
               onClick={handleNext}
               disabled={!isConfirmed || isComplete}
             >
               Submit
             </button>
-            
-            </div>
-           
-          ) : (
-            <button
-              className="buttonplus next-button"
-              onClick={handleNext}
-              disabled={isComplete}
-            >
-              Next
-            </button>
-          )
+          </div>
+        ) : (
+          <button
+            className="buttonplus next-button"
+            onClick={handleNext}
+            disabled={isComplete}
+          >
+            Next
+          </button>
         )}
       </div>
 
@@ -575,3 +559,98 @@ const Stepper = ({ stepsConfig = [], formAllData }) => {
 
 export default Stepper;
 
+
+
+
+import React, { useState, useEffect } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { Button, Card, Accordion } from 'react-bootstrap';
+
+const DraftView = () => {
+  const { id } = useParams();
+  const navigate = useNavigate();
+  const [draftData, setDraftData] = useState(null);
+
+  useEffect(() => {
+    const drafts = JSON.parse(localStorage.getItem('formDrafts') || '[]';
+    const draft = drafts.find(d => d.id === id);
+    if (draft) {
+      setDraftData(draft);
+    } else {
+      navigate('/drafts'); // Redirect if draft not found
+    }
+  }, [id, navigate]);
+
+  if (!draftData) {
+    return <div>Loading draft data...</div>;
+  }
+
+  const formatData = (data) => {
+    if (typeof data === 'object' && data !== null) {
+      if (data.path) {
+        return <a href={data.path} target="_blank" rel="noopener noreferrer">View Document</a>;
+      }
+      return Object.entries(data).map(([key, value]) => (
+        <div key={key}>
+          <strong>{key}:</strong> {formatData(value)}
+        </div>
+      ));
+    }
+    return data;
+  };
+
+  return (
+    <div className="container mt-4">
+      <div className="d-flex justify-content-between align-items-center mb-4">
+        <h2>Draft: {draftData.formType || 'Unknown Form'}</h2>
+        <div>
+          <Button variant="primary" onClick={() => navigate(`/form/${id}`)}>
+            Edit Draft
+          </Button>
+          <Button variant="secondary" onClick={() => navigate('/drafts')} className="ms-2">
+            Back to Drafts
+          </Button>
+        </div>
+      </div>
+
+      <Card className="mb-3">
+        <Card.Header>
+          <h5>Draft Information</h5>
+        </Card.Header>
+        <Card.Body>
+          <p><strong>Status:</strong> {draftData.status}</p>
+          <p><strong>Last Saved:</strong> {new Date(draftData.lastSaved).toLocaleString()}</p>
+          <p><strong>Current Step:</strong> {draftData.currentStep || 'Not specified'}</p>
+        </Card.Body>
+      </Card>
+
+      <Accordion defaultActiveKey={Object.keys(draftData).filter(k => k.startsWith('step'))}>
+        {Object.entries(draftData)
+          .filter(([key]) => key.startsWith('step'))
+          .map(([step, data]) => (
+            <Accordion.Item key={step} eventKey={step}>
+              <Accordion.Header>{step.toUpperCase()}</Accordion.Header>
+              <Accordion.Body>
+                {Object.entries(data).map(([field, value]) => (
+                  <div key={field} className="mb-3">
+                    <h6>{field}</h6>
+                    <div className="ms-3">
+                      {formatData(value)}
+                    </div>
+                  </div>
+                ))}
+              </Accordion.Body>
+            </Accordion.Item>
+          ))}
+      </Accordion>
+    </div>
+  );
+};
+
+export default DraftView;
+
+
+
+// In your main router configuration
+<Route path="/drafts/:id" element={<DraftView />} />
+<Route path="/form/:id" element={<YourFormComponent />} />
