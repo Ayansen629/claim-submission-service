@@ -4,7 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { toast } from "react-toastify";
 import { UserContext } from "../../components/context/UserContext.js";
 import "./Login.css";
-// import { URLS_ENDPOINT } from "../../utils/urlsConstants.ts";
+import axios from "axios";
 
 const LoginPage = () => {
   const {
@@ -13,6 +13,7 @@ const LoginPage = () => {
     watch,
     formState: { errors },
     reset,
+    setValue,
   } = useForm();
   const navigate = useNavigate();
   const { setUserData } = useContext(UserContext);
@@ -21,6 +22,9 @@ const LoginPage = () => {
   const [otp, setOtp] = useState("");
   const [loading, setLoading] = useState(false);
   const [selectedRadio, setSelectedRadio] = useState("corporateDebtor");
+  const [claimantTypes, setClaimantTypes] = useState([]);
+  const [claimantCategories, setClaimantCategories] = useState([]);
+  const [apiLoading, setApiLoading] = useState(false);
 
   const username = watch("username");
   const email = watch("email");
@@ -45,6 +49,61 @@ const LoginPage = () => {
     setOtpSent(false);
     setOtp("");
   }, [selectedRadio, reset]);
+
+  // Fetch initial claimant types when component mounts
+  useEffect(() => {
+    if (selectedRadio === "claimants") {
+      fetchClaimantTypes();
+    }
+  }, [selectedRadio]);
+
+  // Fetch claimant categories when userType changes
+  useEffect(() => {
+    if (userType && selectedRadio === "claimants") {
+      const selectedType = claimantTypes.find(type => type.claimantName === userType);
+      if (selectedType) {
+        fetchClaimantCategories(selectedType.claimantCode);
+      } else {
+        setClaimantCategories([]);
+        setValue("financialCreditorType", "");
+        setValue("operationalCreditorType", "");
+      }
+    }
+  }, [userType, claimantTypes]);
+
+  const fetchClaimantTypes = async () => {
+    try {
+      setApiLoading(true);
+      const response = await axios.get("/claimantsMasterData");
+      if (response.data.status.code === "200") {
+        setClaimantTypes(response.data.claimantMasterData.claimantTypes || []);
+      } else {
+        toast.error("Failed to fetch claimant types");
+      }
+    } catch (error) {
+      console.error("Error fetching claimant types:", error);
+      toast.error("Error fetching claimant types");
+    } finally {
+      setApiLoading(false);
+    }
+  };
+
+  const fetchClaimantCategories = async (claimantCode) => {
+    try {
+      setApiLoading(true);
+      const response = await axios.get(`/claimantsMasterData?claimantCode=${claimantCode}`);
+      if (response.data.status.code === "200") {
+        setClaimantCategories(response.data.claimantMasterData.claimantCategories || []);
+      } else {
+        toast.error("Failed to fetch claimant categories");
+      }
+    } catch (error) {
+      console.error("Error fetching claimant categories:", error);
+      toast.error("Error fetching claimant categories");
+    } finally {
+      setApiLoading(false);
+    }
+  };
 
   const isValidUsername = (username) => /^[6-9]\d{9}$/.test(username);
   const isValidEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
@@ -164,26 +223,6 @@ const LoginPage = () => {
     { value: "Eicher Polaris Private Limited", label: "Eicher Polaris Private Limited" },
   ];
 
-  const claimantsOptions = [
-    { value: "Financial Creditors", label: "Financial Creditors" },
-    { value: "Operational Creditors", label: "Operational Creditors" },
-    { value: "Employees and Workmen", label: "Employees and Workmen" },
-    { value: "Employees and Workmen – Through Authorised Representative", label: "Employees and Workmen – Through Authorised Representative" },
-    { value: "Other Creditors (other than financial and operational creditors)", label: "Other Creditors (other than financial and operational creditors)" },
-  ];
-
-  const financialCreditorOptions = [
-    { value: "Secured Financial Creditors (Banks/ARCs/NBFCs/FIs)", label: "Secured Financial Creditors (Banks/ARCs/NBFCs/FIs)" },
-    { value: "Unsecured Financial Creditors (Banks/ARCs/NBFCs/FIs)", label: "Unsecured Financial Creditors (Banks/ARCs/NBFCs/FIs)" },
-    { value: "Unsecured Financial Creditors in Class of Creditors (Homebuyers)", label: "Unsecured Financial Creditors in Class of Creditors (Homebuyers)" },
-    { value: "Unsecured Financial Creditors – (Other than Banks / ARCs / NBFCs)", label: "Unsecured Financial Creditors – (Other than Banks / ARCs / NBFCs)" },
-  ];
-
-  const operationalCreditorOptions = [
-    { value: "Operational Creditors – (Other than Govt Authorities)", label: "Operational Creditors – (Other than Govt Authorities)" },
-    { value: "Operational Creditors – Govt Authorities", label: "Operational Creditors – Govt Authorities" },
-  ];
-
   return (
     <div className="login-page">
       <div className="login-container">
@@ -266,11 +305,18 @@ const LoginPage = () => {
               <div className="dropdown-container">
                 <select
                   className="dropdown-select"
-                  {...register("userType", { required: "Claimant type is required" })}
+                  {...register("userType", { 
+                    required: "Claimant type is required",
+                    onChange: (e) => {
+                      setValue("financialCreditorType", "");
+                      setValue("operationalCreditorType", "");
+                    }
+                  })}
+                  disabled={apiLoading}
                 >
                   <option value="">Claimant Type</option>
-                  {claimantsOptions.map(opt => (
-                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  {claimantTypes.map(opt => (
+                    <option key={opt.uuid} value={opt.claimantName}>{opt.claimantName}</option>
                   ))}
                 </select>
                 {errors.userType && <p className="error-message">{errors.userType.message}</p>}
@@ -282,10 +328,11 @@ const LoginPage = () => {
                   <select
                     className="dropdown-select"
                     {...register("financialCreditorType", { required: "Financial creditor type is required" })}
+                    disabled={apiLoading}
                   >
                     <option value="">Financial Creditor Type</option>
-                    {financialCreditorOptions.map(opt => (
-                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    {claimantCategories.map(opt => (
+                      <option key={opt.uuid} value={opt.claimantCategoryName}>{opt.claimantCategoryName}</option>
                     ))}
                   </select>
                   {errors.financialCreditorType && <p className="error-message">{errors.financialCreditorType.message}</p>}
@@ -298,10 +345,11 @@ const LoginPage = () => {
                   <select
                     className="dropdown-select"
                     {...register("operationalCreditorType", { required: "Operational creditor type is required" })}
+                    disabled={apiLoading}
                   >
                     <option value="">Operational Creditor Type</option>
-                    {operationalCreditorOptions.map(opt => (
-                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    {claimantCategories.map(opt => (
+                      <option key={opt.uuid} value={opt.claimantCategoryName}>{opt.claimantCategoryName}</option>
                     ))}
                   </select>
                   {errors.operationalCreditorType && <p className="error-message">{errors.operationalCreditorType.message}</p>}
@@ -314,7 +362,7 @@ const LoginPage = () => {
                   type="button"
                   className="send-otp-btn"
                   onClick={handleSendOTP}
-                  disabled={!isClaimantsFormValid() || loading}
+                  disabled={!isClaimantsFormValid() || loading || apiLoading}
                 >
                   {loading ? "Sending..." : "Send OTP"}
                 </button>
@@ -346,7 +394,7 @@ const LoginPage = () => {
               <button
                 type="submit"
                 className="login-btn"
-                disabled={!otpSent || !otp || loading || !watch("termsAccepted")}
+                disabled={!otpSent || !otp || loading || !watch("termsAccepted") || apiLoading}
               >
                 {loading ? "Verifying..." : "Verify OTP & Login"}
               </button>
@@ -424,117 +472,3 @@ const LoginPage = () => {
 };
 
 export default LoginPage;
-PLEASE ADD THIS API WHEN LOGINPAGE LOAD claimantsMasterData CALL
-THAN IN DROPDOWN PLEASE SHOW THIS DETAILS
-{
-  "status": {
-    "code": "200",
-    "messages": "Data Received Succssfully"
-  },
-  "claimantMasterData": {
-    "claimantTypes": [
-      {
-        "uuid": "1001",
-        "claimantName": "Financial Creditors",
-        "claimantCode": "1001"
-      },
-      {
-        "uuid": "1002",
-        "claimantName": "Operational Creditors",
-        "claimantCode": "1002"
-      },
-      {
-        "uuid": "1003",
-        "claimantName": "Employees and Workmen",
-        "claimantCode": "1003"
-      },
-      {
-        "uuid": "1004",
-        "claimantName": "Employees and Workmen – Through Authorised Representative",
-        "claimantCode": "1004"
-      },
-      {
-        "uuid": "1005",
-        "claimantName": "Other Creditors (Other than financial and operational creditors)",
-        "claimantCode": "1005"
-      }
-    ],
-    "claimantCategories": null,
-    "cirpFormDetail": null
-  }
-}
-in clamant type show claimantName 
-depend on this api when any claimantName select than please call 
-
-when select any dropdown than again 
-/claimantsMasterData?claimantCode=1001   this api call
-{
-  "status": {
-    "code": "200",
-    "messages": "Data Received Succssfully"
-  },
-  "claimantMasterData": {
-    "claimantTypes": [
-      {
-        "uuid": "1001",
-        "claimantName": "Financial Creditors",
-        "claimantCode": "1001"
-      },
-      {
-        "uuid": "1002",
-        "claimantName": "Operational Creditors",
-        "claimantCode": "1002"
-      },
-      {
-        "uuid": "1003",
-        "claimantName": "Employees and Workmen",
-        "claimantCode": "1003"
-      },
-      {
-        "uuid": "1004",
-        "claimantName": "Employees and Workmen – Through Authorised Representative",
-        "claimantCode": "1004"
-      },
-      {
-        "uuid": "1005",
-        "claimantName": "Other Creditors (Other than financial and operational creditors)",
-        "claimantCode": "1005"
-      }
-    ],
-    "claimantCategories": [
-      {
-        "uuid": "20001",
-        "claimantCategoryName": "Secured Financial Creditors (Banks/ARCs/NBFCs/FIs)",
-        "claimantCategoryCode": "20001",
-        "isActive": true,
-        "cirpFormCode": "40002"
-      },
-      {
-        "uuid": "20002",
-        "claimantCategoryName": "Unsecured Financial Creditors (Banks/ARCs/NBFCs/FIs)",
-        "claimantCategoryCode": "20002",
-        "isActive": true,
-        "cirpFormCode": "40002"
-      },
-      {
-        "uuid": "20003",
-        "claimantCategoryName": "Unsecured Financial Creditors in Class of Creditors (Homebuyers)",
-        "claimantCategoryCode": "20003",
-        "isActive": true,
-        "cirpFormCode": "40007"
-      },
-      {
-        "uuid": "20004",
-        "claimantCategoryName": "Unsecured Financial Creditors – (Other than Banks / ARCs / NBFCs)",
-        "claimantCategoryCode": "20004",
-        "isActive": true,
-        "cirpFormCode": "40002"
-      }
-    ],
-    "cirpFormDetail": null
-  }
-}
-than this list call
-than show this details claimantCategoryName
-please write a code correctly & fuctionality with api call
-
