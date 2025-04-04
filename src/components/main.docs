@@ -1,167 +1,622 @@
-import React, { useState, useEffect, useCallback } from "react";
-import { useForm, FormProvider } from "react-hook-form";
-import DynamicField from "./formCommon/DynamicField";
-import Collapsible from "./formCommon/Collapsible";
-import Tooltip from "@mui/material/Tooltip"; 
-import "./StepFirst.css";
+// Stepper.js
+import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { useNavigate, useParams } from "react-router-dom";
+import { toast } from "react-toastify";
+import { Modal, Button, Form } from "react-bootstrap";
+import "./Stepper.css";
+import { useRegistration } from "../../context/ApplicationContext";
+import ReviewStep from "./ReviewStep";
+import { FormDataProvider } from "../../context/FormDataContext"; // Import the context
 
-const StepFirst = ({ provideSubmitHandler, formData }) => {
-  const methods = useForm();
-  const { register, handleSubmit, formState: { errors }, trigger, clearErrors, setValue, control, getValues, watch } = methods;
+const deepEqual = (obj1, obj2) => {
+  return JSON.stringify(obj1) === JSON.stringify(obj2);
+};
 
-  const claimantDetailsSchema = [
-    { 
-      name: "CreditorName", 
-      label: <>Creditor Name <span className="required-asterisk">*</span></>, 
-      type: "text", 
-      rules: { required: "Creditor Name is required" },
-      placeholder: "Enter Creditor Name"
-    },
-    { 
-      name: "totalClaimAmount", 
-      label: <>Total Claim Amount <span className="required-asterisk">*</span></>, 
-      type: "number", 
-      rules: { required: "Total Claim Amount is required", min: { value: 0, message: "Value must be greater than or equal to 0" } },
-      placeholder: "Enter Total Claim Amount"
-    },
-    { 
-      name: "debtDetails", 
-      label: <>Debt Incurred Details <span className="required-asterisk">*</span></>, 
-      type: "textarea", 
-      rules: { required: "Debt Details are required" },
-      tooltip: "Details of how and when debt incurred",
-      placeholder: "Enter Debt Incurred Details"
-    },
-    { 
-      name: "mutualCreditDetails", 
-      label: <>Mutual Credit/Debts Details <span className="required-asterisk">*</span></>, 
-      type: "textarea", 
-      rules: { required: "Mutual Credit Details are required" },
-      tooltip: "Details of any mutual credit, mutual debts, or other mutual dealings between the corporate debtor and the creditor which may be set-off against the claim",
-      placeholder: "Enter Mutual Credit/Debts Details"
-    },
-    {
-      name: "identificationType",
-      label: <>Identification Type <span className="required-asterisk">*</span></>,
-      type: "select",
-      options: [
-        { value: "", label: "Select Identification Type", disabled: true },
-        { value: "Aadhar", label: "Aadhar" },
-        { value: "PAN", label: "PAN" },
-        { value: "Passport", label: "Passport" },
-      ],
-      rules: { required: "Identification type is required" },
-      tooltip: "Select the type of identification document.",
-    },
-    {
-      name: "identificationNumber",
-      label: <>Identification Number <span className="required-asterisk">*</span></>,
-      type: "text",
-      rules: { required: "Identification number is required" },
-      tooltip: "You can enter Aadhar, PAN, or Passport number.",
-      placeholder: "Enter Identification Number"
-    },
-    {
-      name: "identificationDocument",
-      label: <>Identification Document <span className="required-asterisk">*</span></>,
-      type: "file",
-      rules: { required: "Identification document is required" },
-      tooltip: "Upload a document as proof of identification (e.g., Aadhar, PAN, or Passport).",
-    },
-  ];
+const Stepper = ({ stepsConfig = [], formAllData }) => {
+  const { id } = useParams();
+  const isEditMode = !!id;
+  const [currentStep, setCurrentStep] = useState(1);
+  const [isConfirmed, setIsConfirmed] = useState(false);
+  const [isComplete, setIsComplete] = useState(false);
+  const [isViewModalOpen, setIsViewModalOpen] = useState(false);
+  const [hasPreviewed, setHasPreviewed] = useState(false);
+  const [formData, setFormData] = useState({});
+  const [margins, setMargins] = useState({ marginLeft: 0, marginRight: 0 });
+  const stepRef = useRef([]);
+  const navigate = useNavigate();
+  const [currentSubmitHandler, setCurrentSubmitHandler] = useState(null);
+  const [showModal, setShowModal] = useState(false);
+  const [comments, setComments] = useState("");
+  const [actionType, setActionType] = useState("");
+  const [flattenedData, setFlattenedData] = useState({});
+  const [isSavingDraft, setIsSavingDraft] = useState(false);
 
-  const debtorDetailsSchema = [
-    {
-      name: "debtorName",
-      label: <>Debtor Name <span className="required-asterisk">*</span></>,
-      type: "text",
-      rules: { required: "Debtor Name is required" },
-      placeholder: "Enter Debtor Name",
-      tooltip: "Name of the corporate debtor against whom the claim is being filed"
+  const {
+    registrationData,
+    handleStepDataFetch,
+    updateRegistrationData,
+    loadDataFromLocalStorage,
+    isDataLoaded,
+
+  } = useRegistration();
+
+  const userFormData = JSON.parse(localStorage.getItem("userFormData"));
+  const isCRPUser = userFormData?.userType === "CRP";
+
+  const filteredStepsConfig = useMemo(() => {
+    if (isCRPUser) {
+      return stepsConfig.filter((step) => step.name !== "Review & Submit");
     }
-  ];
-
-  const onSubmit = useCallback(async () => {
-    // Trigger validation for all fields
-    const isValid = await trigger();
-  
-    // Check if the Identification Document is uploaded
-    const identificationDocument = getValues("identificationDocument");
-  
-    if (!isValid || !identificationDocument) {
-      console.error("Validation failed or Identification Document not uploaded");
-      return false;
-    }
-  
-    return getValues(); // Return form values if validation passes
-  }, [trigger, getValues]);
+    return stepsConfig;
+  }, [stepsConfig, isCRPUser]);
 
   useEffect(() => {
-    if (formData) {
-      Object.keys(formData).forEach((key) => {
-        setValue(key, formData[key]);
+    if (id) {
+      loadDataFromLocalStorage(id);
+    }
+  }, [id, loadDataFromLocalStorage]);
+
+  useEffect(() => {
+    if (isEditMode && registrationData && !deepEqual(formData, registrationData)) {
+      setFormData(registrationData);
+    }
+  }, [isEditMode, registrationData, formData]);
+
+  useEffect(() => {
+    const savedIsConfirmed = localStorage.getItem("isConfirmed");
+    if (savedIsConfirmed) {
+      setIsConfirmed(JSON.parse(savedIsConfirmed));
+    }
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem("isConfirmed", JSON.stringify(isConfirmed));
+  }, [isConfirmed]);
+
+  useEffect(() => {
+    const newSubmitHandler = filteredStepsConfig[currentStep - 1]?.submitHandler;
+    if (newSubmitHandler && newSubmitHandler !== currentSubmitHandler) {
+      setCurrentSubmitHandler(() => newSubmitHandler);
+    }
+  }, [currentStep, filteredStepsConfig]);
+
+  const updateSubmitHandler = useCallback((submitHandler) => {
+    setCurrentSubmitHandler(() => submitHandler);
+  }, []);
+
+  useEffect(() => {
+    if (stepRef.current.length > 0) {
+      const firstStep = stepRef.current[0]?.offsetWidth || 0;
+      const lastStep = stepRef.current[filteredStepsConfig.length - 1]?.offsetWidth || 0;
+      setMargins({
+        marginLeft: firstStep / 2,
+        marginRight: lastStep / 2,
       });
     }
-  }, [formData, setValue]);
+  }, [filteredStepsConfig.length]);
 
-  useEffect(() => {
-    if (provideSubmitHandler) {
-      provideSubmitHandler(onSubmit);
+  const validateStepData = (step, data) => {
+    const requiredFields = filteredStepsConfig[step - 1]?.requiredFields || [];
+    for (let field of requiredFields) {
+      if (!data[field]) {
+        toast.error(`${field} is required.`);
+        return false;
+      }
     }
-  }, [provideSubmitHandler, onSubmit]);
+    return true;
+  };
 
-  const identificationType = watch("identificationType");
-
-  useEffect(() => {
-    if (identificationType) {
-      trigger("identificationType");
+  const handleNext = async () => {
+    if (!currentSubmitHandler) {
+      console.error("No submit handler available.");
+      return;
     }
-  }, [identificationType, trigger]);
+
+    const currentStepData = await currentSubmitHandler();
+    if (!currentStepData) {
+      console.error("Form validation failed.");
+      return;
+    }
+
+    if (!validateStepData(currentStep, currentStepData)) {
+      return;
+    }
+
+    const updatedFormData = {
+      ...formData,
+      [`step${currentStep}`]: { ...formData[`step${currentStep}`], ...currentStepData },
+    };
+
+    if (!deepEqual(updatedFormData, formData)) {
+      setFormData(updatedFormData);
+      updateRegistrationData(`step${currentStep}`, updatedFormData[`step${currentStep}`], id);
+    }
+
+    if (currentStep === filteredStepsConfig.length) {
+      setIsComplete(true);
+      toast.success("Form submitted successfully");
+      navigate("/dashboard");
+    } else {
+      setCurrentStep((prevStep) => prevStep + 1);
+    }
+  };
+
+  const handleSaveDraft = async () => {
+    setIsSavingDraft(true);
+    try {
+      const currentStepData = currentSubmitHandler ? await currentSubmitHandler() : {};
+      const draftId=id || `draft-${Date.now()}-${Math.random()}.toString(36).substring(2, 9)}`;
+      
+      const draftData = {
+        ...formData,
+        [`step${currentStep}`]: { 
+          ...formData[`step${currentStep}`], 
+          ...currentStepData 
+        },
+        id: draftId,
+        status: "draft",
+        lastSaved: new Date().toISOString(),
+        currentStep,
+        formType:userFormData?.formType,
+        userType: userFormData?.userType,
+      };
+      const existingDraft = JSON.parse(localStorage.getItem("formDrafts") || "[]");
+ 
+     const updatedDrafts=[
+      ...existingDraft.filter((draft) => draft.id !== draftId), 
+      draftData
+     ]
+      localStorage.setItem("formDrafts", JSON.stringify(updatedDrafts));
+      
+
+      // await saveDraft(draftData);
+     
+      toast.success("Draft saved successfully");
+      navigate("/drafts"); 
+    } catch (error) {
+      console.error("Error saving draft:", error);
+      toast.error("Failed to save draft");
+    } finally {
+      setIsSavingDraft(false);
+    }
+  };
+
+  const handleActionClick = (action) => {
+    setActionType(action);
+    setShowModal(true);
+  };
+  const handleModalClose = () => {
+    setShowModal(false);
+    setComments("");
+  };
+
+  const handleActionSubmit = () => {
+    console.log(`Action: ${actionType}, Comments: ${comments}`);
+    toast.success(`${actionType} submitted successfully`);
+    navigate("/dashboard");
+  };
+  const handlePrevious = () => {
+    setCurrentStep((prevStep) => Math.max(1, prevStep - 1));
+    setIsConfirmed(false);
+    localStorage.removeItem("isConfirmed");
+  };
+
+  const handleCancel = () => {
+    navigate("/dashboard");
+  };
+
+  const calculateProgressBarWidth = () => {
+    return ((currentStep - 1) / (filteredStepsConfig.length - 1)) * 100;
+  };
+
+  const ActiveComponent = filteredStepsConfig[currentStep - 1]?.Component;
+  const shouldRenderReviewStep = currentStep === filteredStepsConfig.length && isDataLoaded;
+
+  const flattenFormData = (formData) => {
+    return {
+      ...formData.step1,
+      ...formData.step2,
+      ...formData.step3,
+    };
+  };
+
+//  console.log(formData, "formDataStepper");
+ 
+
+  // useEffect(() => {
+  //   if (formData && Object.keys(formData).length > 0) {
+  //     // localStorage.setItem("formData", JSON.stringify(formData));
+  //     setFlattenedData(flattenFormData(formData));
+  //   }
+  // }, []);
+  // console.log(flattenedData, "flattenFormData");
+
 
   return (
-    <FormProvider {...methods}>
-      <form className="form-stepper">
-        <div className="mb-4 bg-light">
-          <Collapsible title="Creditor Basic Details">
-            <div className="flex-container">
-              {claimantDetailsSchema.map((fieldConfig) => (
-                <DynamicField
-                  key={fieldConfig.name}
-                  fieldConfig={fieldConfig}
-                  control={control}
-                  register={register}
-                  errors={errors}
-                  setValue={setValue}
-                  trigger={trigger}
-                  getValues={getValues}
-                />
-              ))}
+    <FormDataProvider formData={flattenFormData(formData)}> {/* Wrap with FormDataProvider */}
+      <div className="stepper">
+        {filteredStepsConfig.map((step, index) => (
+          <div
+            key={step.name}
+            ref={(el) => (stepRef.current[index] = el)}
+            className={`step ${
+              currentStep > index + 1 || isComplete ? "complete" : ""
+            } ${currentStep === index + 1 ? "active" : ""}`}
+          >
+            <div className="step-number">
+              {currentStep > index + 1 || isComplete ? (
+                <span>✓</span>
+              ) : (
+                index + 1
+              )}
             </div>
-          </Collapsible>
-        </div>
+            <div className="step-name">{step.name}</div>
+          </div>
+        ))}
 
-        {/* New Debtor Details Collapsible Section */}
-        <div className="mb-4 bg-light">
-          <Collapsible title="Debtor Details">
-            <div className="flex-container">
-              {debtorDetailsSchema.map((fieldConfig) => (
-                <DynamicField
-                  key={fieldConfig.name}
-                  fieldConfig={fieldConfig}
-                  control={control}
-                  register={register}
-                  errors={errors}
-                  setValue={setValue}
-                  trigger={trigger}
-                  getValues={getValues}
-                />
-              ))}
-            </div>
-          </Collapsible>
+        <div
+          className="progress-bar"
+          style={{
+            marginLeft: margins.marginLeft,
+            marginRight: margins.marginRight,
+          }}
+        >
+          <div
+            className="progress"
+            style={{ width: `${calculateProgressBarWidth()}%` }}
+          ></div>
         </div>
-      </form>
-    </FormProvider>
+      </div>
+
+      {ActiveComponent && (
+        <ActiveComponent
+          formData={formData[`step${currentStep}`] || {}}
+          provideSubmitHandler={updateSubmitHandler}
+          setFormData={setFormData}
+        />
+      )}
+
+      {shouldRenderReviewStep && Object.keys(flattenedData).length > 0 && !isCRPUser && (
+        <ReviewStep />
+      )}
+
+      {currentStep === filteredStepsConfig.length && !isCRPUser && (
+        <div className="confirmation-container">
+          <Form.Group controlId="formConfirmation" className="mt-3 confirmation-checkbox">
+            <Form.Check
+              type="checkbox"
+              label="I confirm that the information provided is correct."
+              checked={isConfirmed}
+              onChange={(e) => setIsConfirmed(e.target.checked)}
+            />
+          </Form.Group>
+        </div>
+      )}
+
+      <div className="stepper-buttons">
+        {currentStep > 1 && (
+          <button className="buttonplus previous-button" onClick={handlePrevious}>
+            Previous
+          </button>
+          
+        )}
+        {currentStep === 1 && (
+          <button className="buttonplus cancel-button" onClick={handleCancel}>
+            Cancel
+          </button>
+        )}
+
+        {currentStep === filteredStepsConfig.length && isCRPUser ? (
+          <>
+           <button
+              className="buttonplus sendback-button"
+              onClick={() => handleActionClick("Sendback To Claimants")}
+            >
+              Sendback To Claimants
+            </button>
+            <button
+              className="buttonplus accept-contingent-button"
+              onClick={() => handleActionClick("Accept as Contingent")}
+            >
+              Accept as Contingent
+            </button>
+
+            <button
+              className="buttonplus accept-button"
+              onClick={() => handleActionClick("Accept")}
+            >
+              Accept
+            </button>
+           
+            
+            <button
+              className="buttonplus reject-button"
+              onClick={() => handleActionClick("Reject")}
+            >
+              Reject
+            </button>
+           
+          </>
+        ) : (
+          currentStep === filteredStepsConfig.length ? (
+            <div className="last-step-buttons">
+             
+            <button
+              className="buttonplus draft-button"
+              onClick={handleSaveDraft}
+              disabled={isSavingDraft}
+            >
+              {isSavingDraft ? "Saving..." : "Save as Draft"}
+            </button>
+
+<button
+              className="buttonplus next-button"
+              onClick={handleNext}
+              disabled={!isConfirmed || isComplete}
+            >
+              Submit
+            </button>
+            
+            </div>
+           
+          ) : (
+            <button
+              className="buttonplus next-button"
+              onClick={handleNext}
+              disabled={isComplete}
+            >
+              Next
+            </button>
+          )
+        )}
+      </div>
+
+      <Modal show={showModal} onHide={handleModalClose} centered>
+        <Modal.Header closeButton>
+          <Modal.Title>{actionType} Form</Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          <Form>
+            <Form.Group controlId="comments">
+              <Form.Label>Comments</Form.Label>
+              <Form.Control
+                as="textarea"
+                rows={3}
+                value={comments}
+                onChange={(e) => setComments(e.target.value)}
+                placeholder="Enter your comments..."
+              />
+            </Form.Group>
+          </Form>
+        </Modal.Body>
+        <Modal.Footer>
+          <Button className="modal-close-button" onClick={handleModalClose}>
+            Close
+          </Button>
+          <Button
+            className="modal-submit-button"
+            onClick={handleActionSubmit}
+            disabled={!comments.trim()}
+          >
+            Submit
+          </Button>
+        </Modal.Footer>
+      </Modal>
+    </FormDataProvider>
   );
 };
 
-export default StepFirst;
+export default Stepper;
+.stepper {
+  position: relative;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  width: 100%;
+}
+
+.form-stepper {
+  width: 100%;
+}
+
+.step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.step-number {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background-color: #ccc;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin-bottom: 5px;
+  z-index: 2;
+}
+
+.step-name {
+  font-size: 14px;
+}
+
+.active .step-number {
+  background-color: #269ccc;
+  color: #fff;
+}
+
+.complete .step-number {
+  background-color: #7fab0f;
+  color: #fff;
+}
+
+.progress-bar {
+  position: absolute;
+  top: 25%;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background-color: #ccc;
+  margin: 0 auto;
+}
+
+.progress {
+  height: 100%;
+  background-color: #28a745 !important;
+  transition: width 0.2s ease;
+}
+
+
+
+
+
+.next-button {
+  margin-left: auto; 
+}
+.stepper-buttons {
+  display: flex;
+  justify-content: space-between; 
+  /* align-items: center;  */
+  width: 100%; 
+  margin-top: 20px; 
+  gap: 10px; 
+}
+
+.buttonplus {
+  background-color: #269ccc;
+  color: white;
+  padding: 10px 20px;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 16px;
+  transition: background-color 0.3s ease; 
+}
+
+.buttonplus:disabled {
+  background-color: #ccc;
+  cursor: not-allowed;
+}
+
+.buttonplus:hover:not(:disabled) {
+  background-color: #1f7a9c; 
+}
+
+.previous-button {
+  margin-right: auto; 
+}
+
+
+
+.accept-button {
+  background-color: #7fab0f; 
+}
+
+.reject-button {
+  background-color: #dc3545; 
+}
+
+.sendback-button {
+  background-color: #ffc107; 
+}
+
+
+.accept-button:hover:not(:disabled) {
+  background-color: #6c8d0d; 
+}
+
+.reject-button:hover:not(:disabled) {
+  background-color: #bb2d3b; 
+}
+
+.sendback-button:hover:not(:disabled) {
+  background-color: #e0a800; 
+}
+
+/* Modal Submit Button */
+.modal-submit-button {
+  background-color: #269ccc; 
+  color: white;
+  padding: 10px 20px;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 16px;
+  transition: background-color 0.3s ease; 
+}
+
+.modal-submit-button:disabled {
+  background-color: #ccc;
+  cursor: not-allowed;
+}
+
+.modal-submit-button:hover:not(:disabled) {
+  background-color: #1f7a9c; 
+}
+
+/* Modal Close Button */
+.modal-close-button {
+  background-color: #6c757d;
+  color: white;
+  padding: 10px 20px;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 16px;
+  transition: background-color 0.3s ease; 
+}
+
+.modal-close-button:hover {
+  background-color: #5a6268; 
+}
+
+.preview-button {
+  background-color: #269ccc; 
+  padding: 10px 20px;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 16px;
+  transition: background-color 0.3s ease;
+  margin-left: 70%;
+}
+
+.preview-button:hover {
+  background-color: #1f7a9c; 
+}
+
+.confirmation-container {
+  display: flex;
+  justify-content: flex-start; 
+  width: 100%; 
+  margin-left: 0; 
+  padding-left: 0; 
+}
+
+.draft-button {
+  background-color: #6c757d;
+  color: white;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 5px;
+  cursor: pointer;
+  margin-right: 10px;
+  transition: background-color 0.3s;
+}
+
+.draft-button:hover {
+  background-color: #5a6268;
+}
+.draft-button:disabled {
+  background-color: #cccccc;
+  cursor: not-allowed;
+}
+
+.last-step-buttons{
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  width: 100%;
+}
