@@ -1,593 +1,80 @@
-// Stepper.js
-import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
-import { useNavigate, useParams } from "react-router-dom";
-import { toast } from "react-toastify";
-import { Modal, Button, Form } from "react-bootstrap";
-import "./Stepper.css";
-import { useRegistration } from "../../context/ApplicationContext";
-import ReviewStep from "./ReviewStep";
-import { FormDataProvider } from "../../context/FormDataContext";
+<div className="stepper-buttons">
+  {currentStep > 1 && (
+    <button className="buttonplus previous-button" onClick={handlePrevious}>
+      Previous
+    </button>
+  )}
+  {currentStep === 1 && (
+    <button className="buttonplus cancel-button" onClick={handleCancel}>
+      Cancel
+    </button>
+  )}
 
-const deepEqual = (obj1, obj2) => {
-  return JSON.stringify(obj1) === JSON.stringify(obj2);
-};
-
-const Stepper = ({ stepsConfig = [], formAllData }) => {
-  const { id } = useParams();
-  const isEditMode = !!id;
-  const [currentStep, setCurrentStep] = useState(1);
-  const [isConfirmed, setIsConfirmed] = useState(false);
-  const [isComplete, setIsComplete] = useState(false);
-  const [isViewModalOpen, setIsViewModalOpen] = useState(false);
-  const [hasPreviewed, setHasPreviewed] = useState(false);
-  const [formData, setFormData] = useState({});
-  const [margins, setMargins] = useState({ marginLeft: 0, marginRight: 0 });
-  const stepRef = useRef([]);
-  const navigate = useNavigate();
-  const [currentSubmitHandler, setCurrentSubmitHandler] = useState(null);
-  const [showModal, setShowModal] = useState(false);
-  const [comments, setComments] = useState("");
-  const [actionType, setActionType] = useState("");
-  const [flattenedData, setFlattenedData] = useState({});
-  const [isSavingDraft, setIsSavingDraft] = useState(false);
-
-  const {
-    registrationData,
-    handleStepDataFetch,
-    updateRegistrationData,
-    loadDataFromLocalStorage,
-    isDataLoaded,
-  } = useRegistration();
-
-  const userFormData = JSON.parse(localStorage.getItem("userFormData"));
-  const isCRPUser = userFormData?.userType === "CRP";
-
-  const filteredStepsConfig = useMemo(() => {
-    if (isCRPUser) {
-      return stepsConfig.filter((step) => step.name !== "Review & Submit");
-    }
-    return stepsConfig;
-  }, [stepsConfig, isCRPUser]);
-
-  useEffect(() => {
-    if (id) {
-      loadDataFromLocalStorage(id);
-    }
-  }, [id, loadDataFromLocalStorage]);
-
-  useEffect(() => {
-    if (isEditMode && registrationData && !deepEqual(formData, registrationData)) {
-      setFormData(registrationData);
-    }
-  }, [isEditMode, registrationData, formData]);
-
-  useEffect(() => {
-    const savedIsConfirmed = localStorage.getItem("isConfirmed");
-    if (savedIsConfirmed) {
-      setIsConfirmed(JSON.parse(savedIsConfirmed));
-    }
-  }, []);
-
-  useEffect(() => {
-    localStorage.setItem("isConfirmed", JSON.stringify(isConfirmed));
-  }, [isConfirmed]);
-
-  useEffect(() => {
-    const newSubmitHandler = filteredStepsConfig[currentStep - 1]?.submitHandler;
-    if (newSubmitHandler && newSubmitHandler !== currentSubmitHandler) {
-      setCurrentSubmitHandler(() => newSubmitHandler);
-    }
-  }, [currentStep, filteredStepsConfig]);
-
-  const updateSubmitHandler = useCallback((submitHandler) => {
-    setCurrentSubmitHandler(() => submitHandler);
-  }, []);
-
-  useEffect(() => {
-    if (stepRef.current.length > 0) {
-      const firstStep = stepRef.current[0]?.offsetWidth || 0;
-      const lastStep = stepRef.current[filteredStepsConfig.length - 1]?.offsetWidth || 0;
-      setMargins({
-        marginLeft: firstStep / 2,
-        marginRight: lastStep / 2,
-      });
-    }
-  }, [filteredStepsConfig.length]);
-
-  const validateStepData = (step, data) => {
-    const requiredFields = filteredStepsConfig[step - 1]?.requiredFields || [];
-    for (let field of requiredFields) {
-      if (!data[field]) {
-        toast.error(`${field} is required.`);
-        return false;
-      }
-    }
-    return true;
-  };
-
-  const handleNext = async () => {
-    if (!currentSubmitHandler) {
-      console.error("No submit handler available.");
-      return;
-    }
-
-    const currentStepData = await currentSubmitHandler();
-    if (!currentStepData) {
-      console.error("Form validation failed.");
-      return;
-    }
-
-    if (!validateStepData(currentStep, currentStepData)) {
-      return;
-    }
-
-    const updatedFormData = {
-      ...formData,
-      [`step${currentStep}`]: { ...formData[`step${currentStep}`], ...currentStepData },
-    };
-
-    if (!deepEqual(updatedFormData, formData)) {
-      setFormData(updatedFormData);
-      updateRegistrationData(`step${currentStep}`, updatedFormData[`step${currentStep}`], id);
-    }
-
-    if (currentStep === filteredStepsConfig.length) {
-      setIsComplete(true);
-      toast.success("Form submitted successfully");
-      navigate("/dashboard");
-    } else {
-      setCurrentStep((prevStep) => prevStep + 1);
-    }
-  };
-
-  const handleSaveDraft = async () => {
-    setIsSavingDraft(true);
-    try {
-      const currentStepData = currentSubmitHandler ? await currentSubmitHandler() : {};
-      const draftId = id || `draft-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
-      
-      const draftData = {
-        ...formData,
-        [`step${currentStep}`]: { 
-          ...formData[`step${currentStep}`], 
-          ...currentStepData 
-        },
-        id: draftId,
-        status: "draft",
-        lastSaved: new Date().toISOString(),
-        currentStep,
-        formType: userFormData?.formType,
-        userType: userFormData?.userType,
-      };
-      
-      const existingDraft = JSON.parse(localStorage.getItem("formDrafts") || "[]");
-      const updatedDrafts = [
-        ...existingDraft.filter((draft) => draft.id !== draftId), 
-        draftData
-      ];
-      localStorage.setItem("formDrafts", JSON.stringify(updatedDrafts));
-      
-      toast.success("Draft saved successfully");
-      navigate("/drafts"); 
-    } catch (error) {
-      console.error("Error saving draft:", error);
-      toast.error("Failed to save draft");
-    } finally {
-      setIsSavingDraft(false);
-    }
-  };
-
-  const handleActionClick = (action) => {
-    setActionType(action);
-    setShowModal(true);
-  };
-
-  const handleModalClose = () => {
-    setShowModal(false);
-    setComments("");
-  };
-
-  const handleActionSubmit = () => {
-    console.log(`Action: ${actionType}, Comments: ${comments}`);
-    toast.success(`${actionType} submitted successfully`);
-    navigate("/dashboard");
-  };
-
-  const handlePrevious = () => {
-    setCurrentStep((prevStep) => Math.max(1, prevStep - 1));
-    setIsConfirmed(false);
-    localStorage.removeItem("isConfirmed");
-  };
-
-  const handleCancel = () => {
-    navigate("/dashboard");
-  };
-
-  const calculateProgressBarWidth = () => {
-    return ((currentStep - 1) / (filteredStepsConfig.length - 1)) * 100;
-  };
-
-  const ActiveComponent = filteredStepsConfig[currentStep - 1]?.Component;
-  const shouldRenderReviewStep = currentStep === filteredStepsConfig.length && isDataLoaded;
-
-  const flattenFormData = (formData) => {
-    return {
-      ...formData.step1,
-      ...formData.step2,
-      ...formData.step3,
-    };
-  };
-
-  return (
-    <FormDataProvider formData={flattenFormData(formData)}>
-      <div className="stepper">
-        {filteredStepsConfig.map((step, index) => (
-          <div
-            key={step.name}
-            ref={(el) => (stepRef.current[index] = el)}
-            className={`step ${
-              currentStep > index + 1 || isComplete ? "complete" : ""
-            } ${currentStep === index + 1 ? "active" : ""}`}
-          >
-            <div className="step-number">
-              {currentStep > index + 1 || isComplete ? (
-                <span>✓</span>
-              ) : (
-                index + 1
-              )}
-            </div>
-            <div className="step-name">{step.name}</div>
-          </div>
-        ))}
-
-        <div
-          className="progress-bar"
-          style={{
-            marginLeft: margins.marginLeft,
-            marginRight: margins.marginRight,
-          }}
-        >
-          <div
-            className="progress"
-            style={{ width: `${calculateProgressBarWidth()}%` }}
-          ></div>
-        </div>
-      </div>
-
-      {ActiveComponent && (
-        <ActiveComponent
-          formData={formData[`step${currentStep}`] || {}}
-          provideSubmitHandler={updateSubmitHandler}
-          setFormData={setFormData}
-        />
-      )}
-
-      {shouldRenderReviewStep && Object.keys(flattenedData).length > 0 && !isCRPUser && (
-        <ReviewStep />
-      )}
-
-      {currentStep === filteredStepsConfig.length && !isCRPUser && (
-        <div className="confirmation-container">
-          <Form.Group controlId="formConfirmation" className="mt-3 confirmation-checkbox">
-            <Form.Check
-              type="checkbox"
-              label="I confirm that the information provided is correct."
-              checked={isConfirmed}
-              onChange={(e) => setIsConfirmed(e.target.checked)}
-            />
-          </Form.Group>
-        </div>
-      )}
-
-      <div className="stepper-buttons">
-        {currentStep > 1 && (
-          <button className="buttonplus previous-button" onClick={handlePrevious}>
-            Previous
-          </button>
-        )}
-        {currentStep === 1 && (
-          <button className="buttonplus cancel-button" onClick={handleCancel}>
-            Cancel
-          </button>
-        )}
-
-        {/* Save as Draft button - shown on all steps except last */}
-        {currentStep !== filteredStepsConfig.length && (
-          <button
-            className="buttonplus draft-button"
-            onClick={handleSaveDraft}
-            disabled={isSavingDraft}
-          >
-            {isSavingDraft ? "Saving..." : "Save as Draft"}
-          </button>
-        )}
-
-        {/* Last step buttons */}
-        {currentStep === filteredStepsConfig.length && isCRPUser ? (
-          <>
-            <button
-              className="buttonplus sendback-button"
-              onClick={() => handleActionClick("Sendback To Claimants")}
-            >
-              Sendback To Claimants
-            </button>
-            <button
-              className="buttonplus accept-contingent-button"
-              onClick={() => handleActionClick("Accept as Contingent")}
-            >
-              Accept as Contingent
-            </button>
-            <button
-              className="buttonplus accept-button"
-              onClick={() => handleActionClick("Accept")}
-            >
-              Accept
-            </button>
-            <button
-              className="buttonplus reject-button"
-              onClick={() => handleActionClick("Reject")}
-            >
-              Reject
-            </button>
-          </>
-        ) : currentStep === filteredStepsConfig.length ? (
-          <button
-            className="buttonplus next-button"
-            onClick={handleNext}
-            disabled={!isConfirmed || isComplete}
-          >
-            Submit
-          </button>
-        ) : (
-          // For intermediate steps (including step 3)
-          <button
-            className="buttonplus preview-button"
-            onClick={() => setIsViewModalOpen(true)}
-          >
-            Preview
-          </button>
-        )}
-      </div>
-
-      {/* Preview Modal */}
-      <Modal 
-        show={isViewModalOpen} 
-        onHide={() => setIsViewModalOpen(false)}
-        size="lg"
+  {/* Special handling for step 3 */}
+  {currentStep === 3 && (
+    <>
+      <button
+        className="buttonplus draft-button"
+        onClick={handleSaveDraft}
+        disabled={isSavingDraft}
       >
-        <Modal.Header closeButton>
-          <Modal.Title>Form Preview</Modal.Title>
-        </Modal.Header>
-        <Modal.Body>
-          <ReviewStep />
-        </Modal.Body>
-        <Modal.Footer>
-          <Button 
-            variant="secondary" 
-            onClick={() => setIsViewModalOpen(false)}
-          >
-            Close
-          </Button>
-          <Button 
-            variant="primary"
-            onClick={() => {
-              setIsViewModalOpen(false);
-              handleNext();
-            }}
-          >
-            Continue
-          </Button>
-        </Modal.Footer>
-      </Modal>
+        {isSavingDraft ? "Saving..." : "Save as Draft"}
+      </button>
+      <button
+        className="buttonplus preview-button"
+        onClick={() => setIsViewModalOpen(true)}
+      >
+        Preview
+      </button>
+    </>
+  )}
 
-      {/* Action Modal (Accept/Reject/etc) */}
-      <Modal show={showModal} onHide={handleModalClose} centered>
-        <Modal.Header closeButton>
-          <Modal.Title>{actionType} Form</Modal.Title>
-        </Modal.Header>
-        <Modal.Body>
-          <Form>
-            <Form.Group controlId="comments">
-              <Form.Label>Comments</Form.Label>
-              <Form.Control
-                as="textarea"
-                rows={3}
-                value={comments}
-                onChange={(e) => setComments(e.target.value)}
-                placeholder="Enter your comments..."
-              />
-            </Form.Group>
-          </Form>
-        </Modal.Body>
-        <Modal.Footer>
-          <Button className="modal-close-button" onClick={handleModalClose}>
-            Close
-          </Button>
-          <Button
-            className="modal-submit-button"
-            onClick={handleActionSubmit}
-            disabled={!comments.trim()}
-          >
-            Submit
-          </Button>
-        </Modal.Footer>
-      </Modal>
-    </FormDataProvider>
-  );
-};
+  {/* Normal step handling (except step 3 and last step) */}
+  {currentStep !== 3 && currentStep !== filteredStepsConfig.length && (
+    <button
+      className="buttonplus next-button"
+      onClick={handleNext}
+      disabled={isComplete}
+    >
+      Next
+    </button>
+  )}
 
-export default Stepper;
-.stepper {
-  position: relative;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 20px;
-  width: 100%;
-}
-
-.step {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-}
-
-.step-number {
-  width: 30px;
-  height: 30px;
-  border-radius: 50%;
-  background-color: #ccc;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  margin-bottom: 5px;
-  z-index: 2;
-}
-
-.step-name {
-  font-size: 14px;
-}
-
-.active .step-number {
-  background-color: #269ccc;
-  color: #fff;
-}
-
-.complete .step-number {
-  background-color: #7fab0f;
-  color: #fff;
-}
-
-.progress-bar {
-  position: absolute;
-  top: 25%;
-  left: 0;
-  right: 0;
-  height: 4px;
-  background-color: #ccc;
-  margin: 0 auto;
-}
-
-.progress {
-  height: 100%;
-  background-color: #28a745 !important;
-  transition: width 0.2s ease;
-}
-
-.stepper-buttons {
-  display: flex;
-  justify-content: space-between;
-  width: 100%;
-  margin-top: 20px;
-  gap: 10px;
-}
-
-.buttonplus {
-  background-color: #269ccc;
-  color: white;
-  padding: 10px 20px;
-  border: none;
-  border-radius: 5px;
-  cursor: pointer;
-  font-size: 16px;
-  transition: background-color 0.3s ease;
-}
-
-.buttonplus:disabled {
-  background-color: #ccc;
-  cursor: not-allowed;
-}
-
-.buttonplus:hover:not(:disabled) {
-  background-color: #1f7a9c;
-}
-
-.previous-button {
-  margin-right: auto;
-}
-
-.cancel-button {
-  background-color: #6c757d;
-}
-
-.cancel-button:hover {
-  background-color: #5a6268;
-}
-
-.accept-button {
-  background-color: #7fab0f;
-}
-
-.reject-button {
-  background-color: #dc3545;
-}
-
-.sendback-button {
-  background-color: #ffc107;
-  color: #212529;
-}
-
-.accept-contingent-button {
-  background-color: #17a2b8;
-}
-
-.accept-button:hover:not(:disabled) {
-  background-color: #6c8d0d;
-}
-
-.reject-button:hover:not(:disabled) {
-  background-color: #bb2d3b;
-}
-
-.sendback-button:hover:not(:disabled) {
-  background-color: #e0a800;
-}
-
-.accept-contingent-button:hover:not(:disabled) {
-  background-color: #138496;
-}
-
-.draft-button {
-  background-color: #6c757d;
-}
-
-.draft-button:hover {
-  background-color: #5a6268;
-}
-
-.preview-button {
-  background-color: #17a2b8;
-  margin-left: auto;
-}
-
-.preview-button:hover {
-  background-color: #138496;
-}
-
-.modal-submit-button {
-  background-color: #269ccc;
-}
-
-.modal-submit-button:hover {
-  background-color: #1f7a9c;
-}
-
-.modal-close-button {
-  background-color: #6c757d;
-}
-
-.modal-close-button:hover {
-  background-color: #5a6268;
-}
-
-.confirmation-container {
-  display: flex;
-  justify-content: flex-start;
-  width: 100%;
-  margin-top: 20px;
-}
-
-.confirmation-checkbox {
-  margin-left: 0;
-  padding-left: 0;
-}
+  {/* Last step handling */}
+  {currentStep === filteredStepsConfig.length && isCRPUser ? (
+    <>
+      <button
+        className="buttonplus sendback-button"
+        onClick={() => handleActionClick("Sendback To Claimants")}
+      >
+        Sendback To Claimants
+      </button>
+      <button
+        className="buttonplus accept-contingent-button"
+        onClick={() => handleActionClick("Accept as Contingent")}
+      >
+        Accept as Contingent
+      </button>
+      <button
+        className="buttonplus accept-button"
+        onClick={() => handleActionClick("Accept")}
+      >
+        Accept
+      </button>
+      <button
+        className="buttonplus reject-button"
+        onClick={() => handleActionClick("Reject")}
+      >
+        Reject
+      </button>
+    </>
+  ) : currentStep === filteredStepsConfig.length ? (
+    <button
+      className="buttonplus next-button"
+      onClick={handleNext}
+      disabled={!isConfirmed || isComplete}
+    >
+      Submit
+    </button>
+  ) : null}
+</div>
