@@ -18,6 +18,7 @@ const LoginPage = () => {
     formState: { errors },
     reset,
     setValue,
+    trigger,
   } = useForm();
   const navigate = useNavigate();
   const { setUserData } = useContext(UserContext);
@@ -65,7 +66,7 @@ const LoginPage = () => {
     setOtp("");
   }, [selectedRadio, reset]);
 
-  // Fetch initial data when component mounts and radio is claimants
+  // Fetch initial data when radio is claimants
   useEffect(() => {
     if (selectedRadio === "claimants") {
       fetchInitialData();
@@ -93,7 +94,7 @@ const LoginPage = () => {
     }
   };
 
-  // Fetch claimant categories when userType changes
+  // Fetch claimant categories when dependencies change
   useEffect(() => {
     if (userType && selectedRadio === "claimants" && corporateDebtorUuid && processTypeUuid) {
       const selectedType = claimantTypes.find((type) => type.claimantName === userType);
@@ -105,7 +106,7 @@ const LoginPage = () => {
         setValue("operationalCreditorType", "");
       }
     }
-  }, [userType, claimantTypes, corporateDebtorUuid, processTypeUuid]);
+  }, [userType, corporateDebtorUuid, processTypeUuid]);
 
   const fetchClaimantCategories = async (claimantType) => {
     try {
@@ -136,7 +137,8 @@ const LoginPage = () => {
     const selected = corporateDebtors.find((d) => d.uuid === selectedUuid);
     setSelectedCorporateDebtor(selected);
     setValue("corporateDebtorUuid", selectedUuid, { shouldValidate: true });
-    setValue("corporateDebtorName", selected?.nameOfCorporateDebtor || "");
+    setValue("corporateDebtorName", selected?.nameOfCorporateDebtor || "", { shouldValidate: true });
+    trigger(["corporateDebtorUuid", "corporateDebtorName"]);
   };
 
   const handleProcessTypeSelect = (e) => {
@@ -144,30 +146,18 @@ const LoginPage = () => {
     const selected = processTypes.find((p) => p.uuid === selectedUuid);
     setSelectedProcessType(selected);
     setValue("processTypeUuid", selectedUuid, { shouldValidate: true });
-    setValue("processType", selected?.processTypeValue || "");
+    setValue("processType", selected?.processTypeValue || "", { shouldValidate: true });
+    trigger(["processTypeUuid", "processType"]);
   };
 
-  const handleClaimantCategorySelect = async (e, category) => {
-    if (category && corporateDebtorUuid && processTypeUuid && selectedClaimantType) {
-      try {
-        setApiLoading(true);
-        const response = await fetchFormDetailsData(
-          corporateDebtorUuid,
-          processTypeUuid,
-          processTypes.find(p => p.uuid === processTypeUuid)?.processTypeValue,
-          selectedClaimantType.uuid,
-          category.uuid,
-          category.formId
-        );
-
-        if (response.data.status.code !== "200") {
-          toast.error("Failed to fetch form details");
-        }
-      } catch (error) {
-        console.error("Error fetching form details:", error);
-        toast.error("Error fetching form details");
-      } finally {
-        setApiLoading(false);
+  const handleClaimantCategorySelect = (e, category) => {
+    if (category) {
+      if (userType === "Financial Creditors") {
+        setValue("financialCreditorType", category.uuid, { shouldValidate: true });
+        trigger("financialCreditorType");
+      } else if (userType === "Operational Creditors") {
+        setValue("operationalCreditorType", category.uuid, { shouldValidate: true });
+        trigger("operationalCreditorType");
       }
     }
   };
@@ -177,16 +167,19 @@ const LoginPage = () => {
 
   const isClaimantsFormValid = () => {
     if (selectedRadio === "claimants") {
-      const basicFieldsValid = 
-        isValidUsername(username) && 
-        processTypeUuid && 
-        corporateDebtorUuid && 
-        userType;
+      const currentValues = watch();
+      console.log('Form validation check:', currentValues);
 
-      if (userType === "Financial Creditors") {
-        return basicFieldsValid && financialCreditorType;
-      } else if (userType === "Operational Creditors") {
-        return basicFieldsValid && operationalCreditorType;
+      const basicFieldsValid = 
+        isValidUsername(currentValues.username) && 
+        currentValues.processTypeUuid && 
+        currentValues.corporateDebtorUuid && 
+        currentValues.userType;
+
+      if (currentValues.userType === "Financial Creditors") {
+        return basicFieldsValid && currentValues.financialCreditorType;
+      } else if (currentValues.userType === "Operational Creditors") {
+        return basicFieldsValid && currentValues.operationalCreditorType;
       }
       return basicFieldsValid;
     }
@@ -276,20 +269,6 @@ const LoginPage = () => {
     }, 1000);
   };
 
-  // Debug form validation state
-  useEffect(() => {
-    console.log('Form validation state:', {
-      username,
-      isValidUsername: isValidUsername(username),
-      processTypeUuid,
-      corporateDebtorUuid,
-      userType,
-      financialCreditorType,
-      operationalCreditorType,
-      isFormValid: isClaimantsFormValid()
-    });
-  }, [username, processTypeUuid, corporateDebtorUuid, userType, financialCreditorType, operationalCreditorType]);
-
   return (
     <div className="login-page">
       <div className="login-container">
@@ -344,8 +323,10 @@ const LoginPage = () => {
               <div className="dropdown-container">
                 <select
                   className="dropdown-select"
-                  {...register("processTypeUuid", { required: "Process type is required" })}
-                  onChange={handleProcessTypeSelect}
+                  {...register("processTypeUuid", { 
+                    required: "Process type is required",
+                    onChange: handleProcessTypeSelect
+                  })}
                 >
                   <option value="">Process Type</option>
                   {processTypes.map((opt) => (
@@ -361,8 +342,10 @@ const LoginPage = () => {
               <div className="dropdown-container">
                 <select
                   className="dropdown-select"
-                  {...register("corporateDebtorUuid", { required: "Corporate Debtor name is required" })}
-                  onChange={handleCorporateDebtorSelect}
+                  {...register("corporateDebtorUuid", { 
+                    required: "Corporate Debtor name is required",
+                    onChange: handleCorporateDebtorSelect
+                  })}
                 >
                   <option value="">Corporate Debtor Name</option>
                   {corporateDebtors.map((opt) => (
@@ -385,9 +368,10 @@ const LoginPage = () => {
                     onChange: (e) => {
                       const selectedType = claimantTypes.find(type => type.claimantName === e.target.value);
                       setSelectedClaimantType(selectedType);
+                      setValue("userType", e.target.value, { shouldValidate: true });
                       setValue("financialCreditorType", "", { shouldValidate: true });
                       setValue("operationalCreditorType", "", { shouldValidate: true });
-                      setValue("userType", e.target.value, { shouldValidate: true });
+                      trigger(["userType", "financialCreditorType", "operationalCreditorType"]);
                     },
                   })}
                   disabled={apiLoading}
@@ -409,14 +393,14 @@ const LoginPage = () => {
                     className="dropdown-select"
                     {...register("financialCreditorType", {
                       required: "Financial creditor type is required",
+                      onChange: (e) => {
+                        const selectedCategory = claimantCategories.find((c) => c.uuid === e.target.value);
+                        if (selectedCategory) {
+                          handleClaimantCategorySelect(e, selectedCategory);
+                        }
+                      },
                     })}
                     disabled={apiLoading}
-                    onChange={(e) => {
-                      const selectedCategory = claimantCategories.find((c) => c.uuid === e.target.value);
-                      if (selectedCategory) {
-                        handleClaimantCategorySelect(e, selectedCategory);
-                      }
-                    }}
                   >
                     <option value="">Financial Creditor Type</option>
                     {claimantCategories.map((opt) => (
@@ -438,14 +422,14 @@ const LoginPage = () => {
                     className="dropdown-select"
                     {...register("operationalCreditorType", {
                       required: "Operational creditor type is required",
+                      onChange: (e) => {
+                        const selectedCategory = claimantCategories.find((c) => c.uuid === e.target.value);
+                        if (selectedCategory) {
+                          handleClaimantCategorySelect(e, selectedCategory);
+                        }
+                      },
                     })}
                     disabled={apiLoading}
-                    onChange={(e) => {
-                      const selectedCategory = claimantCategories.find((c) => c.uuid === e.target.value);
-                      if (selectedCategory) {
-                        handleClaimantCategorySelect(e, selectedCategory);
-                      }
-                    }}
                   >
                     <option value="">Operational Creditor Type</option>
                     {claimantCategories.map((opt) => (
@@ -467,6 +451,18 @@ const LoginPage = () => {
                   className="send-otp-btn"
                   onClick={handleSendOTP}
                   disabled={!isClaimantsFormValid() || loading || apiLoading}
+                  title={
+                    !isClaimantsFormValid() ? 
+                    `Missing fields: ${[
+                      !isValidUsername(username) && "Valid Mobile Number",
+                      !processTypeUuid && "Process Type",
+                      !corporateDebtorUuid && "Corporate Debtor",
+                      !userType && "Claimant Type",
+                      userType === "Financial Creditors" && !financialCreditorType && "Financial Creditor Type",
+                      userType === "Operational Creditors" && !operationalCreditorType && "Operational Creditor Type"
+                    ].filter(Boolean).join(', ')}` 
+                    : ""
+                  }
                 >
                   {loading ? "Sending..." : "Send OTP"}
                 </button>
@@ -520,64 +516,3 @@ const LoginPage = () => {
                   className="user-input"
                   type="email"
                   {...register("email", {
-                    required: "Email is required",
-                    pattern: {
-                      value: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
-                      message: "Invalid email format"
-                    }
-                  })}
-                  placeholder="Email ID"
-                />
-                {errors.email && <p className="error-message">{errors.email.message}</p>}
-              </div>
-
-              {/* Password Field */}
-              <div className="form-group">
-                <input
-                  className="user-input"
-                  type="password"
-                  {...register("password", {
-                    required: "Password is required",
-                    minLength: {
-                      value: 6,
-                      message: "Password must be at least 6 characters"
-                    }
-                  })}
-                  placeholder="Password"
-                />
-                {errors.password && <p className="error-message">{errors.password.message}</p>}
-              </div>
-
-              {/* Terms and Submit */}
-              <div className="terms-conditions">
-                <input
-                  type="checkbox"
-                  id="termsAccepted"
-                  {...register("termsAccepted", { required: "You must accept terms" })}
-                />
-                <label htmlFor="termsAccepted">
-                  I accept the <a href="/terms">Terms & Conditions</a>
-                </label>
-                {errors.termsAccepted && <p className="error-message">{errors.termsAccepted.message}</p>}
-              </div>
-
-              <button
-                type="submit"
-                className="login-btn"
-                disabled={!isCorporateDebtorFormValid() || loading}
-              >
-                {loading ? "Logging in..." : "Login"}
-              </button>
-
-              <div className="register-text" onClick={() => navigate("/register/corporate-debtor")}>
-                Don't have an account? <span className="register-link">Register here</span>
-              </div>
-            </form>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-};
-
-export default LoginPage;
