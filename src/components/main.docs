@@ -1,49 +1,426 @@
-// Update the handleClaimantCategorySelect function
-const handleClaimantCategorySelect = async (e, category) => {
-  if (!category || !corporateDebtorUuid || !processTypeUuid || !selectedClaimantType) {
-    return;
-  }
+import React, { useState, useContext, useEffect } from "react";
+import { useForm } from "react-hook-form";
+import { useNavigate } from "react-router-dom";
+import { toast } from "react-toastify";
+import { UserContext } from "../../components/context/UserContext.js";
+import "./Login.css";
+import {
+  fetchInitialClaimantData,
+  fetchClaimantCategoriesData,
+  fetchFormDetailsData,
+} from "../../services/claimant.service.js";
 
-  try {
-    setApiLoading(true);
-    const processType = processTypes.find(p => p.uuid === processTypeUuid);
-    
-    const payload = {
-      debtorsUuid: corporateDebtorUuid,
-      processTypeUuid: processTypeUuid,
-      processTypeValue: processType?.processTypeValue || "",
-      claimantTypeUuid: selectedClaimantType.uuid,
-      claimantCategoryUuid: category.uuid,
-      formUuid: category.formId
-    };
+const LoginPage = () => {
+  const {
+    register,
+    handleSubmit,
+    watch,
+    formState: { errors },
+    reset,
+    setValue,
+    trigger,
+  } = useForm();
+  const navigate = useNavigate();
+  const { setUserData } = useContext(UserContext);
 
-    console.log("Fetching form details with payload:", payload);
-    
-    const response = await fetchFormDetailsData(
-      payload.debtorsUuid,
-      payload.processTypeUuid,
-      payload.processTypeValue,
-      payload.claimantTypeUuid,
-      payload.claimantCategoryUuid,
-      payload.formUuid
-    );
+  const [otpSent, setOtpSent] = useState(false);
+  const [otp, setOtp] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [selectedRadio, setSelectedRadio] = useState("corporateDebtor");
+  const [claimantTypes, setClaimantTypes] = useState([]);
+  const [claimantCategories, setClaimantCategories] = useState([]);
+  const [apiLoading, setApiLoading] = useState(false);
+  const [corporateDebtors, setCorporateDebtors] = useState([]);
+  const [processTypes, setProcessTypes] = useState([]);
+  const [selectedCorporateDebtor, setSelectedCorporateDebtor] = useState(null);
+  const [selectedProcessType, setSelectedProcessType] = useState(null);
+  const [selectedClaimantType, setSelectedClaimantType] = useState(null);
 
-    if (response.data.status.code === "200") {
-      console.log("Form details fetched successfully");
-      // Handle successful response here if needed
-    } else {
-      toast.error(response.data.status.message || "Failed to fetch form details");
+  // Watch all form values
+  const formValues = watch();
+  const {
+    username,
+    email,
+    password,
+    userType,
+    financialCreditorType,
+    operationalCreditorType,
+    processTypeUuid,
+    corporateDebtorUuid,
+    termsAccepted
+  } = formValues;
+
+  useEffect(() => {
+    reset({
+      username: "",
+      email: "",
+      password: "",
+      userType: "",
+      financialCreditorType: "",
+      operationalCreditorType: "",
+      processTypeUuid: "",
+      corporateDebtorUuid: "",
+      corporateDebtorName: "",
+    });
+    setOtpSent(false);
+    setOtp("");
+  }, [selectedRadio, reset]);
+
+  // Fetch initial data when radio is claimants
+  useEffect(() => {
+    if (selectedRadio === "claimants") {
+      fetchInitialData();
     }
-  } catch (error) {
-    console.error("Error fetching form details:", error);
-    toast.error("Error fetching form details");
-  } finally {
-    setApiLoading(false);
-  }
-};
+  }, [selectedRadio]);
 
-// Update the claimant category dropdowns to properly call the handler
-{userType === "Financial Creditors" && (
+  const fetchInitialData = async () => {
+    try {
+      setApiLoading(true);
+      const response = await fetchInitialClaimantData();
+
+      if (response.data.status.code === "200") {
+        const data = response.data.claimantMasterData;
+        setCorporateDebtors(data.corporateDebtors || []);
+        setProcessTypes(data.processTypes || []);
+        setClaimantTypes(data.claimantTypes || []);
+      } else {
+        toast.error(response.data.status.message || "Failed to fetch initial data");
+      }
+    } catch (error) {
+      console.error("Error fetching initial data:", error);
+      toast.error(error.response?.data?.status?.message || "Error fetching initial data");
+    } finally {
+      setApiLoading(false);
+    }
+  };
+
+  // Fetch claimant categories when dependencies change
+  useEffect(() => {
+    if (userType && selectedRadio === "claimants" && corporateDebtorUuid && processTypeUuid) {
+      const selectedType = claimantTypes.find((type) => type.claimantName === userType);
+      if (selectedType) {
+        fetchClaimantCategories(selectedType);
+      } else {
+        setClaimantCategories([]);
+        setValue("financialCreditorType", "");
+        setValue("operationalCreditorType", "");
+      }
+    }
+  }, [userType, corporateDebtorUuid, processTypeUuid]);
+
+  const fetchClaimantCategories = async (claimantType) => {
+    try {
+      setApiLoading(true);
+      const response = await fetchClaimantCategoriesData(
+        corporateDebtorUuid,
+        processTypeUuid,
+        processTypes.find(p => p.uuid === processTypeUuid)?.processTypeValue,
+        claimantType.uuid
+      );
+
+      if (response.data.status.code === "200") {
+        setClaimantCategories(response.data.claimantMasterData.claimantCategories || []);
+        setSelectedClaimantType(claimantType);
+      } else {
+        toast.error("Failed to fetch claimant categories");
+      }
+    } catch (error) {
+      console.error("Error fetching claimant categories:", error);
+      toast.error("Error fetching claimant categories");
+    } finally {
+      setApiLoading(false);
+    }
+  };
+
+  const handleCorporateDebtorSelect = (e) => {
+    const selectedUuid = e.target.value;
+    const selected = corporateDebtors.find((d) => d.uuid === selectedUuid);
+    setSelectedCorporateDebtor(selected);
+    setValue("corporateDebtorUuid", selectedUuid, { shouldValidate: true });
+    setValue("corporateDebtorName", selected?.nameOfCorporateDebtor || "", { shouldValidate: true });
+    trigger(["corporateDebtorUuid", "corporateDebtorName"]);
+  };
+
+  const handleProcessTypeSelect = (e) => {
+    const selectedUuid = e.target.value;
+    const selected = processTypes.find((p) => p.uuid === selectedUuid);
+    setSelectedProcessType(selected);
+    setValue("processTypeUuid", selectedUuid, { shouldValidate: true });
+    setValue("processType", selected?.processTypeValue || "", { shouldValidate: true });
+    trigger(["processTypeUuid", "processType"]);
+  };
+
+
+  const handleClaimantCategorySelect = async (e, category) => {
+    if (!category || !corporateDebtorUuid || !processTypeUuid || !selectedClaimantType) {
+      return;
+    }
+  
+    try {
+      setApiLoading(true);
+      const processType = processTypes.find(p => p.uuid === processTypeUuid);
+      
+      const payload = {
+        debtorsUuid: corporateDebtorUuid,
+        processTypeUuid: processTypeUuid,
+        processTypeValue: processType?.processTypeValue || "",
+        claimantTypeUuid: selectedClaimantType.uuid,
+        claimantCategoryUuid: category.uuid,
+        formUuid: category.formId
+      };
+  
+      console.log("Fetching form details with payload:", payload);
+      
+      const response = await fetchFormDetailsData(
+        payload.debtorsUuid,
+        payload.processTypeUuid,
+        payload.processTypeValue,
+        payload.claimantTypeUuid,
+        payload.claimantCategoryUuid,
+        payload.formUuid
+      );
+  
+      if (response.data.status.code === "200") {
+        console.log("Form details fetched successfully");
+        // Handle successful response here if needed
+      } else {
+        toast.error(response.data.status.message || "Failed to fetch form details");
+      }
+    } catch (error) {
+      console.error("Error fetching form details:", error);
+      toast.error("Error fetching form details");
+    } finally {
+      setApiLoading(false);
+    }
+  };
+  
+  
+
+  const isValidUsername = (username) => /^[6-9]\d{9}$/.test(username);
+  const isValidEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+
+  const isClaimantsFormValid = () => {
+    if (selectedRadio === "claimants") {
+      const currentValues = watch();
+      console.log('Form validation check:', currentValues);
+
+      const basicFieldsValid = 
+        isValidUsername(currentValues.username) && 
+        currentValues.processTypeUuid && 
+        currentValues.corporateDebtorUuid && 
+        currentValues.userType;
+
+      if (currentValues.userType === "Financial Creditors") {
+        return basicFieldsValid && currentValues.financialCreditorType;
+      } else if (currentValues.userType === "Operational Creditors") {
+        return basicFieldsValid && currentValues.operationalCreditorType;
+      }
+      return basicFieldsValid;
+    }
+    return false;
+  };
+
+  const isCorporateDebtorFormValid = () => {
+    if (selectedRadio === "corporateDebtor") {
+      return isValidEmail(email) && password?.length >= 6 && termsAccepted;
+    }
+    return false;
+  };
+
+  const handleSendOTP = async () => {
+    if (!isClaimantsFormValid()) {
+      toast.error("Please fill all required fields.");
+      return;
+    }
+
+    setLoading(true);
+    setTimeout(() => {
+      const payload = {
+        userType: "CLM",
+        userId: username,
+        processType: processTypes.find(p => p.uuid === processTypeUuid)?.processTypeValue,
+        corporateDebtorName: corporateDebtors.find(d => d.uuid === corporateDebtorUuid)?.nameOfCorporateDebtor,
+        claimantType: userType,
+        claimantCategoryType:
+          userType === "Financial Creditors" ? financialCreditorType : operationalCreditorType,
+        otp: "123456",
+      };
+
+      console.log("OTP Payload:", payload);
+      toast.success("OTP Sent");
+      setOtpSent(true);
+      setLoading(false);
+    }, 1000);
+  };
+
+  const handleVerifyOTP = async (data) => {
+    if (!otp) {
+      toast.error("Please enter OTP");
+      return;
+    }
+    if (!data.termsAccepted) {
+      toast.info("Please accept terms");
+      return;
+    }
+
+    setLoading(true);
+    setTimeout(() => {
+      if (otp === "123456") {
+        const payload = {
+          userType: "CLM",
+          userId: username,
+          processType: processTypes.find(p => p.uuid === processTypeUuid)?.processTypeValue,
+          corporateDebtorName: corporateDebtors.find(d => d.uuid === corporateDebtorUuid)?.nameOfCorporateDebtor,
+          claimantType: userType,
+          claimantCategoryType:
+            userType === "Financial Creditors" ? financialCreditorType : operationalCreditorType,
+        };
+
+        setUserData(payload);
+        localStorage.setItem("userFormData", JSON.stringify(payload));
+        toast.success("Login Successful");
+        navigate("/dashboard");
+      } else {
+        toast.error("Invalid OTP");
+      }
+      setLoading(false);
+    }, 1000);
+  };
+
+  const handleCorporateDebtorLogin = async (data) => {
+    setLoading(true);
+    setTimeout(() => {
+      const payload = {
+        userType: "CRP",
+        email: data.email,
+      };
+      console.log("Corporate Debtor Payload:", payload);
+      setUserData(payload);
+      localStorage.setItem("userFormData", JSON.stringify(payload));
+      toast.success("Login Successful");
+      navigate("/dashboard");
+      setLoading(false);
+    }, 1000);
+  };
+
+  return (
+    <div className="login-page">
+      <div className="login-container">
+        <div className="Login-header">
+          <div className="login-text">LOG IN</div>
+        </div>
+
+        <div className="radio-options">
+          <div className={`radio-op ${selectedRadio === "corporateDebtor" ? "active" : ""}`}>
+            <input
+              type="radio"
+              id="corporateDebtor"
+              name="radioGroup"
+              checked={selectedRadio === "corporateDebtor"}
+              onChange={() => setSelectedRadio("corporateDebtor")}
+            />
+            <label htmlFor="corporateDebtor">Corporate Debtor</label>
+          </div>
+          <div className={`radio-op ${selectedRadio === "claimants" ? "active" : ""}`}>
+            <input
+              type="radio"
+              id="claimants"
+              name="radioGroup"
+              checked={selectedRadio === "claimants"}
+              onChange={() => setSelectedRadio("claimants")}
+            />
+            <label htmlFor="claimants">Claimants</label>
+          </div>
+        </div>
+
+        <div className="login-form">
+          {selectedRadio === "claimants" ? (
+            <form onSubmit={handleSubmit(handleVerifyOTP)}>
+              {/* Mobile Number */}
+              <div className="form-group">
+                <input
+                  className="user-input"
+                  type="text"
+                  {...register("username", {
+                    required: "Mobile number is required",
+                    pattern: {
+                      value: /^[6-9]\d{9}$/,
+                      message: "Invalid mobile number",
+                    },
+                  })}
+                  placeholder="Mobile Number"
+                />
+                {errors.username && <p className="error-message">{errors.username.message}</p>}
+              </div>
+
+              {/* Process Type */}
+              <div className="dropdown-container">
+                <select
+                  className="dropdown-select"
+                  {...register("processTypeUuid", { 
+                    required: "Process type is required",
+                    onChange: handleProcessTypeSelect
+                  })}
+                >
+                  <option value="">Process Type</option>
+                  {processTypes.map((opt) => (
+                    <option key={opt.uuid} value={opt.uuid}>
+                      {opt.processTypeName}
+                    </option>
+                  ))}
+                </select>
+                {errors.processTypeUuid && <p className="error-message">{errors.processTypeUuid.message}</p>}
+              </div>
+
+              {/* Corporate Debtor Name */}
+              <div className="dropdown-container">
+                <select
+                  className="dropdown-select"
+                  {...register("corporateDebtorUuid", { 
+                    required: "Corporate Debtor name is required",
+                    onChange: handleCorporateDebtorSelect
+                  })}
+                >
+                  <option value="">Corporate Debtor Name</option>
+                  {corporateDebtors.map((opt) => (
+                    <option key={opt.uuid} value={opt.uuid}>
+                      {opt.nameOfCorporateDebtor}
+                    </option>
+                  ))}
+                </select>
+                {errors.corporateDebtorUuid && (
+                  <p className="error-message">{errors.corporateDebtorUuid.message}</p>
+                )}
+              </div>
+
+              {/* Claimant Type */}
+              <div className="dropdown-container">
+                <select
+                  className="dropdown-select"
+                  {...register("userType", {
+                    required: "Claimant type is required",
+                    onChange: (e) => {
+                      const selectedType = claimantTypes.find(type => type.claimantName === e.target.value);
+                      setSelectedClaimantType(selectedType);
+                      setValue("userType", e.target.value, { shouldValidate: true });
+                      setValue("financialCreditorType", "", { shouldValidate: true });
+                      setValue("operationalCreditorType", "", { shouldValidate: true });
+                      trigger(["userType", "financialCreditorType", "operationalCreditorType"]);
+                    },
+                  })}
+                  disabled={apiLoading}
+                >
+                  <option value="">Claimant Type</option>
+                  {claimantTypes?.map((opt) => (
+                    <option key={opt.uuid} value={opt.claimantName}>
+                      {opt.claimantName}
+                    </option>
+                  ))}
+                </select>
+                {errors.userType && <p className="error-message">{errors.userType.message}</p>}
+              </div>
+
+              {userType === "Financial Creditors" && (
   <select
     className="dropdown-select"
     {...register("financialCreditorType", {
@@ -90,3 +467,340 @@ const handleClaimantCategorySelect = async (e, category) => {
     ))}
   </select>
 )}
+
+              {/* OTP Section */}
+              {!otpSent ? (
+                <button
+                  type="button"
+                  className="send-otp-btn"
+                  onClick={handleSendOTP}
+                  disabled={!isClaimantsFormValid() || loading || apiLoading}
+                  title={
+                    !isClaimantsFormValid() ? 
+                    `Missing fields: ${[
+                      !isValidUsername(username) && "Valid Mobile Number",
+                      !processTypeUuid && "Process Type",
+                      !corporateDebtorUuid && "Corporate Debtor",
+                      !userType && "Claimant Type",
+                      userType === "Financial Creditors" && !financialCreditorType && "Financial Creditor Type",
+                      userType === "Operational Creditors" && !operationalCreditorType && "Operational Creditor Type"
+                    ].filter(Boolean).join(', ')}` 
+                    : ""
+                  }
+                >
+                  {loading ? "Sending..." : "Send OTP"}
+                </button>
+              ) : (
+                <div className="otp-verification">
+                  <input
+                    type="text"
+                    value={otp}
+                    onChange={(e) => setOtp(e.target.value)}
+                    placeholder="Enter OTP"
+                    className="user-input"
+                  />
+                </div>
+              )}
+
+              {/* Terms and Submit */}
+              <div className="terms-conditions">
+                <input
+                  type="checkbox"
+                  id="termsAccepted"
+                  {...register("termsAccepted", { required: "You must accept terms" })}
+                />
+                <label htmlFor="termsAccepted">
+                  I accept the <a href="/terms">Terms & Conditions</a>
+                </label>
+                {errors.termsAccepted && (
+                  <p className="error-message">{errors.termsAccepted.message}</p>
+                )}
+              </div>
+
+              <button
+                type="submit"
+                className="login-btn"
+                disabled={!otpSent || !otp || loading || !termsAccepted || apiLoading}
+              >
+                {loading ? "Verifying..." : "Verify OTP & Login"}
+              </button>
+
+              <div
+                className="register-text"
+                onClick={() => navigate("/register/claimants")}
+              >
+                Don't have an account? <span className="register-link">Register here</span>
+              </div>
+            </form>
+          ) : (
+            <form onSubmit={handleSubmit(handleCorporateDebtorLogin)}>
+              {/* Email Field */}
+              <div className="form-group">
+                <input
+                  className="user-input"
+                  type="email"
+                  {...register("email", {
+                    required: "Email is required",
+                    pattern: {
+                      value: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
+                      message: "Invalid email format"
+                    }
+                  })}
+                  placeholder="Email ID"
+                />
+                {errors.email && <p className="error-message">{errors.email.message}</p>}
+              </div>
+
+              {/* Password Field */}
+              <div className="form-group">
+                <input
+                  className="user-input"
+                  type="password"
+                  {...register("password", {
+                    required: "Password is required",
+                    minLength: {
+                      value: 6,
+                      message: "Password must be at least 6 characters"
+                    }
+                  })}
+                  placeholder="Password"
+                />
+                {errors.password && <p className="error-message">{errors.password.message}</p>}
+              </div>
+
+              {/* Terms and Submit */}
+              <div className="terms-conditions">
+                <input
+                  type="checkbox"
+                  id="termsAccepted"
+                  {...register("termsAccepted", { required: "You must accept terms" })}
+                />
+                <label htmlFor="termsAccepted">
+                  I accept the <a href="/terms">Terms & Conditions</a>
+                </label>
+                {errors.termsAccepted && <p className="error-message">{errors.termsAccepted.message}</p>}
+              </div>
+
+              <button
+                type="submit"
+                className="login-btn"
+                disabled={!isCorporateDebtorFormValid() || loading}
+              >
+                {loading ? "Logging in..." : "Login"}
+              </button>
+
+              <div className="register-text" onClick={() => navigate("/register/corporate-debtor")}>
+                Don't have an account? <span className="register-link">Register here</span>
+              </div>
+            </form>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default LoginPage;
+
+RESPONSE ARE
+{
+    "status": {
+        "code": "200",
+        "messages": "Data Received Succssfully"
+    },
+    "claimantMasterData": {
+        "corporateDebtors": [
+            {
+                "uuid": "7c249b25-7e75-4e0f-9177-5988ccbda43a",
+                "nameOfCorporateDebtor": "Jalpower Corporation Limited"
+            },
+            {
+                "uuid": "70e51b80-9323-4077-92e8-166d70b8c29c",
+                "nameOfCorporateDebtor": "Neesa Leisure Limited"
+            },
+            {
+                "uuid": "8f605cf9-7609-4371-bf73-506d807a7b7c",
+                "nameOfCorporateDebtor": "Empathy Infra and Engineering Private Limited"
+            },
+            {
+                "uuid": "32cd273c-d766-4b69-8fbf-a5ed4f537159",
+                "nameOfCorporateDebtor": "Simpa Energy India Private Limited"
+            },
+            {
+                "uuid": "930af90d-1b3e-44c3-a656-4e347d5762d1",
+                "nameOfCorporateDebtor": "Eicher Polaris Private Limited"
+            },
+            {
+                "uuid": "0565efda-bd64-417d-be17-23c4d01ddd0e",
+                "nameOfCorporateDebtor": "VIJAY TIMBER INDUSTRIES PRIVATE LIMITED"
+            },
+            {
+                "uuid": "6228e4fe-cfeb-4565-b880-dee7ff3f75bc",
+                "nameOfCorporateDebtor": "SURANA META CAST (INDIA) PRIVATE LIMITED"
+            },
+            {
+                "uuid": "a6131922-cf11-4b27-8536-bd0e8e138a66",
+                "nameOfCorporateDebtor": "WEST COAST FROZEN FOODS PVT. LTD."
+            },
+            {
+                "uuid": "65604296-75d2-4953-b75b-cbc1b4dcc4a1",
+                "nameOfCorporateDebtor": "NANA LAYJA POWER COMPANY LIMITED"
+            },
+            {
+                "uuid": "60e537c5-f516-4fa0-b53f-a746a8ec7af0",
+                "nameOfCorporateDebtor": "SANSKRUT JEWEL RESIDENCY LIMITED LIABILITY PARTNERSHIP"
+            },
+            {
+                "uuid": "96653244-a4b2-458c-b71a-058a8b376bf5",
+                "nameOfCorporateDebtor": "Real Strips Limited"
+            },
+            {
+                "uuid": "2954392d-90ff-42de-8abf-1188749c49e9",
+                "nameOfCorporateDebtor": "Vikram Hospital Private Limited"
+            },
+            {
+                "uuid": "31b592b3-d306-43db-aeb7-b3d17a13ddd5",
+                "nameOfCorporateDebtor": "Anil Nutrients Limited"
+            },
+            {
+                "uuid": "61dd77c7-93b0-4635-bdba-3990b59186c4",
+                "nameOfCorporateDebtor": "Oasis Tradelink Limited"
+            },
+            {
+                "uuid": "36d9b100-654a-4736-96f3-45941d041716",
+                "nameOfCorporateDebtor": "Anil Mega Food Park Private Limited"
+            },
+            {
+                "uuid": "8a41b377-c1b1-4e59-9519-6eefce88b037",
+                "nameOfCorporateDebtor": "MAHARASHTRA SHETKARI SUGAR LIMITED"
+            },
+            {
+                "uuid": "3886a0d0-3574-4279-8de1-b508b933359a",
+                "nameOfCorporateDebtor": "Krrome Glass Private Limited"
+            },
+            {
+                "uuid": "01e650b2-94bf-4983-a805-ddf8df81b133",
+                "nameOfCorporateDebtor": "VARIA ALUMINIUM PRIVATE LIMITED"
+            },
+            {
+                "uuid": "4f3c51d6-a2e1-4fc7-aadd-998606296402",
+                "nameOfCorporateDebtor": "RADHESHYAM FIBERS PRIVATE LIMITED"
+            },
+            {
+                "uuid": "b1c3bc5a-3d11-430f-9e96-a07edf147903",
+                "nameOfCorporateDebtor": "ANIL LIMITED"
+            },
+            {
+                "uuid": "83b4517c-1a47-4862-b599-537e1ab165ed",
+                "nameOfCorporateDebtor": "Rainbow Papers Limited"
+            },
+            {
+                "uuid": "fee04244-635b-42f9-84e7-9a98221b564f",
+                "nameOfCorporateDebtor": "FIVEBRO INTERNATIONAL PRIVATE LIMITED"
+            },
+            {
+                "uuid": "df4906c3-e6a9-4c81-83d9-29ad36c2ab8b",
+                "nameOfCorporateDebtor": "VIKRAM HOSPITAL PRIVATE LIMITED"
+            },
+            {
+                "uuid": "2be387d3-3f22-43bc-994e-ccf3ce4e4aed",
+                "nameOfCorporateDebtor": "DOSHION PRIVATE LIMITED"
+            },
+            {
+                "uuid": "b75cf9bf-50d1-4f03-a801-ec99b07bf83a",
+                "nameOfCorporateDebtor": "ASHAPURA GARMENTS LIMITED"
+            }
+        ],
+        "processTypes": [
+            {
+                "uuid": "bb9683f5-0506-45be-99a7-477c5318219r",
+                "processTypeName": "Corporate Insolvency Resolution Process (CIRP)",
+                "processTypeCode": "50001",
+                "isActive": null,
+                "processTypeValue": "CIRP",
+                "auditDetails": null
+            },
+            {
+                "uuid": "4cff2462-4b00-4bac-b675-f4229d23a27e",
+                "processTypeName": "Liquidation",
+                "processTypeCode": "50002",
+                "isActive": null,
+                "processTypeValue": "Liquidation",
+                "auditDetails": null
+            },
+            {
+                "uuid": "7dd28133-31a5-4240-a8e8-9b9cadcbdaa1",
+                "processTypeName": "Voluntary Liquidation",
+                "processTypeCode": "50003",
+                "isActive": null,
+                "processTypeValue": "Voluntary Liquidation",
+                "auditDetails": null
+            },
+            {
+                "uuid": "83501753-c596-470b-81fc-06840c993b39",
+                "processTypeName": "Pre-Packaged Insolvency Resolution Process (PPIRP)",
+                "processTypeCode": "50004",
+                "isActive": null,
+                "processTypeValue": "PPIRP",
+                "auditDetails": null
+            }
+        ],
+        "claimantTypes": [
+            {
+                "uuid": "1001",
+                "claimantName": "Financial Creditors",
+                "claimantCode": "1001"
+            },
+            {
+                "uuid": "1002",
+                "claimantName": "Operational Creditors",
+                "claimantCode": "1002"
+            },
+            {
+                "uuid": "1003",
+                "claimantName": "Employees and Workmen",
+                "claimantCode": "1003"
+            },
+            {
+                "uuid": "1004",
+                "claimantName": "Employees and Workmen – Through Authorised Representative",
+                "claimantCode": "1004"
+            },
+            {
+                "uuid": "1005",
+                "claimantName": "Other Creditors (Other than financial and operational creditors)",
+                "claimantCode": "1005"
+            }
+        ],
+        "claimantCategories": [
+            {
+                "uuid": "20001",
+                "claimantCategoryName": "Secured Financial Creditors (Banks/ARCs/NBFCs/FIs)",
+                "formId": "40002"
+            },
+            {
+                "uuid": "20002",
+                "claimantCategoryName": "Unsecured Financial Creditors (Banks/ARCs/NBFCs/FIs)",
+                "formId": "40002"
+            },
+            {
+                "uuid": "20003",
+                "claimantCategoryName": "Unsecured Financial Creditors in Class of Creditors (Homebuyers)",
+                "formId": "40007"
+            },
+            {
+                "uuid": "20004",
+                "claimantCategoryName": "Unsecured Financial Creditors – (Other than Banks / ARCs / NBFCs)",
+                "formId": "40002"
+            }
+        ],
+        "formDetail": {
+            "uuid": "40002",
+            "formName": "Form C",
+            "formCode": "40002",
+            "isActive": true
+        }
+    }
+}
+formName NEED TO SAVE IN LOCALSTORAGE AFTER LOGIN 
+IN userFormData LOCALSTORGAE SAVE formName VALUE ALSO AFTER LOGIN
