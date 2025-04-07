@@ -1,167 +1,259 @@
-import React, { useState, useContext, useEffect } from "react";
-import { useForm } from "react-hook-form";
-import { useNavigate } from "react-router-dom";
-import { toast } from "react-toastify";
-import { UserContext } from "../../components/context/UserContext.js";
-import "./Login.css";
-import {
-  fetchInitialClaimantData,
-  fetchClaimantCategoriesData,
-  fetchFormDetailsData,
-} from "../../services/claimant.service.js";
-import axios from "axios"; // Import axios for API calls
+import React, { useState, useEffect, useCallback } from "react";
+import { useForm, FormProvider } from "react-hook-form";
+import DynamicField from "./formCommon/DynamicField";
+import Collapsible from "./formCommon/Collapsible";
+import Tooltip from "@mui/material/Tooltip"; 
+import "./StepFirst.css";
 
-const LoginPage = () => {
-  const {
-    register,
-    handleSubmit,
-    watch,
-    formState: { errors },
-    reset,
-    setValue,
-    trigger,
-  } = useForm();
-  const navigate = useNavigate();
-  const { setUserData } = useContext(UserContext);
+const StepFirst = ({ provideSubmitHandler, formData }) => {
+  const methods = useForm();
+  const { register, handleSubmit, formState: { errors }, trigger, clearErrors, setValue, control, getValues, watch } = methods;
 
-  const [otpSent, setOtpSent] = useState(false);
-  const [otp, setOtp] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [selectedRadio, setSelectedRadio] = useState("corporateDebtor");
-  const [claimantTypes, setClaimantTypes] = useState([]);
-  const [claimantCategories, setClaimantCategories] = useState([]);
-  const [apiLoading, setApiLoading] = useState(false);
-  const [corporateDebtors, setCorporateDebtors] = useState([]);
-  const [processTypes, setProcessTypes] = useState([]);
-  const [selectedCorporateDebtor, setSelectedCorporateDebtor] = useState(null);
-  const [selectedProcessType, setSelectedProcessType] = useState(null);
-  const [selectedClaimantType, setSelectedClaimantType] = useState(null);
-  const [selectedFormName, setSelectedFormName] = useState("");
+  const claimantDetailsSchema = [
+    { 
+      name: "CreditorName", 
+      label: <>Creditor Name <span className="required-asterisk">*</span></>, 
+      type: "text", 
+      rules: { required: "Creditor Name is required" },
+      placeholder: "Enter Creditor Name"
+    },
+    { 
+      name: "totalClaimAmount", 
+      label: <>Total Claim Amount <span className="required-asterisk">*</span></>, 
+      type: "number", 
+      rules: { required: "Total Claim Amount is required", min: { value: 0, message: "Value must be greater than or equal to 0" } },
+      placeholder: "Enter Total Claim Amount"
+    },
+    { 
+      name: "debtDetails", 
+      label: <>Debt Incurred Details <span className="required-asterisk">*</span></>, 
+      type: "textarea", 
+      rules: { required: "Debt Details are required" },
+      tooltip: "Details of how and when debt incurred",
+      placeholder: "Enter Debt Incurred Details"
+    },
+    { 
+      name: "mutualCreditDetails", 
+      label: <>Mutual Credit/Debts Details <span className="required-asterisk">*</span></>, 
+      type: "textarea", 
+      rules: { required: "Mutual Credit Details are required" },
+      tooltip: "Details of any mutual credit, mutual debts, or other mutual dealings between the corporate debtor and the creditor which may be set-off against the claim",
+      placeholder: "Enter Mutual Credit/Debts Details"
+    },
+    {
+      name: "identificationType",
+      label: <>Identification Type <span className="required-asterisk">*</span></>,
+      type: "select",
+      options: [
+        { value: "", label: "Select Identification Type", disabled: true },
+        { value: "Aadhar", label: "Aadhar" },
+        { value: "PAN", label: "PAN" },
+        { value: "Passport", label: "Passport" },
+      ],
+      rules: { required: "Identification type is required" },
+      tooltip: "Select the type of identification document.",
+    },
+    {
+      name: "identificationNumber",
+      label: <>Identification Number <span className="required-asterisk">*</span></>,
+      type: "text",
+      rules: { required: "Identification number is required" },
+      tooltip: "You can enter Aadhar, PAN, or Passport number.",
+      placeholder: "Enter Identification Number"
+    },
+    {
+      name: "identificationDocument",
+      label: <>Identification Document <span className="required-asterisk">*</span></>,
+      type: "file",
+      rules: { required: "Identification document is required" },
+      tooltip: "Upload a document as proof of identification (e.g., Aadhar, PAN, or Passport).",
+    },
+  ];
 
-  // Watch all form values
-  const formValues = watch();
-  const {
-    username,
-    email,
-    password,
-    userType,
-    financialCreditorType,
-    operationalCreditorType,
-    processTypeUuid,
-    corporateDebtorUuid,
-    termsAccepted
-  } = formValues;
-
-  // ... [keep all existing useEffect hooks and helper functions] ...
-
-  const handleVerifyOTP = async (data) => {
-    if (!otp) {
-      toast.error("Please enter OTP");
-      return;
+  const debtorDetailsSchema = [
+    {
+      name: "debtorName",
+      label: <>Debtor Name <span className="required-asterisk">*</span></>,
+      type: "text",
+      rules: { required: "Debtor Name is required" },
+      placeholder: "Enter Debtor Name",
+      tooltip: "Name of the corporate debtor against whom the claim is being filed"
     }
-    if (!data.termsAccepted) {
-      toast.info("Please accept terms");
-      return;
+  ];
+
+  const onSubmit = useCallback(async () => {
+    // Trigger validation for all fields
+    const isValid = await trigger();
+  
+    // Check if the Identification Document is uploaded
+    const identificationDocument = getValues("identificationDocument");
+  
+    if (!isValid || !identificationDocument) {
+      console.error("Validation failed or Identification Document not uploaded");
+      return false;
     }
+  
+    return getValues(); // Return form values if validation passes
+  }, [trigger, getValues]);
 
-    setLoading(true);
-    
-    try {
-      const processType = processTypes.find(p => p.uuid === processTypeUuid);
-      const corporateDebtor = corporateDebtors.find(d => d.uuid === corporateDebtorUuid);
-      const claimantCategory = claimantCategories.find(c => 
-        c.uuid === (userType === "Financial Creditors" ? financialCreditorType : operationalCreditorType)
-      );
-
-      const payload = {
-        userType: "CLAIMANT",
-        commonMasterRequest: {
-          debtorsUuid: corporateDebtorUuid,
-          processTypeUuid: processTypeUuid,
-          processTypeValue: processType?.processTypeValue || "",
-          claimantTypeUuid: selectedClaimantType?.uuid || "",
-          claimantCategoryUuid: claimantCategory?.uuid || "",
-          formUuid: claimantCategory?.formId || ""
-        },
-        claimantLoginRequest: {
-          mobileNumber: username,
-          processId: processType?.processTypeValue || "",
-          corporateDebtorId: corporateDebtor?.uuid || "",
-          claimantCatagoryId: selectedClaimantType?.uuid || "",
-          claimantSubCatagoryId: claimantCategory?.uuid || "",
-          otp: otp
-        },
-        corporateDebtorLoginRequest: null
-      };
-
-      const response = await axios.post('/_user/_login', payload);
-      
-      if (response.data.status.code === "200") {
-        const userPayload = {
-          userType: "CLM",
-          userId: username,
-          processType: processType?.processTypeValue || "",
-          corporateDebtorName: corporateDebtor?.nameOfCorporateDebtor || "",
-          claimantType: userType,
-          claimantCategoryType: claimantCategory?.claimantCategoryName || "",
-          formName: selectedFormName,
-          userDetails: response.data.users[0]?.claimant || null
-        };
-
-        setUserData(userPayload);
-        localStorage.setItem("userFormData", JSON.stringify(userPayload));
-        toast.success("Login Successful");
-        navigate("/dashboard");
-      } else {
-        toast.error(response.data.status.message || "Login failed");
-      }
-    } catch (error) {
-      console.error("Login error:", error);
-      toast.error(error.response?.data?.status?.message || "Login failed");
-    } finally {
-      setLoading(false);
+  useEffect(() => {
+    if (formData) {
+      Object.keys(formData).forEach((key) => {
+        setValue(key, formData[key]);
+      });
     }
-  };
+  }, [formData, setValue]);
 
-  const handleCorporateDebtorLogin = async (data) => {
-    setLoading(true);
-    
-    try {
-      const payload = {
-        userType: "CORPORATOR",
-        commonMasterRequest: {},
-        claimantLoginRequest: null,
-        corporateDebtorLoginRequest: {
-          emailId: data.email,
-          password: data.password
-        }
-      };
-
-      const response = await axios.post('/_user/_login', payload);
-      
-      if (response.data.status.code === "200") {
-        const userPayload = {
-          userType: "CRP",
-          email: data.email,
-          userDetails: response.data.users[0]?.corporateDebtor || null
-        };
-
-        setUserData(userPayload);
-        localStorage.setItem("userFormData", JSON.stringify(userPayload));
-        toast.success("Login Successful");
-        navigate("/dashboard");
-      } else {
-        toast.error(response.data.status.message || "Login failed");
-      }
-    } catch (error) {
-      console.error("Login error:", error);
-      toast.error(error.response?.data?.status?.message || "Login failed");
-    } finally {
-      setLoading(false);
+  useEffect(() => {
+    if (provideSubmitHandler) {
+      provideSubmitHandler(onSubmit);
     }
-  };
+  }, [provideSubmitHandler, onSubmit]);
 
-  // ... [keep all the existing JSX return code] ...
+  const identificationType = watch("identificationType");
+
+  useEffect(() => {
+    if (identificationType) {
+      trigger("identificationType");
+    }
+  }, [identificationType, trigger]);
+
+  return (
+    <FormProvider {...methods}>
+      <form className="form-stepper">
+        <div className="mb-4 bg-light">
+          
+        
+        <div className="mb-4 bg-light">
+          <Collapsible title="Debtor Details">
+            <div className="flex-container">
+              {debtorDetailsSchema.map((fieldConfig) => (
+                <DynamicField
+                  key={fieldConfig.name}
+                  fieldConfig={fieldConfig}
+                  control={control}
+                  register={register}
+                  errors={errors}
+                  setValue={setValue}
+                  trigger={trigger}
+                  getValues={getValues}
+                />
+              ))}
+            </div>
+          </Collapsible>
+        </div>
+          <Collapsible title="Creditor Basic Details">
+            <div className="flex-container">
+              {claimantDetailsSchema.map((fieldConfig) => (
+                <DynamicField
+                  key={fieldConfig.name}
+                  fieldConfig={fieldConfig}
+                  control={control}
+                  register={register}
+                  errors={errors}
+                  setValue={setValue}
+                  trigger={trigger}
+                  getValues={getValues}
+                />
+              ))}
+            </div>
+          </Collapsible>
+        </div>
+
+      </form>
+    </FormProvider>
+  );
 };
 
-export default LoginPage;
+export default StepFirst;
+
+{
+  "userType": "CLM",
+  "userId": "8737373737",
+  "processType": "CIRP",
+  "corporateDebtorName": "Jalpower Corporation Limited",
+  "claimantType": "Financial Creditors",
+  "claimantCategoryType": "Secured Financial Creditors (Banks/ARCs/NBFCs/FIs)",
+  "formName": "Form C",
+  "userDetails": {
+    "uuid": "b955fd81-e1f1-49f2-a73c-bf11f8361dcd",
+    "claimantName": "Anjali Thakur",
+    "corporateName": null,
+    "emailId": "anali.thakur@example.com",
+    "claimantEntityType": "INDV",
+    "mobileNumber": "8737373737",
+    "aadharNumber": "012203445566",
+    "panNumber": "THKA8912L",
+    "cinOrTaNumber": null,
+    "roleCode": "CLAIMANT",
+    "auditDetails": {
+      "createdBy": "b955fd81-e1f1-49f2-a73c-bf11f8361dcd",
+      "lastModifiedBy": "b955fd81-e1f1-49f2-a73c-bf11f8361dcd",
+      "createdTime": "2025-04-07 12:17:32.467",
+      "lastModifiedTime": "2025-04-07 12:17:32.467"
+    },
+    "active": true
+  },
+  "claimantName": "Anjali Thakur",
+  "fullloginDetails": {
+    "status": {
+      "code": "200",
+      "message": "Successful"
+    },
+    "token": null,
+    "otp": "123456",
+    "processTypes": {
+      "auditDetails": null,
+      "uuid": "bb9683f5-0506-45be-99a7-477c5318219r",
+      "processTypeName": "Corporate Insolvency Resolution Process (CIRP)",
+      "processTypeCode": "50001",
+      "isActive": null,
+      "processTypeValue": "CIRP"
+    },
+    "claimantTypes": {
+      "uuid": "1001",
+      "claimantName": "Financial Creditors",
+      "claimantCode": "1001"
+    },
+    "claimantCategories": {
+      "uuid": "20001",
+      "claimantCategoryName": "Secured Financial Creditors (Banks/ARCs/NBFCs/FIs)",
+      "claimantCategoryCode": "20001",
+      "isActive": true,
+      "cirpFormId": "40002",
+      "claimantTypeCode": "1001",
+      "liquidationId": "a6928a25-1d51-4e6b-aa6c-a9c1a4ab62f8"
+    },
+    "formDetails": {
+      "uuid": "40002",
+      "formName": "Form C",
+      "formCode": "40002",
+      "isActive": true
+    },
+    "userType": "CLAIMANT",
+    "users": [
+      {
+        "claimant": {
+          "uuid": "b955fd81-e1f1-49f2-a73c-bf11f8361dcd",
+          "claimantName": "Anjali Thakur",
+          "corporateName": null,
+          "emailId": "anali.thakur@example.com",
+          "claimantEntityType": "INDV",
+          "mobileNumber": "8737373737",
+          "aadharNumber": "012203445566",
+          "panNumber": "THKA8912L",
+          "cinOrTaNumber": null,
+          "roleCode": "CLAIMANT",
+          "auditDetails": {
+            "createdBy": "b955fd81-e1f1-49f2-a73c-bf11f8361dcd",
+            "lastModifiedBy": "b955fd81-e1f1-49f2-a73c-bf11f8361dcd",
+            "createdTime": "2025-04-07 12:17:32.467",
+            "lastModifiedTime": "2025-04-07 12:17:32.467"
+          },
+          "active": true
+        },
+        "corporateDebtor": null
+      }
+    ]
+  }
+}
