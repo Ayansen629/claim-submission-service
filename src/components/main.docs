@@ -6,414 +6,6 @@ import { Modal, Button, Form } from "react-bootstrap";
 import "./Stepper.css";
 import { useRegistration } from "../../context/ApplicationContext";
 import ReviewStep from "./ReviewStep";
-import { FormDataProvider } from "../../context/FormDataContext"; // Import the context
-
-const deepEqual = (obj1, obj2) => {
-  return JSON.stringify(obj1) === JSON.stringify(obj2);
-};
-
-const Stepper = ({ stepsConfig = [], formAllData }) => {
-  const { id } = useParams();
-  const isEditMode = !!id;
-  const [currentStep, setCurrentStep] = useState(1);
-  const [isConfirmed, setIsConfirmed] = useState(false);
-  const [isComplete, setIsComplete] = useState(false);
-  const [isViewModalOpen, setIsViewModalOpen] = useState(false);
-  const [hasPreviewed, setHasPreviewed] = useState(false);
-  const [formData, setFormData] = useState({});
-  const [margins, setMargins] = useState({ marginLeft: 0, marginRight: 0 });
-  const stepRef = useRef([]);
-  const navigate = useNavigate();
-  const [currentSubmitHandler, setCurrentSubmitHandler] = useState(null);
-  const [showModal, setShowModal] = useState(false);
-  const [comments, setComments] = useState("");
-  const [actionType, setActionType] = useState("");
-  const [flattenedData, setFlattenedData] = useState({});
-  const [isSavingDraft, setIsSavingDraft] = useState(false);
-
-  const {
-    registrationData,
-    handleStepDataFetch,
-    updateRegistrationData,
-    loadDataFromLocalStorage,
-    isDataLoaded,
-
-  } = useRegistration();
-
-  const userFormData = JSON.parse(localStorage.getItem("userFormData"));
-  const isCRPUser = userFormData?.userType === "CRP";
-
-  const filteredStepsConfig = useMemo(() => {
-    if (isCRPUser) {
-      return stepsConfig.filter((step) => step.name !== "Review & Submit");
-    }
-    return stepsConfig;
-  }, [stepsConfig, isCRPUser]);
-
-  useEffect(() => {
-    if (id) {
-      loadDataFromLocalStorage(id);
-    }
-  }, [id, loadDataFromLocalStorage]);
-
-  useEffect(() => {
-    if (isEditMode && registrationData && !deepEqual(formData, registrationData)) {
-      setFormData(registrationData);
-    }
-  }, [isEditMode, registrationData, formData]);
-
-  useEffect(() => {
-    const savedIsConfirmed = localStorage.getItem("isConfirmed");
-    if (savedIsConfirmed) {
-      setIsConfirmed(JSON.parse(savedIsConfirmed));
-    }
-  }, []);
-
-  useEffect(() => {
-    localStorage.setItem("isConfirmed", JSON.stringify(isConfirmed));
-  }, [isConfirmed]);
-
-  useEffect(() => {
-    const newSubmitHandler = filteredStepsConfig[currentStep - 1]?.submitHandler;
-    if (newSubmitHandler && newSubmitHandler !== currentSubmitHandler) {
-      setCurrentSubmitHandler(() => newSubmitHandler);
-    }
-  }, [currentStep, filteredStepsConfig]);
-
-  const updateSubmitHandler = useCallback((submitHandler) => {
-    setCurrentSubmitHandler(() => submitHandler);
-  }, []);
-
-  useEffect(() => {
-    if (stepRef.current.length > 0) {
-      const firstStep = stepRef.current[0]?.offsetWidth || 0;
-      const lastStep = stepRef.current[filteredStepsConfig.length - 1]?.offsetWidth || 0;
-      setMargins({
-        marginLeft: firstStep / 2,
-        marginRight: lastStep / 2,
-      });
-    }
-  }, [filteredStepsConfig.length]);
-
-  const validateStepData = (step, data) => {
-    const requiredFields = filteredStepsConfig[step - 1]?.requiredFields || [];
-    for (let field of requiredFields) {
-      if (!data[field]) {
-        toast.error(`${field} is required.`);
-        return false;
-      }
-    }
-    return true;
-  };
-
-  const handleNext = async () => {
-    if (!currentSubmitHandler) {
-      console.error("No submit handler available.");
-      return;
-    }
-
-    const currentStepData = await currentSubmitHandler();
-    if (!currentStepData) {
-      console.error("Form validation failed.");
-      return;
-    }
-
-    if (!validateStepData(currentStep, currentStepData)) {
-      return;
-    }
-console.log(formData,"allformDetails")
-    const updatedFormData = {
-      ...formData,
-      [`step${currentStep}`]: { ...formData[`step${currentStep}`], ...currentStepData },
-    };
-    console.log("Updated Form Data:", JSON.stringify(updatedFormData, null, 2));
-
-    if (!deepEqual(updatedFormData, formData)) {
-      setFormData(updatedFormData);
-      updateRegistrationData(`step${currentStep}`, updatedFormData[`step${currentStep}`], id);
-    }
-
-    if (currentStep === filteredStepsConfig.length) {
-      setIsComplete(true);
-      toast.success("Form submitted successfully");
-      navigate("/dashboard");
-    } else {
-      setCurrentStep((prevStep) => prevStep + 1);
-    }
-  };
-
-  const handleSaveDraft = async () => {
-    setIsSavingDraft(true);
-    try {
-      const currentStepData = currentSubmitHandler ? await currentSubmitHandler() : {};
-      const draftId=id || `draft-${Date.now()}-${Math.random()}.toString(36).substring(2, 9)}`;
-      
-      const draftData = {
-        ...formData,
-        [`step${currentStep}`]: { 
-          ...formData[`step${currentStep}`], 
-          ...currentStepData 
-        },
-        id: draftId,
-        status: "draft",
-        lastSaved: new Date().toISOString(),
-        currentStep,
-        formType:userFormData?.formType,
-        userType: userFormData?.userType,
-      };
-      const existingDraft = JSON.parse(localStorage.getItem("formDrafts") || "[]");
- 
-     const updatedDrafts=[
-      ...existingDraft.filter((draft) => draft.id !== draftId), 
-      draftData
-     ]
-      localStorage.setItem("formDrafts", JSON.stringify(updatedDrafts));
-      
-
-      // await saveDraft(draftData);
-     
-      toast.success("Draft saved successfully");
-      navigate("/drafts"); 
-    } catch (error) {
-      console.error("Error saving draft:", error);
-      toast.error("Failed to save draft");
-    } finally {
-      setIsSavingDraft(false);
-    }
-  };
-
-  const handleActionClick = (action) => {
-    setActionType(action);
-    setShowModal(true);
-  };
-  const handleModalClose = () => {
-    setShowModal(false);
-    setComments("");
-  };
-
-  const handleActionSubmit = () => {
-    console.log(`Action: ${actionType}, Comments: ${comments}`);
-    toast.success(`${actionType} submitted successfully`);
-    navigate("/dashboard");
-  };
-  const handlePrevious = () => {
-    setCurrentStep((prevStep) => Math.max(1, prevStep - 1));
-    setIsConfirmed(false);
-    localStorage.removeItem("isConfirmed");
-  };
-
-  const handleCancel = () => {
-    navigate("/dashboard");
-  };
-
-  const calculateProgressBarWidth = () => {
-    return ((currentStep - 1) / (filteredStepsConfig.length - 1)) * 100;
-  };
-
-  const ActiveComponent = filteredStepsConfig[currentStep - 1]?.Component;
-  const shouldRenderReviewStep = currentStep === filteredStepsConfig.length && isDataLoaded;
-
-  const flattenFormData = (formData) => {
-    return {
-      ...formData.step1,
-      ...formData.step2,
-      ...formData.step3,
-    };
-  };
-
-
-
-
-  return (
-    <FormDataProvider formData={flattenFormData(formData)}> 
-      <div className="stepper">
-        {filteredStepsConfig.map((step, index) => (
-          <div
-            key={step.name}
-            ref={(el) => (stepRef.current[index] = el)}
-            className={`step ${
-              currentStep > index + 1 || isComplete ? "complete" : ""
-            } ${currentStep === index + 1 ? "active" : ""}`}
-          >
-            <div className="step-number">
-              {currentStep > index + 1 || isComplete ? (
-                <span>✓</span>
-              ) : (
-                index + 1
-              )}
-            </div>
-            <div className="step-name">{step.name}</div>
-          </div>
-        ))}
-
-        <div
-          className="progress-bar"
-          style={{
-            marginLeft: margins.marginLeft,
-            marginRight: margins.marginRight,
-          }}
-        >
-          <div
-            className="progress"
-            style={{ width: `${calculateProgressBarWidth()}%` }}
-          ></div>
-        </div>
-      </div>
-
-      {ActiveComponent && (
-        <ActiveComponent
-          formData={formData[`step${currentStep}`] || {}}
-          provideSubmitHandler={updateSubmitHandler}
-          setFormData={setFormData}
-        />
-      )}
-
-      {shouldRenderReviewStep && Object.keys(flattenedData).length > 0 && !isCRPUser && (
-        <ReviewStep />
-      )}
-
-      {currentStep === filteredStepsConfig.length && !isCRPUser && (
-        <div className="confirmation-container">
-          <Form.Group controlId="formConfirmation" className="mt-3 confirmation-checkbox">
-            <Form.Check
-              type="checkbox"
-              label="I confirm that the information provided is correct."
-              checked={isConfirmed}
-              onChange={(e) => setIsConfirmed(e.target.checked)}
-            />
-          </Form.Group>
-        </div>
-      )}
-
-
-<div className="stepper-buttons">
-  {currentStep > 1 && (
-    <button className="buttonplus previous-button" onClick={handlePrevious}>
-      Previous
-    </button>
-  )}
-  {currentStep === 1 && (
-    <button className="buttonplus cancel-button" onClick={handleCancel}>
-      Cancel
-    </button>
-  )}
-
-  {/* Special handling for step 3 */}
-  {currentStep === 3 && !isCRPUser && (
-    <div className="last-step-buttons">
-      <button
-        className="buttonplus draft-button"
-        onClick={handleSaveDraft}
-        disabled={isSavingDraft}
-      >
-        {isSavingDraft ? "Saving..." : "Save as Draft"}
-      </button>
-      <button
-        className="buttonplus preview-button"
-        onClick={handleNext}
-      >
-        Preview
-      </button>
-      </div>
-  )}
-
-  {/* Normal step handling (except step 3 and last step) */}
-  {currentStep !== 3 && currentStep !== filteredStepsConfig.length && (
-    <button
-      className="buttonplus next-button"
-      onClick={handleNext}
-      disabled={isComplete}
-    >
-      Next
-    </button>
-  )}
-
-  {/* Last step handling */}
-  {currentStep === filteredStepsConfig.length && isCRPUser ? (
-    <>
-      <button
-        className="buttonplus sendback-button"
-        onClick={() => handleActionClick("Sendback To Claimants")}
-      >
-        Sendback To Claimants
-      </button>
-      <button
-        className="buttonplus accept-contingent-button"
-        onClick={() => handleActionClick("Accept as Contingent")}
-      >
-        Accept as Contingent
-      </button>
-      <button
-        className="buttonplus accept-button"
-        onClick={() => handleActionClick("Accept")}
-      >
-        Accept
-      </button>
-      <button
-        className="buttonplus reject-button"
-        onClick={() => handleActionClick("Reject")}
-      >
-        Reject
-      </button>
-    </>
-  ) : currentStep === filteredStepsConfig.length ? (
-    <button
-      className="buttonplus next-button"
-      onClick={handleNext}
-      disabled={!isConfirmed || isComplete}
-    >
-      Submit
-    </button>
-  ) : null}
-</div>
-
-     
-
-      <Modal show={showModal} onHide={handleModalClose} centered>
-        <Modal.Header closeButton>
-          <Modal.Title>{actionType} Form</Modal.Title>
-        </Modal.Header>
-        <Modal.Body>
-          <Form>
-            <Form.Group controlId="comments">
-              <Form.Label>Comments</Form.Label>
-              <Form.Control
-                as="textarea"
-                rows={3}
-                value={comments}
-                onChange={(e) => setComments(e.target.value)}
-                placeholder="Enter your comments..."
-              />
-            </Form.Group>
-          </Form>
-        </Modal.Body>
-        <Modal.Footer>
-          <Button className="modal-close-button" onClick={handleModalClose}>
-            Close
-          </Button>
-          <Button
-            className="modal-submit-button"
-            onClick={handleActionSubmit}
-            disabled={!comments.trim()}
-          >
-            Submit
-          </Button>
-        </Modal.Footer>
-      </Modal>
-    </FormDataProvider>
-  );
-};
-
-export default Stepper;
-this code is good
-// Stepper.js
-import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
-import { useNavigate, useParams } from "react-router-dom";
-import { toast } from "react-toastify";
-import { Modal, Button, Form } from "react-bootstrap";
-import "./Stepper.css";
-import { useRegistration } from "../../context/ApplicationContext";
-import ReviewStep from "./ReviewStep";
 import { FormDataProvider } from "../../context/FormDataContext";
 
 /**
@@ -710,6 +302,7 @@ const Stepper = ({ stepsConfig = [], formAllData }) => {
   };
 
   const handlePreview = async () => {
+    // debugger;
     if (!currentSubmitHandler) {
       console.error("No submit handler available.");
       return;
@@ -739,11 +332,13 @@ const Stepper = ({ stepsConfig = [], formAllData }) => {
 
     // Create the payload same as handleNext would
     const previewPayload = createFormPayload(updatedFormData);
-    if(!hasPreviewed){
+    // if(!hasPreviewed){
       console.log("Preview Payload:", JSON.stringify(previewPayload, null, 2));
+      localStorage.setItem("previewPayload", JSON.stringify(previewPayload));
+
           setHasPreviewed(true);
 
-    }
+    // }
 
     
     // Open the preview modal
@@ -860,6 +455,14 @@ const Stepper = ({ stepsConfig = [], formAllData }) => {
     
     return flattened;
   };
+  // const flattenedFormData=useMemo(() => {
+  //   return flattenFormData(formData)
+ 
+
+  // },[formData])
+  // const showReviewStep = useMemo(() => {
+  //   return currentStep === filteredStepsConfig.length && isDataLoaded && !isCRPUser;
+  // }, [currentStep, filteredStepsConfig.length, isDataLoaded, isCRPUser]);
 
   return (
     <FormDataProvider formData={flattenFormData(formData)}> 
@@ -1036,3 +639,133 @@ const Stepper = ({ stepsConfig = [], formAllData }) => {
 };
 
 export default Stepper;
+// ReviewStep.js
+import React, { useEffect, useMemo } from "react";
+import { Container, Row, Col, Spinner } from "react-bootstrap";
+import Collapsible from "./formCommon/Collapsible";
+import { useFormData } from "../../context/FormDataContext";
+import PreviewCard from "../../private/Dashboard/PreviewCard";
+
+const ReviewStep = () => {
+  const { formData } = useFormData();
+  const [hasLoggedData, setHasLoggedData] = React.useState(false);
+
+  // Memoize the formatted data to prevent unnecessary re-renders
+  const formattedData = useMemo(() => {
+    if (!formData || Object.keys(formData).length === 0) return null;
+
+    // Helper function to format file information
+    const formatFileInfo = (fileData) => {
+      if (!fileData) return "No file uploaded";
+      if (typeof fileData === "string") return fileData;
+      return fileData.name || fileData.fileName || "File uploaded";
+    };
+
+    return {
+      step1: {
+        creditorDetails: {
+          "Debtor Name": formData.debtorName,
+          "Creditor Name": formData.CreditorName,
+          "Total Claim Amount": formData.totalClaimAmount,
+          "Debt Details": formData.debtDetails,
+          "Mutual Credit Details": formData.mutualCreditDetails,
+        },
+        identificationDetails: {
+          "Identification Type": formData.identificationType,
+          "Identification Number": formData.identificationNumber,
+          "Identification Document": formatFileInfo(formData.identificationDocument),
+        }
+      },
+      step2: {
+        financialDetails: {
+          "Security Interest Amount": formData.securityInterestAmount,
+          "Guarantee Amount": formData.guaranteeAmount,
+          "Guarantor Name": formData.guarantorName,
+          "Guarantor Address": formData.guarantorAddress,
+          "Creditor Address": formData.creditorAddress,
+          "Creditor Email": formData.creditorEmail,
+        },
+        beneficiaryDetails: {
+          "Beneficiary Name": formData.beneficiaryName,
+          "Beneficiary Address": formData.beneficiaryAddress,
+          "Corporate Debtor Security Amount": formData.corporateDebtorSecurityAmount,
+          "Corporate Debtor Guarantee Amount": formData.corporateDebtorGuaranteeAmount,
+        },
+        bankDetails: {
+          "Principal Borrower Name": formData.principalBorrowerName,
+          "Principal Borrower Address": formData.principalBorrowerAddress,
+          "Account Number": formData.accountNumber,
+          "IFSC Code": formData.ifscCode,
+          "Branch Name": formData.branchName,
+          "Address Proof": formatFileInfo(formData.addressProof),
+        }
+      },
+      step3: {
+        signatoryDetails: {
+          "Signatory Name": formData.signatoryName,
+          "Signatory Position": formData.signatoryPosition,
+          "Signatory Address": formData.signatoryAddress,
+          "Signatory Document": formatFileInfo(formData.signatoryDocument),
+        }
+      }
+    };
+  }, [formData]);
+
+  useEffect(() => {
+    if (formattedData && !hasLoggedData) {
+      console.log("Review formdata:", formattedData);
+      setHasLoggedData(true);
+    }
+  }, [formattedData, hasLoggedData]);
+
+  const renderPreviewSection = (fields) => (
+    <Container fluid>
+      <Row className="g-3">
+        {Object.entries(fields).map(([key, value]) => (
+          <Col key={key} xs={12} sm={6} md={3} className="mb-3">
+            <PreviewCard 
+              title={key} 
+              value={value} 
+            />
+          </Col>
+        ))}
+      </Row>
+    </Container>
+  );
+
+  const renderCard = (title, fields) => (
+    <div className="mb-3">
+      <h5 style={{ fontWeight: 600 }}>{title}</h5>
+      {renderPreviewSection(fields)}
+    </div>
+  );
+
+  if (!formattedData) {
+    return (
+      <div className="d-flex justify-content-center align-items-center" style={{ height: "100vh" }}>
+        <Spinner animation="border" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="form-stepper">
+      <Collapsible title="Step 1: Creditor and Identification Details">
+        {renderCard("Creditor Details", formattedData.step1.creditorDetails)}
+        {renderCard("Identification Details", formattedData.step1.identificationDetails)}
+      </Collapsible>
+
+      <Collapsible title="Step 2: Financial and Beneficiary Details">
+        {renderCard("Financial Details", formattedData.step2.financialDetails)}
+        {renderCard("Beneficiary Details", formattedData.step2.beneficiaryDetails)}
+        {renderCard("Bank Details", formattedData.step2.bankDetails)}
+      </Collapsible>
+
+      <Collapsible title="Step 3: Signatory Details">
+        {renderCard("Signatory Details", formattedData.step3.signatoryDetails)}
+      </Collapsible>
+    </div>
+  );
+};
+
+export default React.memo(ReviewStep);
