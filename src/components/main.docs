@@ -8,6 +8,7 @@ import {
   fetchInitialClaimantData,
   fetchClaimantCategoriesData,
   fetchFormDetailsData,
+  loginUser, // Import the login service
 } from "../../services/claimant.service.js";
 
 const LoginPage = () => {
@@ -108,7 +109,7 @@ const LoginPage = () => {
         setValue("operationalCreditorType", "");
       }
     }
-  }, [userType, corporateDebtorUuid, processTypeUuid]);
+  }, [userType, corporateDebtorUuid, processTypeUuid, claimantTypes, setValue, trigger]);
 
   const fetchClaimantCategories = async (claimantType) => {
     try {
@@ -156,11 +157,11 @@ const LoginPage = () => {
     if (!category || !corporateDebtorUuid || !processTypeUuid || !selectedClaimantType) {
       return;
     }
-  
+
     try {
       setApiLoading(true);
       const processType = processTypes.find(p => p.uuid === processTypeUuid);
-      
+
       const payload = {
         debtorsUuid: corporateDebtorUuid,
         processTypeUuid: processTypeUuid,
@@ -169,7 +170,7 @@ const LoginPage = () => {
         claimantCategoryUuid: category.uuid,
         formUuid: category.formId
       };
-      
+
       const response = await fetchFormDetailsData(
         payload.debtorsUuid,
         payload.processTypeUuid,
@@ -178,7 +179,7 @@ const LoginPage = () => {
         payload.claimantCategoryUuid,
         payload.formUuid
       );
-  
+
       if (response.data.status.code === "200") {
         setSelectedFormName(response.data.claimantMasterData.formDetail.formName);
       } else {
@@ -199,10 +200,10 @@ const LoginPage = () => {
     if (selectedRadio === "claimants") {
       const currentValues = watch();
 
-      const basicFieldsValid = 
-        isValidUsername(currentValues.username) && 
-        currentValues.processTypeUuid && 
-        currentValues.corporateDebtorUuid && 
+      const basicFieldsValid =
+        isValidUsername(currentValues.username) &&
+        currentValues.processTypeUuid &&
+        currentValues.corporateDebtorUuid &&
         currentValues.userType;
 
       if (currentValues.userType === "Financial Creditors") {
@@ -229,23 +230,46 @@ const LoginPage = () => {
     }
 
     setLoading(true);
-    setTimeout(() => {
+    try {
       const payload = {
-        userType: "CLM",
-        userId: username,
-        processType: processTypes.find(p => p.uuid === processTypeUuid)?.processTypeValue,
-        corporateDebtorName: corporateDebtors.find(d => d.uuid === corporateDebtorUuid)?.nameOfCorporateDebtor,
-        claimantType: userType,
-        claimantCategoryType:
-          userType === "Financial Creditors" ? financialCreditorType : operationalCreditorType,
-        otp: "123456",
+        userType: "CLAIMANT",
+        commonMasterRequest: {
+          debtorsUuid: corporateDebtorUuid,
+          processTypeUuid: processTypeUuid,
+          processTypeValue: processTypes.find(p => p.uuid === processTypeUuid)?.processTypeValue,
+          claimantTypeUuid: claimantTypes.find(ct => ct.claimantName === userType)?.uuid,
+          claimantCategoryUuid:
+            userType === "Financial Creditors" ? financialCreditorType : operationalCreditorType,
+          formUuid: claimantCategories.find(cc =>
+            (userType === "Financial Creditors" && cc.uuid === financialCreditorType) ||
+            (userType === "Operational Creditors" && cc.uuid === operationalCreditorType)
+          )?.formId,
+        },
+        claimantLoginRequest: {
+          mobileNumber: username,
+          processId: processTypes.find(p => p.uuid === processTypeUuid)?.processId, // Assuming processId exists
+          corporateDebtorId: corporateDebtors.find(d => d.uuid === corporateDebtorUuid)?.corporateDebtorId, // Assuming corporateDebtorId exists
+          claimantCatagoryId:
+            userType === "Financial Creditors" ? financialCreditorType : operationalCreditorType,
+          claimantSubCatagoryId: null, // No field for this in the form
+        },
+        corporateDebtorLoginRequest: null,
       };
+      console.log("Send OTP Payload:", payload);
+      const response = await loginUser({ ...payload, sendOtp: true }); // Assuming your login API handles OTP sending with a flag
 
-      console.log("OTP Payload:", payload);
-      toast.success("OTP Sent");
-      setOtpSent(true);
+      if (response?.data?.status?.code === "200") {
+        toast.success(response.data.status.message || "OTP Sent to your mobile number");
+        setOtpSent(true);
+      } else {
+        toast.error(response?.data?.status?.message || "Failed to send OTP");
+      }
+    } catch (error) {
+      console.error("Error sending OTP:", error);
+      toast.error(error.response?.data?.status?.message || "Failed to send OTP");
+    } finally {
       setLoading(false);
-    }, 1000);
+    }
   };
 
   const handleVerifyOTP = async (data) => {
@@ -259,44 +283,88 @@ const LoginPage = () => {
     }
 
     setLoading(true);
-    setTimeout(() => {
-      if (otp === "123456") {
-        const payload = {
-          userType: "CLM",
-          userId: username,
-          processType: processTypes.find(p => p.uuid === processTypeUuid)?.processTypeValue,
-          corporateDebtorName: corporateDebtors.find(d => d.uuid === corporateDebtorUuid)?.nameOfCorporateDebtor,
-          claimantType: userType,
-          claimantCategoryType:
+    try {
+      const payload = {
+        userType: "CLAIMANT",
+        commonMasterRequest: {
+          debtorsUuid: corporateDebtorUuid,
+          processTypeUuid: processTypeUuid,
+          processTypeValue: processTypes.find(p => p.uuid === processTypeUuid)?.processTypeValue,
+          claimantTypeUuid: claimantTypes.find(ct => ct.claimantName === userType)?.uuid,
+          claimantCategoryUuid:
             userType === "Financial Creditors" ? financialCreditorType : operationalCreditorType,
-          formName: selectedFormName,
-        };
+          formUuid: claimantCategories.find(cc =>
+            (userType === "Financial Creditors" && cc.uuid === financialCreditorType) ||
+            (userType === "Operational Creditors" && cc.uuid === operationalCreditorType)
+          )?.formId,
+        },
+        claimantLoginRequest: {
+          mobileNumber: username,
+          processId: processTypes.find(p => p.uuid === processTypeUuid)?.processId,
+          corporateDebtorId: corporateDebtors.find(d => d.uuid === corporateDebtorUuid)?.corporateDebtorId,
+          claimantCatagoryId:
+            userType === "Financial Creditors" ? financialCreditorType : operationalCreditorType,
+          claimantSubCatagoryId: null,
+          otp: otp,
+        },
+        corporateDebtorLoginRequest: null,
+      };
 
-        setUserData(payload);
-        localStorage.setItem("userFormData", JSON.stringify(payload));
+      const response = await loginUser(payload);
+
+      if (response?.data?.status?.code === "200") {
+        const userData = {
+          ...response.data,
+          userType: "CLAIMANT",
+        };
+        setUserData(userData);
+        localStorage.setItem("userFormData", JSON.stringify(userData));
         toast.success("Login Successful");
         navigate("/dashboard");
       } else {
-        toast.error("Invalid OTP");
+        toast.error(response?.data?.status?.message || "Invalid OTP or Login Failed");
       }
+    } catch (error) {
+      console.error("Error verifying OTP:", error);
+      toast.error(error.response?.data?.status?.message || "Login Failed");
+    } finally {
       setLoading(false);
-    }, 1000);
+    }
   };
 
   const handleCorporateDebtorLogin = async (data) => {
     setLoading(true);
-    setTimeout(() => {
+    try {
       const payload = {
-        userType: "CRP",
-        email: data.email,
+        userType: "CORPORATOR",
+        commonMasterRequest: {},
+        claimantLoginRequest: null,
+        corporateDebtorLoginRequest: {
+          emailId: data.email,
+          password: data.password,
+        },
       };
-      console.log("Corporate Debtor Payload:", payload);
-      setUserData(payload);
-      localStorage.setItem("userFormData", JSON.stringify(payload));
-      toast.success("Login Successful");
-      navigate("/dashboard");
+
+      const response = await loginUser(payload);
+
+      if (response?.data?.status?.code === "200") {
+        const userData = {
+          ...response.data,
+          userType: "CRP",
+        };
+        setUserData(userData);
+        localStorage.setItem("userFormData", JSON.stringify(userData));
+        toast.success("Login Successful");
+        navigate("/dashboard");
+      } else {
+        toast.error(response?.data?.status?.message || "Login Failed");
+      }
+    } catch (error) {
+      console.error("Error logging in as Corporate Debtor:", error);
+      toast.error(error.response?.data?.status?.message || "Login Failed");
+    } finally {
       setLoading(false);
-    }, 1000);
+    }
   };
 
   return (
@@ -353,7 +421,7 @@ const LoginPage = () => {
               <div className="dropdown-container">
                 <select
                   className="dropdown-select"
-                  {...register("processTypeUuid", { 
+                  {...register("processTypeUuid", {
                     required: "Process type is required",
                     onChange: handleProcessTypeSelect
                   })}
@@ -372,7 +440,7 @@ const LoginPage = () => {
               <div className="dropdown-container">
                 <select
                   className="dropdown-select"
-                  {...register("corporateDebtorUuid", { 
+                  {...register("corporateDebtorUuid", {
                     required: "Corporate Debtor name is required",
                     onChange: handleCorporateDebtorSelect
                   })}
@@ -472,16 +540,16 @@ const LoginPage = () => {
                   onClick={handleSendOTP}
                   disabled={!isClaimantsFormValid() || loading || apiLoading}
                   title={
-                    !isClaimantsFormValid() ? 
-                    `Missing fields: ${[
-                      !isValidUsername(username) && "Valid Mobile Number",
-                      !processTypeUuid && "Process Type",
-                      !corporateDebtorUuid && "Corporate Debtor",
-                      !userType && "Claimant Type",
-                      userType === "Financial Creditors" && !financialCreditorType && "Financial Creditor Type",
-                      userType === "Operational Creditors" && !operationalCreditorType && "Operational Creditor Type"
-                    ].filter(Boolean).join(', ')}` 
-                    : ""
+                    !isClaimantsFormValid() ?
+                      `Missing fields: ${[
+                        !isValidUsername(username) && "Valid Mobile Number",
+                        !processTypeUuid && "Process Type",
+                        !corporateDebtorUuid && "Corporate Debtor",
+                        !userType && "Claimant Type",
+                        userType === "Financial Creditors" && !financialCreditorType && "Financial Creditor Type",
+                        userType === "Operational Creditors" && !operationalCreditorType && "Operational Creditor Type"
+                      ].filter(Boolean).join(', ')}`
+                      : ""
                   }
                 >
                   {loading ? "Sending..." : "Send OTP"}
@@ -498,7 +566,7 @@ const LoginPage = () => {
                 </div>
               )}
 
-             
+
               {/* Terms and Submit */}
               <div className="terms-conditions">
                 <input
@@ -598,110 +666,3 @@ const LoginPage = () => {
 };
 
 export default LoginPage;
-
-/_user/_login -this is login api path
-{
-    "userType": "CLAIMANT",
-    "commonMasterRequest": {
-        "debtorsUuid": "7c249b25-7e75-4e0f-9177-5988ccbda43a",
-        "processTypeUuid": "4cff2462-4b00-4bac-b675-f4229d23a27e",
-        "processTypeValue": "Liquidation",
-        "claimantTypeUuid": "1003",
-        "claimantCategoryUuid": "20007",
-        "formUuid": "a6928a25-1d51-4e6b-aa6c-a9c1a4ab62f8"
-    },
-    "claimantLoginRequest": {
-        "mobileNumber": "9876543210",
-        "processId": "P123",
-        "corporateDebtorId": "CD456",
-        "claimantCatagoryId": "C789",
-        "claimantSubCatagoryId": "SC101",
-        "otp": "123456"
-    },
-    "corporateDebtorLoginRequest": null
-}
-this is claimant request
-after login please save response in localstorage
-{
-    "userType": "CORPORATOR",
-    "commonMasterRequest": {
-    },
-    "claimantLoginRequest": null,
-    "corporateDebtorLoginRequest": {
-        "emailId": "ifoiiio@apexdynamics.com",
-        "password": "ApexSecure789"
-    }
-}
-this is corporator request
-this is claimant response
-{
-  "status": {
-    "code": "200",
-    "message": "Successful"
-  },
-  "token": null,
-  "otp": "123456",
-  "processTypes": null,
-  "claimantTypes": null,
-  "claimantCategories": null,
-  "formDetails": null,
-  "userType": "CLAIMANT",
-  "users": [
-    {
-      "claimant": {
-        "uuid": "69cda586-da54-4ebb-aeae-8110d7af475a",
-        "claimantName": "John Doe",
-        "corporateName": null,
-        "emailId": "johndoe@example.com",
-        "claimantEntityType": "INDV",
-        "mobileNumber": "9876543210",
-        "aadharNumber": "123412341234",
-        "panNumber": "ABCDE1234F",
-        "cinOrTaNumber": null,
-        "roleCode": "CLAIMANT",
-        "auditDetails": {
-          "createdBy": "69cda586-da54-4ebb-aeae-8110d7af475a",
-          "lastModifiedBy": "69cda586-da54-4ebb-aeae-8110d7af475a",
-          "createdTime": "2025-04-01 17:15:25.281",
-          "lastModifiedTime": "2025-04-01 17:15:25.281"
-        },
-        "active": true
-      },
-      "corporateDebtor": null
-    }
-  ]
-}
-this is corporator response
-{
-  "status": {
-    "code": "200",
-    "message": "Successful"
-  },
-  "token": null,
-  "otp": "123456",
-  "processTypes": null,
-  "claimantTypes": null,
-  "claimantCategories": null,
-  "formDetails": null,
-  "userType": "CORPORATOR",
-  "users": [
-    {
-      "claimant": null,
-      "corporateDebtor": {
-        "uuid": "632f54be-5e87-468c-a476-72594e0cd214",
-        "companyName": "Apex Dynamics Ltd",
-        "emailId": "ifoiiio@apexdynamics.com",
-        "cinNumber": "U12345APEX",
-        "processId": "5",
-        "password": "ApexSecure789",
-        "auditDetails": {
-          "createdBy": "632f54be-5e87-468c-a476-72594e0cd214",
-          "lastModifiedBy": "632f54be-5e87-468c-a476-72594e0cd214",
-          "createdTime": "2025-04-07 11:50:02.017",
-          "lastModifiedTime": "2025-04-07 11:50:02.017"
-        },
-        "active": true
-      }
-    }
-  ]
-}
