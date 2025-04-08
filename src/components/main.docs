@@ -1,215 +1,31 @@
-import React, { useEffect, useCallback, useState } from "react";
-import { useForm, FormProvider } from "react-hook-form";
-import DynamicField from "./formCommon/DynamicField";
-import Collapsible from "./formCommon/Collapsible";
-import Tooltip from "@mui/material/Tooltip"; 
-import { uploadDocument } from "../services/documentUploadService";
-import "./StepFirst.css";
+import axios from 'axios';
 
-const StepFirst = ({ provideSubmitHandler, formData }) => {
-  const [isUploading, setIsUploading] = useState(false);
-  const [uploadError, setUploadError] = useState(null);
-  const [uploadedFileData, setUploadedFileData] = useState(null);
+const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://localhost:5000/api';
 
-  // ... (previous code remains the same until claimantDetailsSchema)
+export const uploadDocument = async (file, docType = 'identification') => {
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('docType', docType);
+  formData.append('uploadSource', 'web_upload');
 
-  const claimantDetailsSchema = [
-    // ... (other fields remain the same)
-    {
-      name: "identificationDocument",
-      label: <>Identification Document <span className="required-asterisk">*</span></>,
-      type: "file",
-      rules: { 
-        required: "Identification document is required",
-        validate: {
-          fileUploaded: () => uploadedFileData !== null || "Please upload the document"
-        }
-      },
-      tooltip: "Upload a clear scan of your identification document",
-      accept: "image/*,.pdf",
-      isUploading,
-      uploadError
-    },
-  ];
-
-  const handleFileUpload = async (file) => {
-    if (!file) return;
-
-    setIsUploading(true);
-    setUploadError(null);
-
-    try {
-      const result = await uploadDocument(file, 'identification');
-      
-      if (result.success) {
-        setUploadedFileData({
-          fileId: result.fileId,
-          docName: result.docName,
-          docType: result.docType,
-          docSource: result.docSource,
-          fileUrl: result.fileUrl
-        });
-        
-        // Set the form value with the complete payload
-        setValue("identificationDocument", {
-          fileId: result.fileId,
-          docName: result.docName,
-          docType: result.docType,
-          docSource: result.docSource,
-          fileUrl: result.fileUrl
-        }, { shouldValidate: true });
-
-        console.log("Uploaded file payload:", {
-          fileId: result.fileId,
-          docName: result.docName,
-          docType: result.docType,
-          docSource: result.docSource,
-          fileUrl: result.fileUrl
-        });
-      } else {
-        throw new Error("File upload failed");
+  try {
+    const response = await axios.post(`${API_BASE_URL}/documents/upload`, formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+        'Authorization': `Bearer ${localStorage.getItem('token')}` // If using auth
       }
-    } catch (error) {
-      console.error("Upload error:", error);
-      setUploadError(error.message || "Failed to upload document");
-    } finally {
-      setIsUploading(false);
-    }
-  };
+    });
 
-  const onSubmit = useCallback(async () => {
-    const isValid = await trigger();
-    
-    if (!isValid || !uploadedFileData) {
-      console.error("Validation failed or required documents missing");
-      return false;
-    }
-
-    const formValues = getValues();
-    console.log("Complete form payload:", formValues);
-    return formValues;
-  }, [trigger, getValues, uploadedFileData]);
-
-  // ... (rest of the component remains the same, except pass handleFileUpload to DynamicField)
-  
-  return (
-    <FormProvider {...methods}>
-      <form className="form-stepper">
-        {/* ... (existing JSX remains the same) */}
-        {claimantDetailsSchema.map((fieldConfig) => (
-          <DynamicField
-            key={fieldConfig.name}
-            fieldConfig={{
-              ...fieldConfig,
-              onFileUpload: handleFileUpload
-            }}
-            control={control}
-            register={register}
-            errors={errors}
-            setValue={setValue}
-            trigger={trigger}
-            getValues={getValues}
-          />
-        ))}
-        {/* ... (rest of the JSX remains the same) */}
-      </form>
-    </FormProvider>
-  );
-};
-
-export default StepFirst;
-///////////////
-import React from "react";
-import { Controller } from "react-hook-form";
-import Tooltip from "@mui/material/Tooltip";
-import { FaInfoCircle } from "react-icons/fa";
-import DatePicker from "react-datepicker";
-import "react-datepicker/dist/react-datepicker.css";
-
-const DynamicField = ({ fieldConfig, control, register, errors, setValue, trigger, getValues }) => {
-  const { name, label, type, options, rules, tooltip, placeholder, onFileUpload, isUploading, uploadError } = fieldConfig;
-
-  const hasError = errors[name];
-
-  const handleKeyPress = (e) => {
-    if (type === "number" && !/^\d$/.test(e.key) && e.key !== "Backspace") {
-      e.preventDefault();
-    }
-  };
-
-  const handleFileChange = async (e) => {
-    const file = e.target.files[0];
-    if (file && onFileUpload) {
-      await onFileUpload(file);
-      trigger(name);
-    }
-  };
-
-  return (
-    <div className="flex-item">
-      <label>
-        {label}
-        {tooltip && (
-          <Tooltip title={tooltip} arrow>
-            <span style={{ marginLeft: "5px", cursor: "pointer" }}>
-              <FaInfoCircle />
-            </span>
-          </Tooltip>
-        )}
-      </label>
-      
-      {type === "file" ? (
-        <div className="custom-file-input">
-          <input
-            type="file"
-            id={name}
-            onChange={handleFileChange}
-            className={`form-input ${hasError ? "input-error" : ""}`}
-            style={{ display: "none" }}
-            disabled={isUploading}
-            accept={fieldConfig.accept}
-          />
-          <label
-            htmlFor={name}
-            className={`file-label ${hasError ? "input-error" : ""} ${isUploading ? "uploading" : ""}`}
-          >
-            {isUploading ? "Uploading..." : "Choose File"}
-          </label>
-          
-          {getValues(name) && !isUploading && (
-            <div style={{ marginTop: "8px" }}>
-              <div>File: {getValues(name).docName || getValues(name).name}</div>
-              <div style={{ fontSize: "12px", color: "#666" }}>
-                Type: {getValues(name).docType || 'identification'}
-              </div>
-            </div>
-          )}
-          
-          {uploadError && <p className="error-message">{uploadError}</p>}
-          {hasError && !uploadError && <p className="error-message">{errors[name]?.message}</p>}
-        </div>
-      ) : (
-        // ... (rest of the field types remain the same)
-      )}
-    </div>
-  );
-};
-
-export default DynamicField;
-// Mock upload function - replace with actual API call
-export const uploadDocument = async (file, docType) => {
-  // Simulate API delay
-  await new Promise(resolve => setTimeout(resolve, 1000));
-  
-  // Create mock response
-  const mockResponse = {
-    success: true,
-    fileId: `doc_${Math.random().toString(36).substr(2, 9)}`,
-    docName: file.name,
-    docType: docType || 'identification',
-    docSource: 'web_upload',
-    fileUrl: URL.createObjectURL(file) // In real app, this would be the server URL
-  };
-
-  return mockResponse;
+    return {
+      success: true,
+      fileId: response.data.fileId,
+      docName: response.data.originalName,
+      docType: response.data.docType,
+      docSource: response.data.source,
+      fileUrl: response.data.fileUrl
+    };
+  } catch (error) {
+    console.error('Upload error:', error);
+    throw new Error(error.response?.data?.message || 'Failed to upload document');
+  }
 };
