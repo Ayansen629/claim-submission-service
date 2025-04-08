@@ -1,104 +1,204 @@
-import React, { useEffect, useCallback, useState } from "react";
+import React, { useEffect, useCallback } from "react";
 import { useForm, FormProvider } from "react-hook-form";
 import DynamicField from "./formCommon/DynamicField";
 import Collapsible from "./formCommon/Collapsible";
-import Tooltip from "@mui/material/Tooltip";
-import axios from "axios"; // Make sure to install axios
+import Tooltip from "@mui/material/Tooltip"; 
 import "./StepFirst.css";
 
 const StepFirst = ({ provideSubmitHandler, formData }) => {
-  const [isUploading, setIsUploading] = useState(false);
-  const [uploadError, setUploadError] = useState(null);
-  const [uploadedFileUrl, setUploadedFileUrl] = useState(null);
+  // Get user data from localStorage safely
+  const userFormData = JSON.parse(localStorage.getItem("userFormData")) || {};
+  const hasCreditorName = !!userFormData?.claimantName;
+  const hasDebtorName = !!userFormData?.corporateDebtorName;
+  
 
-  // ... (previous code remains the same until claimantDetailsSchema)
+  const methods = useForm({
+    defaultValues: {
+      CreditorName: userFormData?.claimantName || "",
+      debtorName: userFormData?.corporateDebtorName || "",
+      // Set default identification values if available in userDetails
+      identificationType: userFormData?.userDetails?.aadharNumber ? "Aadhar" : 
+                         userFormData?.userDetails?.panNumber ? "PAN" : "",
+      identificationNumber: userFormData?.userDetails?.aadharNumber || 
+                           userFormData?.userDetails?.panNumber || ""
+    }
+  });
+  
+  const { register, handleSubmit, formState: { errors }, trigger, setValue, control, getValues, watch } = methods;
 
   const claimantDetailsSchema = [
-    // ... (other fields remain the same)
+    { 
+      name: "CreditorName", 
+      label: <>Creditor Name <span className="required-asterisk">*</span></>, 
+      type: "text", 
+      rules: { 
+        required: !hasCreditorName && "Creditor Name is required",
+      },
+      placeholder: "Enter Creditor Name",
+      disabled: hasCreditorName,
+      tooltip: "Name of the creditor filing the claim"
+    },
+    { 
+      name: "totalClaimAmount", 
+      label: <>Total Claim Amount <span className="required-asterisk">*</span></>, 
+      type: "number", 
+      rules: { 
+        required: "Total Claim Amount is required", 
+        min: { value: 0, message: "Value must be greater than or equal to 0" } 
+      },
+      placeholder: "Enter Total Claim Amount",
+      tooltip: "The total amount being claimed against the debtor"
+    },
+    { 
+      name: "debtDetails", 
+      label: <>Debt Incurred Details <span className="required-asterisk">*</span></>, 
+      type: "textarea", 
+      rules: { required: "Debt Details are required" },
+      tooltip: "Details of how and when debt incurred",
+      placeholder: "Enter details including dates, nature of debt, and agreements"
+    },
+    { 
+      name: "mutualCreditDetails", 
+      label: <>Mutual Credit/Debts Details <span className="required-asterisk">*</span></>, 
+      type: "textarea", 
+      rules: { required: "Mutual Credit Details are required" },
+      tooltip: "Details of any mutual credit, mutual debts, or other mutual dealings between the corporate debtor and the creditor which may be set-off against the claim",
+      placeholder: "Enter details of any mutual transactions or set-offs"
+    },
+    {
+      name: "identificationType",
+      label: <>Identification Type <span className="required-asterisk">*</span></>,
+      type: "select",
+      options: [
+        { value: "", label: "Select Identification Type", disabled: true },
+        { value: "Aadhar", label: "Aadhar" },
+        { value: "PAN", label: "PAN" },
+        { value: "Passport", label: "Passport" },
+      ],
+      rules: { required: "Identification type is required" },
+      tooltip: "Select the type of identification document provided",
+    },
+    {
+      name: "identificationNumber",
+      label: <>Identification Number <span className="required-asterisk">*</span></>,
+      type: "text",
+      rules: { 
+        required: "Identification number is required",
+        pattern: {
+          value: watch("identificationType") === "PAN" 
+            ? /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/ 
+            : /^.*$/,
+          message: "Please enter a valid PAN number (format: ABCDE1234F)"
+        }
+      },
+      tooltip: "Enter your Aadhar, PAN, or Passport number",
+      placeholder: "Enter Identification Number"
+    },
     {
       name: "identificationDocument",
       label: <>Identification Document <span className="required-asterisk">*</span></>,
       type: "file",
-      rules: { 
-        required: "Identification document is required",
-        validate: {
-          fileUploaded: () => uploadedFileUrl !== null || "Please upload the document"
-        }
-      },
+      rules: { required: "Identification document is required" },
       tooltip: "Upload a clear scan of your identification document",
-      accept: "image/*,.pdf",
-      isUploading,
-      uploadError
+      accept: "image/*,.pdf"
     },
   ];
 
-  // Add file upload handler
-  const handleFileUpload = async (file) => {
-    if (!file) return;
-
-    setIsUploading(true);
-    setUploadError(null);
-
-    try {
-      // Create form data
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('documentType', 'identification');
-      formData.append('userId', userFormData?.userId || ''); // Add any user identifier if available
-
-      // Make API call
-      const response = await axios.post('/api/upload-document', formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-          'Authorization': `Bearer ${localStorage.getItem('token')}` // if using auth
-        }
-      });
-
-      if (response.data.success) {
-        setUploadedFileUrl(response.data.fileUrl);
-        setValue("identificationDocument", response.data.fileUrl, { shouldValidate: true });
-      } else {
-        throw new Error(response.data.message || 'File upload failed');
-      }
-    } catch (error) {
-      console.error('Upload error:', error);
-      setUploadError(error.message || 'Failed to upload document');
-    } finally {
-      setIsUploading(false);
+  const debtorDetailsSchema = [
+    {
+      name: "debtorName",
+      label: <>Debtor Name <span className="required-asterisk">*</span></>,
+      type: "text",
+      rules: { 
+        required: !hasDebtorName && "Debtor Name is required" 
+      },
+      placeholder: "Enter Debtor Name",
+      tooltip: "Name of the corporate debtor against whom the claim is being filed",
+      disabled: hasDebtorName
     }
-  };
+  ];
 
   const onSubmit = useCallback(async () => {
     const isValid = await trigger();
-    
-    if (!isValid || !uploadedFileUrl) {
+    const identificationDocument = getValues("identificationDocument");
+
+    if (!isValid || !identificationDocument) {
       console.error("Validation failed or required documents missing");
       return false;
     }
 
     return getValues();
-  }, [trigger, getValues, uploadedFileUrl]);
+  }, [trigger, getValues]);
 
-  // ... (rest of the component remains the same, except pass the handleFileUpload to DynamicField)
+  useEffect(() => {
+    if (formData) {
+      Object.keys(formData).forEach((key) => {
+        setValue(key, formData[key]);
+      });
+    }
+
+    // Set values from localStorage if not in formData
+    if (!formData?.CreditorName && hasCreditorName) {
+      setValue("CreditorName", userFormData.claimantName);
+    }
+    if (!formData?.debtorName && hasDebtorName) {
+      setValue("debtorName", userFormData.corporateDebtorName);
+    }
+  }, [formData, setValue, hasCreditorName, hasDebtorName, userFormData]);
+
+  useEffect(() => {
+    if (provideSubmitHandler) {
+      provideSubmitHandler(onSubmit);
+    }
+  }, [provideSubmitHandler, onSubmit]);
+
+  // Watch identification type for validation
+  const identificationType = watch("identificationType");
+  useEffect(() => {
+    if (identificationType) {
+      trigger("identificationNumber");
+    }
+  }, [identificationType, trigger]);
 
   return (
     <FormProvider {...methods}>
       <form className="form-stepper">
-        {/* ... (existing JSX remains the same) */}
-        {claimantDetailsSchema.map((fieldConfig) => (
-          <DynamicField
-            key={fieldConfig.name}
-            fieldConfig={fieldConfig}
-            control={control}
-            register={register}
-            errors={errors}
-            setValue={setValue}
-            trigger={trigger}
-            getValues={getValues}
-            onFileUpload={handleFileUpload} // Pass the upload handler
-          />
-        ))}
-        {/* ... (rest of the JSX remains the same) */}
+        <div className="mb-4 bg-light">
+          <div className="mb-4 bg-light">
+            <Collapsible title="Debtor Details" defaultOpen={true}>
+              <div className="flex-container">
+                {debtorDetailsSchema.map((fieldConfig) => (
+                  <DynamicField
+                    key={fieldConfig.name}
+                    fieldConfig={fieldConfig}
+                    control={control}
+                    register={register}
+                    errors={errors}
+                    setValue={setValue}
+                    trigger={trigger}
+                    getValues={getValues}
+                  />
+                ))}
+              </div>
+            </Collapsible>
+          </div>
+          <Collapsible title="Creditor Basic Details" defaultOpen={true}>
+            <div className="flex-container">
+              {claimantDetailsSchema.map((fieldConfig) => (
+                <DynamicField
+                  key={fieldConfig.name}
+                  fieldConfig={fieldConfig}
+                  control={control}
+                  register={register}
+                  errors={errors}
+                  setValue={setValue}
+                  trigger={trigger}
+                  getValues={getValues}
+                />
+              ))}
+            </div>
+          </Collapsible>
+        </div>
       </form>
     </FormProvider>
   );
@@ -106,53 +206,139 @@ const StepFirst = ({ provideSubmitHandler, formData }) => {
 
 export default StepFirst;
 
-//////////////////
-// In your DynamicField.js component
-const DynamicField = ({
-  fieldConfig,
-  register,
-  errors,
-  onFileUpload, // Add this prop
-  // ... other props
-}) => {
-  // ... other field type handlers
+import React from "react";
+import { Controller } from "react-hook-form";
+import Tooltip from "@mui/material/Tooltip";
+import { FaInfoCircle } from "react-icons/fa";
+import DatePicker from "react-datepicker";
+import "react-datepicker/dist/react-datepicker.css";
 
-  const handleFileChange = (e) => {
-    const file = e.target.files[0];
-    if (file && onFileUpload) {
-      onFileUpload(file);
+const DynamicField = ({ fieldConfig, control, register, errors, setValue, trigger, getValues }) => {
+  const { name, label, type, options, rules, tooltip, placeholder } = fieldConfig;
+
+  // Check if the field has an error
+  const hasError = errors[name];
+
+  // Allow only valid numeric keys
+  const handleKeyPress = (e) => {
+    if (type === "number" && !/^\d$/.test(e.key) && e.key !== "Backspace") {
+      e.preventDefault();
     }
   };
 
-  // In the return statement, for file type:
-  if (fieldConfig.type === "file") {
-    return (
-      <div className="form-group">
-        <label htmlFor={fieldConfig.name}>
-          {fieldConfig.label}
-          {fieldConfig.tooltip && (
-            <Tooltip title={fieldConfig.tooltip} arrow>
-              <span className="tooltip-icon">i</span>
-            </Tooltip>
-          )}
-        </label>
-        <input
-          type="file"
-          id={fieldConfig.name}
-          accept={fieldConfig.accept}
-          onChange={handleFileChange}
-          disabled={fieldConfig.disabled || fieldConfig.isUploading}
-        />
-        {fieldConfig.isUploading && <div>Uploading...</div>}
-        {fieldConfig.uploadError && (
-          <div className="error-message">{fieldConfig.uploadError}</div>
-        )}
-        {errors[fieldConfig.name] && (
-          <div className="error-message">{errors[fieldConfig.name].message}</div>
-        )}
-      </div>
-    );
-  }
+  // Handle file upload
+  const handleFileChange = (e) => {
+    const files = e.target.files;
+    if (files) {
+      setValue(name, files[0]); // Single file selection
+      trigger(name); // Trigger validation for the file field
+    }
+  };
 
-  // ... rest of the component
+  return (
+    <div className="flex-item">
+      <label>
+        {label}
+        {tooltip && (
+          <Tooltip title={tooltip} arrow>
+            <span style={{ marginLeft: "5px", cursor: "pointer" }}>
+              <FaInfoCircle />
+            </span>
+          </Tooltip>
+        )}
+      </label>
+      {type === "select" ? (
+        <Controller
+          name={name}
+          control={control}
+          rules={rules}
+          render={({ field }) => (
+            <select
+              {...field}
+              className={`form-input ${hasError ? "input-error" : ""}`}
+              onChange={(e) => {
+                field.onChange(e);
+                if (fieldConfig.onChange) fieldConfig.onChange(e.target.value);
+              }}
+            >
+              <option value="" disabled>
+                Select {label}
+              </option>
+              {options.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          )}
+        />
+      ) : type === "date" ? (
+        <Controller
+          name={name}
+          control={control}
+          rules={rules}
+          render={({ field }) => (
+            <DatePicker
+              {...field}
+              selected={field.value}
+              onChange={(date) => {
+                setValue(name, date);
+                trigger(name);
+              }}
+              className={`form-input ${hasError ? "input-error" : ""}`}
+              dateFormat="yyyy-MM-dd"
+              placeholderText={placeholder || "Select a date"}
+            />
+          )}
+        />
+      ) : type === "file" ? (
+        <div className="custom-file-input">
+          <input
+            type="file"
+            id={name}
+            onChange={handleFileChange}
+            className={`form-input ${hasError ? "input-error" : ""}`}
+            style={{ display: "none" }}
+          />
+          <label
+            htmlFor={name}
+            className={`file-label ${hasError ? "input-error" : ""}`} // Apply input-error class to the label
+          >
+            Choose File
+          </label>
+          {getValues(name) && (
+            <span style={{ marginTop: "8px", fontSize: "14px" }}>
+              Selected file: {getValues(name).name}
+            </span>
+          )}
+          {hasError && <p className="error-message">{errors[name]?.message}</p>}
+        </div>
+      ) : type === "textarea" ? (
+        <textarea
+          {...register(name, rules)}
+          className={`form-input ${hasError ? "input-error" : ""}`}
+          placeholder={placeholder}
+          onChange={(e) => {
+            setValue(name, e.target.value);
+            trigger(name);
+          }}
+        />
+      ) : (
+        <input
+          {...register(name, rules)}
+          type={type}
+          className={`form-input ${hasError ? "input-error" : ""}`}
+          placeholder={placeholder}
+          onChange={(e) => {
+            setValue(name, e.target.value);
+            trigger(name);
+          }}
+          onKeyPress={handleKeyPress} // Restrict input for numeric fields
+        />
+      )}
+      {hasError && <p className="error-message">{errors[name]?.message}</p>}
+    </div>
+  );
 };
+
+export default DynamicField;
