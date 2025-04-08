@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { useForm, FormProvider, Controller } from "react-hook-form";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
@@ -6,9 +6,28 @@ import Collapsible from "../formCommon/Collapsible";
 import Tooltip from "@mui/material/Tooltip";
 import { FaInfoCircle } from "react-icons/fa";
 
+// Assume you have an API function for file upload
+const uploadFile = async (file) => {
+  // Replace with your actual API endpoint and logic
+  console.log("Uploading file:", file);
+  await new Promise((resolve) => setTimeout(resolve, 1000)); // Simulate API call
+  // Simulate different responses for demonstration
+  if (file.name === 'error.pdf') {
+    throw new Error("Simulated upload error");
+  }
+  if (file.name === 'invalid.txt'){
+    return { success: false, message: "Invalid file type" };
+  }
+  return { success: true, filename: file.name, serverPath: `/uploads/${file.name}` };
+};
+
 // Dynamic field renderer
-const DynamicField = ({ fieldConfig, control, register, errors, setValue, trigger, getValues, watch }) => {
+const DynamicField = ({ fieldConfig, control, register, errors, setValue, trigger, getValues, watch, onFileUploadSuccess }) => {
   const { name, label, type, options, rules, tooltip, placeholder, accept } = fieldConfig;
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState(null);
+  const [fileSizeError, setFileSizeError] = useState(false); // State for file size error
+
 
   // Check if the field has an error
   const hasError = errors[name];
@@ -20,11 +39,55 @@ const DynamicField = ({ fieldConfig, control, register, errors, setValue, trigge
     }
   };
 
-  // Handle file upload
+  // Handle file upload for address proof
+    const handleAddressProofChange = async (e) => {
+        const files = e.target.files;
+        if (files && files[0]) {
+            const file = files[0];
+
+             // Check file size (2MB limit)
+            if (file.size > 2 * 1024 * 1024) {
+                setFileSizeError(true);
+                setValue(name, undefined); // Clear the file
+                trigger(name); // Trigger validation to show error
+                return; // Stop processing
+            } else {
+                setFileSizeError(false); // Clear file size error
+            }
+
+            setValue(name, file);
+            trigger(name);
+            setUploading(true);
+            setUploadError(null);
+            try {
+                const response = await uploadFile(file);
+                setUploading(false);
+                if (response.success && onFileUploadSuccess) {
+                    onFileUploadSuccess(name, response.serverPath || response.filename); // Pass server path or filename
+                } else {
+                    setUploadError(response.message || "File upload failed.");
+                }
+            } catch (error) {
+                console.error("File upload error:", error);
+                setUploading(false);
+                setUploadError("Failed to upload file.");
+            }        }
+    };
+
+  // Handle generic file upload (for other file types if needed later)
   const handleFileChange = (e) => {
     const files = e.target.files;
-    if (files) {
-      setValue(name, files[0]); // Single file selection
+    if (files && files[0]) {
+       const file = files[0];
+        if (file.size > 2 * 1024 * 1024) {
+            setFileSizeError(true);
+            setValue(name, undefined);
+            trigger(name);
+            return;
+        } else {
+            setFileSizeError(false);
+        }
+      setValue(name, file); // Single file selection
       trigger(name);
     }
   };
@@ -49,7 +112,7 @@ const DynamicField = ({ fieldConfig, control, register, errors, setValue, trigge
           render={({ field }) => (
             <select
               {...field}
-              className={`form-input ${hasError ? "input-error" : ""}`}
+              className={`form-input ${hasError || fileSizeError ? "input-error" : ""}`}
               onChange={(e) => {
                 field.onChange(e);
                 if (fieldConfig.onChange) fieldConfig.onChange(e.target.value);
@@ -79,12 +142,34 @@ const DynamicField = ({ fieldConfig, control, register, errors, setValue, trigge
                 setValue(name, date);
                 trigger(name);
               }}
-              className={`form-input ${hasError ? "input-error" : ""}`}
+              className={`form-input ${hasError || fileSizeError ? "input-error" : ""}`}
               dateFormat="yyyy-MM-dd"
               placeholderText={placeholder || "Select a date"}
             />
           )}
         />
+      ) : type === "file" && name === "addressProofDocument" ? (
+        <div className="custom-file-input">
+          <input
+            type="file"
+            id={name}
+            onChange={handleAddressProofChange}
+            className="form-input"
+            style={{ display: "none" }}
+            accept={accept}
+          />
+          <label htmlFor={name} className="file-label">
+            {placeholder || "Choose File"}
+          </label>
+          {uploading && <span style={{ marginLeft: "8px" }}>Uploading...</span>}
+          {uploadError && <span className="error-message">{uploadError}</span>}
+          {fileSizeError && <p className="error-message">File size exceeds 2MB limit.</p>}
+          {getValues(name) && !uploading && !uploadError && !fileSizeError && (
+            <span style={{ marginTop: "8px", fontSize: "14px" }}>
+              Selected file: {getValues(name)?.name}
+            </span>
+          )}
+        </div>
       ) : type === "file" ? (
         <div className="custom-file-input">
           <input
@@ -98,9 +183,10 @@ const DynamicField = ({ fieldConfig, control, register, errors, setValue, trigge
           <label htmlFor={name} className="file-label">
             {placeholder || "Choose File"}
           </label>
-          {getValues(name) && (
+          {fileSizeError && <p className="error-message">File size exceeds 2MB limit.</p>}
+          {getValues(name)?.name && !fileSizeError && (
             <span style={{ marginTop: "8px", fontSize: "14px" }}>
-              Selected file: {getValues(name).name}
+              Selected file: {getValues(name)?.name}
             </span>
           )}
         </div>
@@ -109,14 +195,14 @@ const DynamicField = ({ fieldConfig, control, register, errors, setValue, trigge
           type="file"
           multiple
           onChange={handleFileChange}
-          className={`form-input ${hasError ? "input-error" : ""}`}
+          className={`form-input ${hasError || fileSizeError ? "input-error" : ""}`}
           placeholder={placeholder || "Upload multiple files"}
         />
       ) : (
         <input
           {...register(name, rules)}
           type={type}
-          className={`form-input ${hasError ? "input-error" : ""}`}
+          className={`form-input ${hasError || fileSizeError ? "input-error" : ""}`}
           onChange={(e) => {
             setValue(name, e.target.value);
             trigger(name);
@@ -142,6 +228,12 @@ const FormCDetails = ({ provideSubmitHandler, formData }) => {
     }
     return getValues();
   }, [trigger, getValues]);
+
+  const handleAddressProofUploadSuccess = useCallback((fieldName, serverPath) => {
+    console.log(`File for ${fieldName} uploaded successfully. Server path: ${serverPath}`);
+    // You can update the form state or perform other actions here
+    setValue(fieldName, serverPath); // Optionally update the form value with the server path
+  }, [setValue]);
 
   useEffect(() => {
     if (formData) {
@@ -361,6 +453,11 @@ const FormCDetails = ({ provideSubmitHandler, formData }) => {
                       trigger={trigger}
                       getValues={getValues}
                       watch={watch}
+                      onFileUploadSuccess={
+                        fieldConfig.name === "addressProofDocument"
+                          ? handleAddressProofUploadSuccess
+                          : undefined
+                      }
                     />
                   ))}
                 </div>
