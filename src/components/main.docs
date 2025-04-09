@@ -4,6 +4,7 @@ import { useForm } from "react-hook-form";
 import { Link, useNavigate } from 'react-router-dom';
 import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
+import axios from 'axios';
 
 const Register = () => {
   const navigate = useNavigate();
@@ -56,12 +57,26 @@ const Register = () => {
   const handleSendOTP = async () => {
     setLoading(true);
 
-    // Simulate OTP sending
-    setTimeout(() => {
-      toast.success("OTP Sent", { position: 'top-right' });
-      setOtpSent(true); // Show OTP input box
+    try {
+      // First validate the form data with backend
+      const validationResponse = await axios.post('/api/validate-registration', {
+        email: formValues.email,
+        mobileNumber: formValues.mobilenumber,
+        userType: selectedRadio === "individual" ? "INDV" : "CORP"
+      });
+
+      if (validationResponse.data.valid) {
+        toast.success("OTP Sent", { position: 'top-right' });
+        setOtpSent(true);
+      } else {
+        toast.error(validationResponse.data.message || "Validation failed");
+      }
+    } catch (error) {
+      console.error("Validation error:", error);
+      toast.error("Failed to validate information. Please try again.");
+    } finally {
       setLoading(false);
-    }, 1000);
+    }
   };
 
   const onSubmit = async (data) => {
@@ -70,38 +85,51 @@ const Register = () => {
       return;
     }
 
-    if (otp !== "123456") {
-      toast.error("Invalid OTP. Please enter the correct OTP.");
-      return;
-    }
+    setLoading(true);
 
-    // Prepare payload
+    // Prepare payload for registration
     const payload = {
-      name: selectedRadio === "individual" ? data.name : data.corporateName,
-      email: data.email,
-      mobilenumber: data.mobilenumber,
-      pancard: data.pancard,
-      userType: selectedRadio === "individual" ? "INDV" : "CORP",
-      ...(selectedRadio === "individual" 
-        ? { aadhar: data.aadhar }
-        : { 
-            cinTaNumber: data.cinTaNumber
-          }
-      )
+      claimant: {
+        uuid: "",
+        claimantName: selectedRadio === "individual" ? data.name : null,
+        corporateName: selectedRadio === "corporate" ? data.corporateName : null,
+        emailId: data.email,
+        claimantEntityType: selectedRadio === "individual" ? "INDV" : "CORP",
+        mobileNumber: data.mobilenumber,
+        aadharNumber: selectedRadio === "individual" ? data.aadhar : null,
+        panNumber: data.pancard,
+        cinOrTaNumber: selectedRadio === "corporate" ? data.cinTaNumber : null,
+        roleCode: "CLAIMANT",
+        active: true,
+        auditDetails: {
+          createdBy: "system_user",
+          createdDate: new Date().toISOString(),
+          lastModifiedBy: "system_user",
+          lastModifiedDate: new Date().toISOString()
+        }
+      },
+      corporateDebtor: null,
+      otp: otp
     };
 
-    console.log("Registration Payload:", payload);
-    toast.success("Registration successful!", { position: 'top-right' });
-
-    // Reset form and OTP state
-    reset();
-    setOtp("");
-    setOtpSent(false);
-
-    // Navigate to login after a delay
-    setTimeout(() => {
-      navigate("/login");
-    }, 1000);
+    try {
+      const response = await axios.post('/claim-user-service/_user/_registration', payload);
+      
+      if (response.data.status.code === "201") {
+        toast.success("Registration successful!", { position: 'top-right' });
+        reset();
+        setOtp("");
+        setOtpSent(false);
+        setTimeout(() => navigate("/login"), 1000);
+      } else {
+        toast.error(response.data.status.message || "Registration failed");
+      }
+    } catch (error) {
+      console.error("Registration error:", error);
+      toast.error(error.response?.data?.message || "Registration failed. Please try again.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -263,8 +291,8 @@ const Register = () => {
           {/* Register Button */}
           <button
             type="submit"
-            className={`register-btn ${!otpSent || otp !== "123456" || loading ? 'disabled' : ''}`}
-            disabled={!otpSent || otp !== "123456" || loading}
+            className={`register-btn ${!otpSent || !otp || loading ? 'disabled' : ''}`}
+            disabled={!otpSent || !otp || loading}
           >
             {loading ? "Registering..." : "Register"}
           </button>
