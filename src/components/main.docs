@@ -7,7 +7,154 @@ import Tooltip from "@mui/material/Tooltip";
 import { FaInfoCircle } from "react-icons/fa";
 import { uploadDocument } from "../../../../services/documentUploadService";
 
-// ... (keep all the existing imports and DynamicField component as is)
+const DynamicField = ({ fieldConfig, control, register, errors, setValue, trigger, getValues, watch }) => {
+  const { name, label, type, options, rules, tooltip, placeholder, accept } = fieldConfig;
+
+  // Check if the field has an error
+  const hasError = errors[name];
+
+  // Allow only valid numeric keys
+  const handleKeyPress = (e) => {
+    if (type === "number" && !/^\d$/.test(e.key) && e.key !== "Backspace") {
+      e.preventDefault();
+    }
+  };
+
+  const handleFileChange = async (e) => {
+    const file = e.target.files[0];
+    if (file && fieldConfig.onFileUpload) {
+      try {
+        fieldConfig.setIsUploading(true);
+        fieldConfig.setUploadError(null);
+        
+        const result = await fieldConfig.onFileUpload(file);
+        
+        if (result.success) {
+          setValue(name, {
+            fileId: result.fileId,
+            docName: result.docName,
+            docType: result.docType,
+            docSource: result.docSource,
+            fileUrl: result.fileUrl
+          }, { shouldValidate: true });
+        }
+      } catch (error) {
+        fieldConfig.setUploadError(error.message);
+        setValue(name, null, { shouldValidate: true });
+      } finally {
+        fieldConfig.setIsUploading(false);
+      }
+    }
+  };
+
+  return (
+    <div className="flex-item">
+      <label>
+        {label}
+        {tooltip && (
+          <Tooltip title={tooltip} arrow>
+            <span style={{ marginLeft: "5px", cursor: "pointer" }}>
+              <FaInfoCircle />
+            </span>
+          </Tooltip>
+        )}
+      </label>
+      {type === "select" ? (
+        <Controller
+          name={name}
+          control={control}
+          rules={rules}
+          render={({ field }) => (
+            <select
+              {...field}
+              className={`form-input ${hasError ? "input-error" : ""}`}
+              onChange={(e) => {
+                field.onChange(e);
+                if (fieldConfig.onChange) fieldConfig.onChange(e.target.value);
+              }}
+            >
+              <option value="" disabled>
+                {placeholder || `Select ${label}`}
+              </option>
+              {options.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          )}
+        />
+      ) : type === "date" ? (
+        <Controller
+          name={name}
+          control={control}
+          rules={rules}
+          render={({ field }) => (
+            <DatePicker
+              {...field}
+              selected={field.value}
+              onChange={(date) => {
+                setValue(name, date);
+                trigger(name);
+              }}
+              className={`form-input ${hasError ? "input-error" : ""}`}
+              dateFormat="yyyy-MM-dd"
+              placeholderText={placeholder || "Select a date"}
+            />
+          )}
+        />
+      ) :  type === "file" ? (
+        <div className="custom-file-input">
+          <input
+            type="file"
+            id={name}
+            onChange={handleFileChange}
+            className={`form-input ${hasError ? "input-error" : ""}`}
+            style={{ display: "none" }}
+            disabled={fieldConfig.isUploading}
+            accept={fieldConfig.accept}
+          />
+          <label
+            htmlFor={name}
+            className={`file-label ${hasError ? "input-error" : ""} ${fieldConfig.isUploading ? "uploading" : ""}`}
+          >
+            {fieldConfig.isUploading ? "Uploading..." : "Choose File"}
+          </label>
+          
+          {getValues(name) && !fieldConfig.isUploading && (
+            <div style={{ marginTop: "8px" }}>
+              <div>File: {getValues(name).docName || getValues(name).name}</div>
+            </div>
+          )}
+          
+          {fieldConfig.uploadError && <p className="error-message">{fieldConfig.uploadError}</p>}
+          {hasError && !fieldConfig.uploadError && <p className="error-message">{errors[name]?.message}</p>}
+        </div>
+      )  : type === "multifile" ? (
+        <input
+          type="file"
+          multiple
+          onChange={handleFileChange}
+          className={`form-input ${hasError ? "input-error" : ""}`}
+          placeholder={placeholder || "Upload multiple files"}
+        />
+      ) : (
+        <input
+          {...register(name, rules)}
+          type={type}
+          className={`form-input ${hasError ? "input-error" : ""}`}
+          onChange={(e) => {
+            setValue(name, e.target.value);
+            trigger(name);
+          }}
+          onKeyPress={handleKeyPress}
+          placeholder={placeholder || `Enter ${label.toLowerCase()}`}
+        />
+      )}
+      {hasError && <p className="error-message">{errors[name]?.message}</p>}
+    </div>
+  );
+};
 
 const FormCDetails = ({ provideSubmitHandler, formData }) => {
   const [isUploading, setIsUploading] = useState(false);
@@ -16,6 +163,41 @@ const FormCDetails = ({ provideSubmitHandler, formData }) => {
   
   const methods = useForm();
   const { register, handleSubmit, formState: { errors }, trigger, clearErrors, setValue, control, getValues, watch, reset } = methods;
+
+  const onSubmit = useCallback(async () => {
+    const isValid = await trigger();
+    if (!isValid) {
+      console.error("Validation failed");
+      return false;
+    }
+    return getValues();
+  }, [trigger, getValues]);
+
+  useEffect(() => {
+    if (formData) {
+      Object.keys(formData).forEach((key) => {
+        setValue(key, formData[key]);
+      });
+      if (formData.claimType) {
+        setSelectedClaimType(formData.claimType);
+      }
+    }
+  }, [formData, setValue]);
+
+  const handleFileUpload = async (file) => {
+    try {
+      const result = await uploadDocument(file, 'addressProofDocument');
+      return result;
+    } catch (error) {
+      throw error;
+    }
+  };
+
+  useEffect(() => {
+    if (provideSubmitHandler) {
+      provideSubmitHandler(onSubmit);
+    }
+  }, [provideSubmitHandler, onSubmit]);
 
   // Claim type options for checkboxes
   const claimTypeOptions = [
@@ -27,14 +209,38 @@ const FormCDetails = ({ provideSubmitHandler, formData }) => {
   // Handle checkbox change
   const handleClaimTypeChange = (value) => {
     setSelectedClaimType(value);
-    setValue("claimType", value);
+    setValue("claimType", value, { shouldValidate: true });
+    trigger("claimType");
     
     // Reset all fields except claimType when changing claim type
-    const currentValues = getValues();
     reset({ claimType: value });
   };
 
-  // ... (keep all other existing functions and effects as is)
+  // Field configurations (keep all your existing schema definitions)
+  const claimDetailsSchema = [
+    // ... (keep all your existing field configurations)
+  ];
+
+  const beneficiaryDetailsSchema = [
+    // ... (keep all your existing field configurations)
+  ];
+
+  const corporateDebtorSchema = [
+    // ... (keep all your existing field configurations)
+  ];
+
+  const bankAccountDetailsSchema = [
+    // ... (keep all your existing field configurations)
+  ];
+
+  // Watch addressProofType for validation
+  const addressProofType = watch("addressProofType");
+  useEffect(() => {
+    if (addressProofType) {
+      localStorage.setItem("selectedAddressProofType", addressProofType);
+      trigger("addressProofNumber");
+    }
+  }, [addressProofType, trigger]);
 
   return (
     <FormProvider {...methods}>
@@ -69,14 +275,114 @@ const FormCDetails = ({ provideSubmitHandler, formData }) => {
           </div>
         </div>
 
-        {/* ... (keep all the rest of the JSX as is) */}
+        {/* Conditional rendering based on selected claim type */}
+        {selectedClaimType === "principalBorrower" && (
+          <div className="mb-4 bg-light">
+            <Tooltip title="Details of claim, if it is made in respect of financial debt covered under clauses (h) and (i) of sub-section (8) of section 5 of the Code, extended by the creditor" arrow>
+              <div>
+                <Collapsible title="Details of claim: corporate debtor as principal borrower">
+                  <div className="flex-container">
+                    {claimDetailsSchema.map((fieldConfig) => (
+                      <DynamicField
+                        key={fieldConfig.name}
+                        fieldConfig={fieldConfig}
+                        control={control}
+                        register={register}
+                        errors={errors}
+                        setValue={setValue}
+                        trigger={trigger}
+                        getValues={getValues}
+                        watch={watch}
+                      />
+                    ))}
+                  </div>
+                </Collapsible>
+              </div>
+            </Tooltip>
+          </div>
+        )}
+
+        {selectedClaimType === "beneficiary" && (
+          <div className="mb-4 bg-light">
+            <Tooltip title="Beneficiary details (Details of claim, if it is made in respect of financial debt covered under clauses (h) and (i) of sub-section (8) of section 5 of the Code, extended by the creditor)" arrow>
+              <div>
+                <Collapsible title="Details of claim: corporate debtor as beneficiary">
+                  <div className="flex-container">
+                    {beneficiaryDetailsSchema.map((fieldConfig) => (
+                      <DynamicField
+                        key={fieldConfig.name}
+                        fieldConfig={fieldConfig}
+                        control={control}
+                        register={register}
+                        errors={errors}
+                        setValue={setValue}
+                        trigger={trigger}
+                        getValues={getValues}
+                        watch={watch}
+                      />
+                    ))}
+                  </div>
+                </Collapsible>
+              </div>
+            </Tooltip>
+          </div>
+        )}
+
+        {selectedClaimType === "guarantor" && (
+          <div className="mb-4 bg-light">
+            <Collapsible title="Details of claim: corporate debtor as guarantor">
+              <div className="flex-container">
+                {corporateDebtorSchema.map((fieldConfig) => (
+                  <DynamicField
+                    key={fieldConfig.name}
+                    fieldConfig={fieldConfig}
+                    control={control}
+                    register={register}
+                    errors={errors}
+                    setValue={setValue}
+                    trigger={trigger}
+                    getValues={getValues}
+                    watch={watch}
+                  />
+                ))}
+              </div>
+            </Collapsible>
+          </div>
+        )}
+
+        {/* Bank Account Details Section (always shown) */}
+        {selectedClaimType && (
+          <div className="mb-4 bg-light">
+            <Tooltip title="Bank account details (Details of the bank account to which the amount of the claim or any part thereof can be transferred pursuant to a resolution plan)" arrow>
+              <div>
+                <Collapsible title="Bank Account Details">
+                  <div className="flex-container">
+                    {bankAccountDetailsSchema.map((fieldConfig) => (
+                      <DynamicField
+                        key={fieldConfig.name}
+                        fieldConfig={fieldConfig}
+                        control={control}
+                        register={register}
+                        errors={errors}
+                        setValue={setValue}
+                        trigger={trigger}
+                        getValues={getValues}
+                        watch={watch}
+                      />
+                    ))}
+                  </div>
+                </Collapsible>
+              </div>
+            </Tooltip>
+          </div>
+        )}
       </form>
     </FormProvider>
   );
 };
 
 export default FormCDetails;
-
+/* Add these styles to your CSS file */
 .checkbox-group-label {
   display: block;
   margin-bottom: 8px;
@@ -86,21 +392,33 @@ export default FormCDetails;
 .checkbox-group {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 12px;
+  margin-top: 8px;
 }
 
 .checkbox-item {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
+}
+
+.checkbox-item label {
+  cursor: pointer;
+  margin-bottom: 0;
 }
 
 .form-checkbox {
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
   accent-color: #4CAF50; /* Green color for checked state */
 }
 
 .form-checkbox.input-error {
   outline: 2px solid #f44336; /* Red outline for error state */
+}
+
+.required-asterisk {
+  color: #f44336;
+  margin-left: 4px;
 }
