@@ -1,15 +1,15 @@
-import React, { useCallback, useState,useEffect } from "react";
+import React, { useCallback, useState, useEffect } from "react";
 import { useForm, FormProvider, Controller } from "react-hook-form";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
-import Collapsible from "../formCommon/Collapsible";
-import Tooltip from "@mui/material/Tooltip";
-import { FaInfoCircle } from "react-icons/fa";
-import { uploadDocument } from "../../../../services/documentUploadService";
+import Collapsible from "../formCommon/Collapsible"; // Assuming this is in a relative path
+import Tooltip from "@mui/material/Tooltip"; // Ensure @mui/material is installed: npm install @mui/material
+import { FaInfoCircle } from "react-icons/fa"; // Ensure react-icons is installed: npm install react-icons
+import { uploadDocument } from "../../../../services/documentUploadService"; // Assuming this service exists and is correctly located
 
-// Dynamic field renderer
+// Dynamic field renderer component
 const DynamicField = ({ fieldConfig, control, register, errors, setValue, trigger, getValues, watch }) => {
-  const { name, label, type, options, rules, tooltip, placeholder, accept } = fieldConfig;
+  const { name, label, type, options, rules, tooltip, placeholder, accept, isMultiFile } = fieldConfig; // Added isMultiFile
 
   // Check if the field has an error
   const hasError = errors[name];
@@ -22,41 +22,89 @@ const DynamicField = ({ fieldConfig, control, register, errors, setValue, trigge
   };
 
   const handleFileChange = async (e) => {
-    const file = e.target.files[0];
-    if (file && fieldConfig.onFileUpload) {
-      try {
-        fieldConfig.setIsUploading(true);
-        fieldConfig.setUploadError(null);
-        
-        const result = await fieldConfig.onFileUpload(file);
-        
-        if (result.success) {
-          setValue(name, {
-            fileId: result.fileId,
-            docName: result.docName,
-            docType: result.docType,
-            docSource: result.docSource,
-            fileUrl: result.fileUrl
-          }, { shouldValidate: true });
+    const files = e.target.files;
+
+    if (files && files.length > 0) {
+      if (isMultiFile) {
+        // Handle multiple file upload
+        const fileData = [];
+        let allUploadsSuccessful = true;
+        let firstError = null;
+
+        for (let i = 0; i < files.length; i++) {
+          const file = files[i];
+          try {
+            fieldConfig.setIsUploading(true);
+            fieldConfig.setUploadError(null);
+            const result = await fieldConfig.onFileUpload(file); // Await here
+
+            if (result && result.success) {
+              fileData.push({
+                fileId: result.fileId,
+                docName: result.docName,
+                docType: result.docType,
+                docSource: result.docSource,
+                fileUrl: result.fileUrl,
+              });
+            } else if (result && result.error) {
+              allUploadsSuccessful = false;
+              firstError = result.error; // Store the first error
+              break; // Exit the loop on first error
+            } else {
+              allUploadsSuccessful = false;
+              firstError = "File upload failed.";
+              break;
+            }
+          } catch (error) {
+            allUploadsSuccessful = false;
+            firstError = error.message || "An unexpected error occurred during upload.";
+            break; // Exit on exception
+          } finally {
+            fieldConfig.setIsUploading(false);
+          }
         }
-      } catch (error) {
-        fieldConfig.setUploadError(error.message);
-        setValue(name, null, { shouldValidate: true });
-      } finally {
-        fieldConfig.setIsUploading(false);
+
+        if (allUploadsSuccessful) {
+          setValue(name, fileData, { shouldValidate: true });
+        } else {
+          fieldConfig.setUploadError(firstError); // Set the error message
+          setValue(name, [], { shouldValidate: true }); // Clear the field
+        }
+      }
+       else {
+        // Handle single file upload
+        try {
+          fieldConfig.setIsUploading(true);
+          fieldConfig.setUploadError(null);
+          const result = await fieldConfig.onFileUpload(files[0]);
+
+          if (result && result.success) {
+            setValue(name, {
+              fileId: result.fileId,
+              docName: result.docName,
+              docType: result.docType,
+              docSource: result.docSource,
+              fileUrl: result.fileUrl,
+            }, { shouldValidate: true });
+          } else if (result && result.error) {
+            fieldConfig.setUploadError(result.error);
+            setValue(name, null, { shouldValidate: true });
+          }
+           else {
+            fieldConfig.setUploadError("File upload failed.");
+            setValue(name, null, { shouldValidate: true });
+          }
+        } catch (error) {
+          fieldConfig.setUploadError(error.message || "An unexpected error occurred during upload.");
+          setValue(name, null, { shouldValidate: true });
+        } finally {
+          fieldConfig.setIsUploading(false);
+        }
       }
     }
   };
 
-  // Handle file upload
-  // const handleFileChange = (e) => {
-  //   const files = e.target.files;
-  //   if (files) {
-  //     setValue(name, files[0]); // Single file selection
-  //     trigger(name);
-  //   }
-  // };
-
+  // Render different input types
   return (
     <div className="flex-item">
       <label>
@@ -113,7 +161,7 @@ const DynamicField = ({ fieldConfig, control, register, errors, setValue, trigge
             />
           )}
         />
-      ) :  type === "file" ? (
+      ) : type === "file" ? (
         <div className="custom-file-input">
           <input
             type="file"
@@ -122,7 +170,8 @@ const DynamicField = ({ fieldConfig, control, register, errors, setValue, trigge
             className={`form-input ${hasError ? "input-error" : ""}`}
             style={{ display: "none" }}
             disabled={fieldConfig.isUploading}
-            accept={fieldConfig.accept}
+            accept={accept}
+            multiple={isMultiFile} // Set multiple attribute
           />
           <label
             htmlFor={name}
@@ -130,25 +179,42 @@ const DynamicField = ({ fieldConfig, control, register, errors, setValue, trigge
           >
             {fieldConfig.isUploading ? "Uploading..." : "Choose File"}
           </label>
-          
-          {getValues(name) && !fieldConfig.isUploading && (
+
+          {/* Display file name(s) */}
+          {isMultiFile ? (
+            getValues(name) && Array.isArray(getValues(name)) && getValues(name).length > 0 && (
+              <div style={{ marginTop: "8px" }}>
+                <div>
+                  Files:
+                  {getValues(name)
+                    .map((file, index) => (
+                      <span key={index}>
+                        {file.docName || file.name}
+                        {index < getValues(name).length - 1 ? ", " : ""}
+                      </span>
+                    ))
+                    .join("")}
+                </div>
+              </div>
+            )
+          ) : (
+            getValues(name)?.docName && !fieldConfig.isUploading && (
+              <div style={{ marginTop: "8px" }}>
+                <div>File: {getValues(name).docName}</div>
+              </div>
+            )
+          )}
+          {!isMultiFile && getValues(name)?.name && !fieldConfig.isUploading && !getValues(name)?.docName && (
             <div style={{ marginTop: "8px" }}>
-              <div>File: {getValues(name).docName || getValues(name).name}</div>
+              <div>File: {getValues(name).name}</div>
             </div>
           )}
-          
+
           {fieldConfig.uploadError && <p className="error-message">{fieldConfig.uploadError}</p>}
           {hasError && !fieldConfig.uploadError && <p className="error-message">{errors[name]?.message}</p>}
         </div>
-      )  : type === "multifile" ? (
-        <input
-          type="file"
-          multiple
-          onChange={handleFileChange}
-          className={`form-input ${hasError ? "input-error" : ""}`}
-          placeholder={placeholder || "Upload multiple files"}
-        />
       ) : (
+        // Default input
         <input
           {...register(name, rules)}
           type={type}
@@ -166,12 +232,15 @@ const DynamicField = ({ fieldConfig, control, register, errors, setValue, trigge
   );
 };
 
+// Main form component
 const FormCDetails = ({ provideSubmitHandler, formData }) => {
-    const [isUploading, setIsUploading] = useState(false);
-    const [uploadError, setUploadError] = useState(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadError, setUploadError] = useState(null);
+  const [activeSection, setActiveSection] = useState("principalBorrower"); // Default active section
   const methods = useForm();
   const { register, handleSubmit, formState: { errors }, trigger, clearErrors, setValue, control, getValues, watch } = methods;
 
+  // Function to handle form submission
   const onSubmit = useCallback(async () => {
     const isValid = await trigger();
     if (!isValid) {
@@ -181,6 +250,7 @@ const FormCDetails = ({ provideSubmitHandler, formData }) => {
     return getValues();
   }, [trigger, getValues]);
 
+  // Populate form with initial data
   useEffect(() => {
     if (formData) {
       Object.keys(formData).forEach((key) => {
@@ -188,23 +258,26 @@ const FormCDetails = ({ provideSubmitHandler, formData }) => {
       });
     }
   }, [formData, setValue]);
-   const handleFileUpload = async (file) => {
-      try {
-        const result = await uploadDocument(file, 'addressProofDocument');
-        return result;
-      } catch (error) {
-        throw error;
-      }
-    };
-  
 
+  // Function to handle file upload using the provided service
+    const handleFileUpload = async (file) => {
+    try {
+      const result = await uploadDocument(file, 'addressProofDocument');
+      return result;
+    } catch (error) {
+      console.error("Error uploading file:", error);
+      return { success: false, error: "File upload failed" }; // Consistent error return
+    }
+  };
+
+  // Provide submit handler to parent component
   useEffect(() => {
     if (provideSubmitHandler) {
       provideSubmitHandler(onSubmit);
     }
   }, [provideSubmitHandler, onSubmit]);
 
-  // Field configurations for each section
+  // Field configurations for each section of the form
   const claimDetailsSchema = [
     {
       name: "securityInterestAmount",
@@ -212,7 +285,7 @@ const FormCDetails = ({ provideSubmitHandler, formData }) => {
       type: "number",
       rules: { required: "Security interest amount is required" },
       tooltip: "Amount of claim covered by security interest, if any (Please provide details of security interest, the value of the security, and the date it was given)",
-      placeholder: "Enter security interest amount"
+      placeholder: "Enter security interest amount",
     },
     {
       name: "guaranteeAmount",
@@ -220,21 +293,21 @@ const FormCDetails = ({ provideSubmitHandler, formData }) => {
       type: "number",
       rules: { required: "Guarantee amount is required" },
       tooltip: "Amount of claim covered by guarantee, if any (Please provide details of guarantee held, the value of the guarantee, and the date it was given)",
-      placeholder: "Enter guarantee amount"
+      placeholder: "Enter guarantee amount",
     },
     {
       name: "guarantorName",
       label: <>Guarantor Name <span className="required-asterisk">*</span></>,
       type: "text",
       rules: { required: "Guarantor name is required" },
-      placeholder: "Enter guarantor name"
+      placeholder: "Enter guarantor name",
     },
     {
       name: "guarantorAddress",
       label: <>Guarantor Address <span className="required-asterisk">*</span></>,
       type: "text",
       rules: { required: "Guarantor address is required" },
-      placeholder: "Enter guarantor address"
+      placeholder: "Enter guarantor address",
     },
     {
       name: "addressProofType",
@@ -256,49 +329,34 @@ const FormCDetails = ({ provideSubmitHandler, formData }) => {
       type: "text",
       rules: {
         required: "Address proof number is required",
-        // validate: (value) => {
-        //   const proofType = watch("addressProofType");
-        //   if (proofType === "Aadhar" && !/^\d{12}$/.test(value)) {
-        //     return "Please enter a valid 12-digit Aadhar number";
-        //   }
-        //   if (proofType === "PAN" && !/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/.test(value)) {
-        //     return "Please enter a valid PAN number (format: ABCDE1234F)";
-        //   }
-        //   if (proofType === "Voter" && !/^[A-Z]{3}[0-9]{7}$/.test(value)) {
-        //     return "Please enter a valid Voter ID number (e.g., ABC1234567)";
-        //   }
-        //   if (proofType === "Passport" && !/^[A-Z]{2}[0-9]{7}$/.test(value)) {
-        //     return "Please enter a valid Passport number (e.g., AB1234567)";
-        //   }
-        //   return true;
-        // },
       },
       tooltip: "Enter your Address Proof Number",
-      placeholder: "Enter Address Proof Number"
+      placeholder: "Enter Address Proof Number",
     },
     {
       name: "addressProofDocument",
       label: <>Address Proof Document <span className="required-asterisk">*</span></>,
       type: "file",
-      rules: { required: "Address proof document is required",
+      rules: {
+        required: "Address proof document is required",
         validate: {
-          fileUploaded: (value) => value !== null || "Please upload the document"
-        }
-       },
+          fileUploaded: (value) => value !== null || "Please upload the document",
+        },
+      },
       tooltip: "Upload a clear scan of your address proof document",
       accept: "image/*,.pdf",
       onFileUpload: handleFileUpload,
       isUploading,
       uploadError,
       setIsUploading,
-      setUploadError
+      setUploadError,
     },
     {
       name: "creditorAddress",
       label: <>Address of Creditor for Correspondence <span className="required-asterisk">*</span></>,
       type: "text",
       rules: { required: "Creditor address is required" },
-      placeholder: "Enter creditor address"
+      placeholder: "Enter creditor address",
     },
     {
       name: "creditorEmail",
@@ -311,7 +369,7 @@ const FormCDetails = ({ provideSubmitHandler, formData }) => {
           message: "Invalid email address",
         },
       },
-      placeholder: "Enter creditor email"
+      placeholder: "Enter creditor email",
     },
   ];
 
@@ -321,14 +379,14 @@ const FormCDetails = ({ provideSubmitHandler, formData }) => {
       label: <>Beneficiary Name <span className="required-asterisk">*</span></>,
       type: "text",
       rules: { required: "Beneficiary name is required" },
-      placeholder: "Enter beneficiary name"
+      placeholder: "Enter beneficiary name",
     },
     {
       name: "beneficiaryAddress",
       label: <>Beneficiary Address <span className="required-asterisk">*</span></>,
       type: "text",
       rules: { required: "Beneficiary address is required" },
-      placeholder: "Enter beneficiary address"
+      placeholder: "Enter beneficiary address",
     },
   ];
 
@@ -339,7 +397,7 @@ const FormCDetails = ({ provideSubmitHandler, formData }) => {
       type: "number",
       rules: { required: "Security amount is required" },
       tooltip: "Amount of claim covered by security interest, if any (Please provide details of security interest, the value of the security, and the date it was given)",
-      placeholder: "Enter security amount"
+      placeholder: "Enter security amount",
     },
     {
       name: "corporateDebtorGuaranteeAmount",
@@ -347,21 +405,21 @@ const FormCDetails = ({ provideSubmitHandler, formData }) => {
       type: "number",
       rules: { required: "Guarantee amount is required" },
       tooltip: "Amount of claim covered by guarantee, if any (Please provide details of guarantee held, the value of the guarantee, and the date it was given)",
-      placeholder: "Enter guarantee amount"
+      placeholder: "Enter guarantee amount",
     },
     {
       name: "principalBorrowerName",
       label: <>Principal Borrower Name <span className="required-asterisk">*</span></>,
       type: "text",
       rules: { required: "Principal borrower name is required" },
-      placeholder: "Enter principal borrower name"
+      placeholder: "Enter principal borrower name",
     },
     {
       name: "principalBorrowerAddress",
       label: <>Principal Borrower Address <span className="required-asterisk">*</span></>,
       type: "text",
       rules: { required: "Principal borrower address is required" },
-      placeholder: "Enter principal borrower address"
+      placeholder: "Enter principal borrower address",
     },
   ];
 
@@ -371,21 +429,21 @@ const FormCDetails = ({ provideSubmitHandler, formData }) => {
       label: <>Account Number <span className="required-asterisk">*</span></>,
       type: "text",
       rules: { required: "Account number is required" },
-      placeholder: "Enter account number"
+      placeholder: "Enter account number",
     },
     {
       name: "ifscCode",
       label: <>IFSC Code <span className="required-asterisk">*</span></>,
       type: "text",
       rules: { required: "IFSC code is required" },
-      placeholder: "Enter IFSC code"
+      placeholder: "Enter IFSC code",
     },
     {
       name: "branchName",
       label: <>Branch Name <span className="required-asterisk">*</span></>,
       type: "text",
       rules: { required: "Branch name is required" },
-      placeholder: "Enter branch name"
+      placeholder: "Enter branch name",
     },
   ];
 
@@ -405,21 +463,26 @@ const FormCDetails = ({ provideSubmitHandler, formData }) => {
         <div className="mb-4 bg-light">
           <Tooltip title="Details of claim, if it is made in respect of financial debt covered under clauses (h) and (i) of sub-section (8) of section 5 of the Code, extended by the creditor" arrow>
             <div>
-              <Collapsible title="Details of claim: corporate debtor as principal borrower">
+              <Collapsible
+                title="Details of claim: corporate debtor as principal borrower"
+                isOpen={activeSection === "principalBorrower"}
+                onToggle={() => setActiveSection("principalBorrower")}
+              >
                 <div className="flex-container">
-                  {claimDetailsSchema.map((fieldConfig) => (
-                    <DynamicField
-                      key={fieldConfig.name}
-                      fieldConfig={fieldConfig}
-                      control={control}
-                      register={register}
-                      errors={errors}
-                      setValue={setValue}
-                      trigger={trigger}
-                      getValues={getValues}
-                      watch={watch}
-                    />
-                  ))}
+                  {activeSection === "principalBorrower" &&
+                    claimDetailsSchema.map((fieldConfig) => (
+                      <DynamicField
+                        key={fieldConfig.name}
+                        fieldConfig={fieldConfig}
+                        control={control}
+                        register={register}
+                        errors={errors}
+                        setValue={setValue}
+                        trigger={trigger}
+                        getValues={getValues}
+                        watch={watch}
+                      />
+                    ))}
                 </div>
               </Collapsible>
             </div>
@@ -430,21 +493,26 @@ const FormCDetails = ({ provideSubmitHandler, formData }) => {
         <div className="mb-4 bg-light">
           <Tooltip title="Beneficiary details (Details of claim, if it is made in respect of financial debt covered under clauses (h) and (i) of sub-section (8) of section 5 of the Code, extended by the creditor)" arrow>
             <div>
-              <Collapsible title="Details of claim: corporate debtor as beneficiary">
+              <Collapsible
+                title="Details of claim: corporate debtor as beneficiary"
+                isOpen={activeSection === "beneficiary"}
+                onToggle={() => setActiveSection("beneficiary")}
+              >
                 <div className="flex-container">
-                  {beneficiaryDetailsSchema.map((fieldConfig) => (
-                    <DynamicField
-                      key={fieldConfig.name}
-                      fieldConfig={fieldConfig}
-                      control={control}
-                      register={register}
-                      errors={errors}
-                      setValue={setValue}
-                      trigger={trigger}
-                      getValues={getValues}
-                      watch={watch}
-                    />
-                  ))}
+                  {activeSection === "beneficiary" &&
+                    beneficiaryDetailsSchema.map((fieldConfig) => (
+                      <DynamicField
+                        key={fieldConfig.name}
+                        fieldConfig={fieldConfig}
+                        control={control}
+                        register={register}
+                        errors={errors}
+                        setValue={setValue}
+                        trigger={trigger}
+                        getValues={getValues}
+                        watch={watch}
+                      />
+                    ))}
                 </div>
               </Collapsible>
             </div>
@@ -453,21 +521,26 @@ const FormCDetails = ({ provideSubmitHandler, formData }) => {
 
         {/* Corporate Debtor as Guarantor Section */}
         <div className="mb-4 bg-light">
-          <Collapsible title="Details of claim: corporate debtor as guarantor">
+          <Collapsible
+            title="Details of claim: corporate debtor as guarantor"
+            isOpen={activeSection === "guarantor"}
+            onToggle={() => setActiveSection("guarantor")}
+          >
             <div className="flex-container">
-              {corporateDebtorSchema.map((fieldConfig) => (
-                <DynamicField
-                  key={fieldConfig.name}
-                  fieldConfig={fieldConfig}
-                  control={control}
-                  register={register}
-                  errors={errors}
-                  setValue={setValue}
-                  trigger={trigger}
-                  getValues={getValues}
-                  watch={watch}
-                />
-              ))}
+              {activeSection === "guarantor" &&
+                corporateDebtorSchema.map((fieldConfig) => (
+                  <DynamicField
+                    key={fieldConfig.name}
+                    fieldConfig={fieldConfig}
+                    control={control}
+                    register={register}
+                    errors={errors}
+                    setValue={setValue}
+                    trigger={trigger}
+                    getValues={getValues}
+                    watch={watch}
+                  />
+                ))}
             </div>
           </Collapsible>
         </div>
@@ -476,21 +549,26 @@ const FormCDetails = ({ provideSubmitHandler, formData }) => {
         <div className="mb-4 bg-light">
           <Tooltip title="Bank account details (Details of the bank account to which the amount of the claim or any part thereof can be transferred pursuant to a resolution plan)" arrow>
             <div>
-              <Collapsible title="Bank Account Details">
+              <Collapsible
+                title="Bank Account Details"
+                isOpen={activeSection === "bankDetails"}
+                onToggle={() => setActiveSection("bankDetails")}
+              >
                 <div className="flex-container">
-                  {bankAccountDetailsSchema.map((fieldConfig) => (
-                    <DynamicField
-                      key={fieldConfig.name}
-                      fieldConfig={fieldConfig}
-                      control={control}
-                      register={register}
-                      errors={errors}
-                      setValue={setValue}
-                      trigger={trigger}
-                      getValues={getValues}
-                      watch={watch}
-                    />
-                  ))}
+                  {activeSection === "bankDetails" &&
+                    bankAccountDetailsSchema.map((fieldConfig) => (
+                      <DynamicField
+                        key={fieldConfig.name}
+                        fieldConfig={fieldConfig}
+                        control={control}
+                        register={register}
+                        errors={errors}
+                        setValue={setValue}
+                        trigger={trigger}
+                        getValues={getValues}
+                        watch={watch}
+                      />
+                    ))}
                 </div>
               </Collapsible>
             </div>
