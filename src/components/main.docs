@@ -1,202 +1,889 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { Container, Row, Col, Spinner } from "react-bootstrap";
-import Collapsible from "./formCommon/Collapsible";
-import { useFormData } from "../../context/FormDataContext";
-import PreviewCard from "../../private/Dashboard/PreviewCard";
+import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { useNavigate, useParams } from "react-router-dom";
+import { toast } from "react-toastify";
+import { Modal, Button, Form } from "react-bootstrap";
+import "./Stepper.css";
+import { useRegistration } from "../../context/ApplicationContext";
+import ReviewStep from "./ReviewStep";
+import { FormDataProvider } from "../../context/FormDataContext";
+import { postData } from "../../../services/http.service.ts";
+import { URLS_ENDPOINT } from "../../../utils/urlsConstants.ts";
+import axios from "axios";
+import { v4 as uuidv4 } from "uuid"; // Import UUID generator
 
-const ReviewStep = () => {
-  const { formData } = useFormData();
-  const [draftResponse, setDraftResponse] = useState(null);
-  const [loading, setLoading] = useState(true);
 
-  // Load draft data from localStorage on mount
-  useEffect(() => {
-    const savedDraft = localStorage.getItem("draftResponse");
-    if (savedDraft) {
-      try {
-        const parsedDraft = JSON.parse(savedDraft);
-        setDraftResponse(parsedDraft);
-      } catch (error) {
-        console.error("Error parsing draft data:", error);
-      }
+const deepEqual = (obj1, obj2) => {
+  return JSON.stringify(obj1) === JSON.stringify(obj2);
+};
+
+const generateFileId = (file) => {
+  return `file-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+};
+// const  idetificationType= localStorage.getItem("selectedIdentificationType");
+// const addressproofType = localStorage.getItem("selectedAddressProofType");
+const extractFileDetails = (file, source,documentType) => {
+  console.log("extractFileDetails", file, source);
+  if (!file) return null;
+
+  return {
+    docId: file.fileId ,
+    docName: file.docName,
+    docType: documentType, 
+    docSource: source,
+  };
+};
+
+const createFormPayload = (formData, isFinalSubmit, userFormData, applicationNumber = "",isActive) => {
+  console.log("createFormPayload", formData);
+  const creditorBasicDetailsUuid = formData.creditorBasicDetailsUuid || "";
+  const claimDetailsUuid = formData.claimDetailsUuid || "";
+  const signatoryDetailsUuid = formData.signatoryDetailsUuid || "";
+
+  return {
+    // userInfo: userFormData?.fullloginDetails || {}, // Make sure to handle potential null
+    uuid: applicationNumber || "", // Application number is generated on final submit
+    applicationNumber: applicationNumber || "",
+    creditorBasicDetails: {
+      uuid: creditorBasicDetailsUuid,
+      debtorName: formData.step1?.debtorName || "",
+      creditorName: formData.step1?.CreditorName || "", 
+      totalClaimAmount: parseFloat(formData.step1?.totalClaimAmount) || 0,
+      debtDetails: formData.step1?.debtDetails || "",
+      mutualCreditDetails: formData.step1?.mutualCreditDetails || "",
+      status: "",
+      isActive: isActive,
+      isFinalSubmit: isFinalSubmit,
+      identificationNumber: formData.step1?.identificationNumber || "",
+      document: extractFileDetails(formData.step1?.identificationDocument, "Identification",formData.step1?.identificationType),
+    },
+    // auditDetails: {
+    //   auditDetails: {
+    //     // createdBy: userFormData?.fullloginDetails?.uuid || "", 
+    //     // lastModifiedBy: userFormData?.fullloginDetails?.uuid || "",
+    //     // createdTime: Date.now(),
+    //     // lastModifiedTime: Date.now(),
+    //   },
+    // },
+    claimDetails: {
+      uuid: claimDetailsUuid,
+      securityInterestAmount: parseFloat(formData.step2?.securityInterestAmount) || 0,
+      guaranteeAmount: parseFloat(formData.step2?.guaranteeAmount) || 0,
+      guarantorName: formData.step2?.guarantorName || "",
+      guarantorAddress: formData.step2?.guarantorAddress || "",
+      creditorAddress: formData.step2?.creditorAddress || "",
+      creditorEmail: formData.step2?.creditorEmail || "",
+      beneficiaryName: formData.step2?.beneficiaryName || "",
+      beneficiaryAddress: formData.step2?.beneficiaryAddress || "",
+      corporateDebtorSecurityAmount: parseFloat(formData.step2?.corporateDebtorSecurityAmount) || 0,
+      corporateDebtorGuaranteeAmount: parseFloat(formData.step2?.corporateDebtorGuaranteeAmount) || 0,
+      principalBorrowerName: formData.step2?.principalBorrowerName || "",
+      principalBorrowerAddress: formData.step2?.principalBorrowerAddress || "",
+      bankAccountNumber: formData.step2?.accountNumber || "",
+      bankIfscCode: formData.step2?.ifscCode || "",
+      bankBranchName: formData.step2?.branchName || "",
+      addressProofNumber: formData.step2?.addressProofNumber || "",
+      document: extractFileDetails(formData.step2?.addressProofDocument, "Addressproof",formData.step2?.addressProofType),
+      // auditDetails: {},
+    },
+    signatoryDetails: {
+      uuid: signatoryDetailsUuid,
+      name: formData.step3?.signatoryName || "",
+      position: formData.step3?.signatoryPosition || "",
+      address: formData.step3?.signatoryAddress || "",
+      document: extractFileDetails(formData.step3?.signatoryDocument, "Signature","Signature"),
+    },
+  };
+};
+
+const getFileFieldsForStep = (stepNumber) => {
+  switch (stepNumber) {
+    case 1:
+      return ["identificationDocument"];
+    case 2:
+      return ["addressProof"];
+    case 3:
+      return ["signatoryDocument"];
+    default:
+      return [];
+  }
+};
+
+const processFileUploads = async (stepData, stepNumber) => {
+  const fileFields = getFileFieldsForStep(stepNumber);
+  const processedData = { ...stepData };
+
+  for (const field of fileFields) {
+    if (stepData[field] && stepData[field] instanceof File) {
+      // In a real application, you would upload the file here
+      // and get a server-side ID or URL.
+      processedData[field] = {
+        id: generateFileId(stepData[field]),
+        name: stepData[field].name,
+        size: stepData[field].size,
+        type: stepData[field].type,
+        uploadedAt: new Date().toISOString(),
+      };
+    } else if (stepData[field] && typeof stepData[field] === 'object' && stepData[field].name) {
+      // Keep existing file details if not a new file
+      processedData[field] = { ...stepData[field] };
     }
-    setLoading(false);
+  }
+
+  return processedData;
+};
+
+const Stepper = ({ stepsConfig = [], formAllData }) => {
+  const { id } = useParams();
+  const isEditMode = !!id;
+  const [currentStep, setCurrentStep] = useState(1);
+  const [isConfirmed, setIsConfirmed] = useState(false);
+  const [isComplete, setIsComplete] = useState(false);
+  const [isViewModalOpen, setIsViewModalOpen] = useState(false);
+  const [hasPreviewed, setHasPreviewed] = useState(false);
+  const [formData, setFormData] = useState({});
+  const [margins, setMargins] = useState({ marginLeft: 0, marginRight: 0 });
+  const stepRef = useRef([]);
+  const navigate = useNavigate();
+  const [currentSubmitHandler, setCurrentSubmitHandler] = useState(null);
+  const [showModal, setShowModal] = useState(false);
+  const [comments, setComments] = useState("");
+  const [actionType, setActionType] = useState("");
+  const [isSavingDraft, setIsSavingDraft] = useState(false);
+
+  const {
+    registrationData,
+    handleStepDataFetch,
+    updateRegistrationData,
+    loadDataFromLocalStorage,
+    isDataLoaded,
+  } = useRegistration();
+
+  const userFormData = JSON.parse(localStorage.getItem("userFormData"));
+  const isCRPUser = userFormData?.userType === "CRP";
+
+  const filteredStepsConfig = useMemo(() => {
+    if (isCRPUser) {
+      return stepsConfig.filter((step) => step.name !== "Review & Submit");
+    }
+    return stepsConfig;
+  }, [stepsConfig, isCRPUser]);
+
+  useEffect(() => {
+    if (id) {
+      loadDataFromLocalStorage(id);
+    }
+  }, [id, loadDataFromLocalStorage]);
+
+  useEffect(() => {
+    if (isEditMode && registrationData && !deepEqual(formData, registrationData)) {
+      setFormData(registrationData);
+    }
+  }, [isEditMode, registrationData, formData]);
+
+  // useEffect(() => {
+  //   if (isEditMode && registrationData && !deepEqual(formData, registrationData)) {
+  //     setFormData({
+  //       ...registrationData,
+  //       creditorBasicDetailsUuid: registrationData.creditorBasicDetails?.uuid || uuidv4(),
+  //       claimDetailsUuid: registrationData.claimDetails?.uuid || uuidv4(),
+  //       signatoryDetailsUuid: registrationData.signatoryDetails?.uuid || uuidv4(),
+  //       step1: {
+  //         debtorName: registrationData.creditorBasicDetails?.debtorName,
+  //         CreditorName: registrationData.creditorBasicDetails?.creditorName,
+  //         totalClaimAmount: registrationData.creditorBasicDetails?.totalClaimAmount,
+  //         debtDetails: registrationData.creditorBasicDetails?.debtDetails,
+  //         mutualCreditDetails: registrationData.creditorBasicDetails?.mutualCreditDetails,
+  //         identificationType: registrationData.creditorBasicDetails?.document?.docType,
+  //         identificationNumber: registrationData.creditorBasicDetails?.document?.docId,
+  //         identificationDocument: registrationData.creditorBasicDetails?.document
+  //           ? { id: registrationData.creditorBasicDetails.document.docId, name: registrationData.creditorBasicDetails.document.docName, type: registrationData.creditorBasicDetails.document.docType }
+  //           : null,
+  //       },
+  //       step2: {
+  //         securityInterestAmount: registrationData.claimDetails?.securityInterestAmount,
+  //         guaranteeAmount: registrationData.claimDetails?.guaranteeAmount,
+  //         guarantorName: registrationData.claimDetails?.guarantorName,
+  //         guarantorAddress: registrationData.claimDetails?.guarantorAddress,
+  //         creditorAddress: registrationData.claimDetails?.creditorAddress,
+  //         creditorEmail: registrationData.claimDetails?.creditorEmail,
+  //         beneficiaryName: registrationData.claimDetails?.beneficiaryName,
+  //         beneficiaryAddress: registrationData.claimDetails?.beneficiaryAddress,
+  //         corporateDebtorSecurityAmount: registrationData.claimDetails?.corporateDebtorSecurityAmount,
+  //         corporateDebtorGuaranteeAmount: registrationData.claimDetails?.corporateDebtorGuaranteeAmount,
+  //         principalBorrowerName: registrationData.claimDetails?.principalBorrowerName,
+  //         principalBorrowerAddress: registrationData.claimDetails?.principalBorrowerAddress,
+  //         accountNumber: registrationData.claimDetails?.bankAccountNumber,
+  //         ifscCode: registrationData.claimDetails?.bankIfscCode,
+  //         branchName: registrationData.claimDetails?.bankBranchName,
+  //         addressProof: registrationData.claimDetails?.document
+  //           ? { id: registrationData.claimDetails.document.docId, name: registrationData.claimDetails.document.docName, type: registrationData.claimDetails.document.docType }
+  //           : null,
+  //       },
+  //       step3: {
+  //         signatoryName: registrationData.signatoryDetails?.name,
+  //         signatoryPosition: registrationData.signatoryDetails?.position,
+  //         signatoryAddress: registrationData.signatoryDetails?.address,
+  //         signatoryDocument: registrationData.signatoryDetails?.document
+  //           ? { id: registrationData.signatoryDetails.document.docId, name: registrationData.signatoryDetails.document.docName, type: registrationData.signatoryDetails.document.docType }
+  //           : null,
+  //       },
+  //     });
+  //   } else if (!isEditMode && !isDataLoaded) {
+  //     // Initialize with new UUIDs for a new form
+  //     setFormData({
+  //       creditorBasicDetailsUuid: uuidv4(),
+  //       claimDetailsUuid: uuidv4(),
+  //       signatoryDetailsUuid: uuidv4(),
+  //     });
+  //   }
+  // }, [isEditMode, registrationData, formData, isDataLoaded]);
+
+  useEffect(() => {
+    const savedIsConfirmed = localStorage.getItem("isConfirmed");
+    if (savedIsConfirmed) {
+      setIsConfirmed(JSON.parse(savedIsConfirmed));
+    }
   }, []);
 
-  // Transform the draft response to match your form structure
-  const transformedDraftData = useMemo(() => {
-    if (!draftResponse) return null;
+  useEffect(() => {
+    localStorage.setItem("isConfirmed", JSON.stringify(isConfirmed));
+  }, [isConfirmed]);
 
-    const basicDetails = draftResponse.applicationDetails?.creditorBasicDetails || {};
-    const claimDetails = draftResponse.applicationDetails?.claimDetails || {};
-    const signatoryDetails = draftResponse.applicationDetails?.signatoryDetails || {};
+  useEffect(() => {
+    const newSubmitHandler = filteredStepsConfig[currentStep - 1]?.submitHandler;
+    if (newSubmitHandler && newSubmitHandler !== currentSubmitHandler) {
+      setCurrentSubmitHandler(() => newSubmitHandler);
+    }
+  }, [currentStep, filteredStepsConfig]);
 
-    return {
-      debtorName: basicDetails.debtorName,
-      CreditorName: basicDetails.creditorName,
-      totalClaimAmount: basicDetails.totalClaimAmount,
-      debtDetails: basicDetails.debtDetails,
-      mutualCreditDetails: basicDetails.mutualCreditDetails,
-      identificationType: basicDetails.document?.docType,
-      identificationNumber: basicDetails.identificationNumber,
-      identificationDocument: basicDetails.document,
+  const updateSubmitHandler = useCallback((submitHandler) => {
+    setCurrentSubmitHandler(() => submitHandler);
+  }, []);
 
-      securityInterestAmount: claimDetails.securityInterestAmount,
-      guaranteeAmount: claimDetails.guaranteeAmount,
-      guarantorName: claimDetails.guarantorName,
-      guarantorAddress: claimDetails.guarantorAddress,
-      creditorAddress: claimDetails.creditorAddress,
-      creditorEmail: claimDetails.creditorEmail,
-      beneficiaryName: claimDetails.beneficiaryName,
-      beneficiaryAddress: claimDetails.beneficiaryAddress,
-      corporateDebtorSecurityAmount: claimDetails.corporateDebtorSecurityAmount,
-      corporateDebtorGuaranteeAmount: claimDetails.corporateDebtorGuaranteeAmount,
-      principalBorrowerName: claimDetails.principalBorrowerName,
-      principalBorrowerAddress: claimDetails.principalBorrowerAddress,
-      accountNumber: claimDetails.bankAccountNumber,
-      ifscCode: claimDetails.bankIfscCode,
-      branchName: claimDetails.bankBranchName,
-      addressProofType: claimDetails.document?.docType,
-      addressProofNumber: claimDetails.addressProofNumber,
-      addressProofDocument: claimDetails.document,
+  useEffect(() => {
+    if (stepRef.current.length > 0) {
+      const firstStep = stepRef.current[0]?.offsetWidth || 0;
+      const lastStep = stepRef.current[filteredStepsConfig.length - 1]?.offsetWidth || 0;
+      setMargins({
+        marginLeft: firstStep / 2,
+        marginRight: lastStep / 2,
+      });
+    }
+  }, [filteredStepsConfig.length]);
 
-      signatoryName: signatoryDetails.name,
-      signatoryPosition: signatoryDetails.position,
-      signatoryAddress: signatoryDetails.address,
-      signatoryDocument: signatoryDetails.document,
-    };
-  }, [draftResponse]);
-
-  // Use draft data if available, otherwise use regular form data
-  const displayData = transformedDraftData || formData;
-
-  // Format the data for display
-  const formattedData = useMemo(() => {
-    if (!displayData || Object.keys(displayData).length === 0) return null;
-
-    const formatFileInfo = (fileData) => {
-      if (!fileData) return "No file uploaded";
-      if (typeof fileData === "string") return fileData;
-      return fileData.docName || "File uploaded";
-    };
-
-    return {
-      step1: {
-        creditorDetails: {
-          "Debtor Name": displayData.debtorName,
-          "Creditor Name": displayData.CreditorName,
-          "Total Claim Amount": displayData.totalClaimAmount,
-          "Debt Details": displayData.debtDetails,
-          "Mutual Credit Details": displayData.mutualCreditDetails,
-        },
-        identificationDetails: {
-          "Identification Type": displayData.identificationType,
-          "Identification Number": displayData.identificationNumber,
-          "Identification Document": formatFileInfo(displayData.identificationDocument),
-        }
-      },
-      step2: {
-        financialDetails: {
-          "Security Interest Amount": displayData.securityInterestAmount,
-          "Guarantee Amount": displayData.guaranteeAmount,
-          "Guarantor Name": displayData.guarantorName,
-          "Guarantor Address": displayData.guarantorAddress,
-          "Creditor Address": displayData.creditorAddress,
-          "Creditor Email": displayData.creditorEmail,
-        },
-        beneficiaryDetails: {
-          "Beneficiary Name": displayData.beneficiaryName,
-          "Beneficiary Address": displayData.beneficiaryAddress,
-          "Corporate Debtor Security Amount": displayData.corporateDebtorSecurityAmount,
-          "Corporate Debtor Guarantee Amount": displayData.corporateDebtorGuaranteeAmount,
-        },
-        addressproofDetails: {
-          "Address Proof Type": displayData.addressProofType,
-          "Address Proof Number": displayData.addressProofNumber,
-          "Address Proof Document": formatFileInfo(displayData.addressProofDocument),
-        },
-        bankDetails: {
-          "Principal Borrower Name": displayData.principalBorrowerName,
-          "Principal Borrower Address": displayData.principalBorrowerAddress,
-          "Account Number": displayData.accountNumber,
-          "IFSC Code": displayData.ifscCode,
-          "Branch Name": displayData.branchName,
-        }
-      },
-      step3: {
-        signatoryDetails: {
-          "Signatory Name": displayData.signatoryName,
-          "Signatory Position": displayData.signatoryPosition,
-          "Signatory Address": displayData.signatoryAddress,
-          "Signatory Document": formatFileInfo(displayData.signatoryDocument),
-        }
+  const validateStepData = (step, data) => {
+    const requiredFields = filteredStepsConfig[step - 1]?.requiredFields || [];
+    for (let field of requiredFields) {
+      if (!data[field]) {
+        toast.error(`${field} is required.`);
+        return false;
       }
+    }
+    return true;
+  };
+
+  const handleNext = async () => {
+    if (!currentSubmitHandler) {
+      console.error("No submit handler available.");
+      return;
+    }
+
+    const currentStepData = await currentSubmitHandler();
+    if (!currentStepData) {
+      console.error("Form validation failed.");
+      return;
+    }
+
+    if (!validateStepData(currentStep, currentStepData)) {
+      return;
+    }
+
+    const processedStepData = await processFileUploads(currentStepData, currentStep);
+
+    const updatedFormData = {
+      ...formData,
+      [`step${currentStep}`]: { ...formData[`step${currentStep}`], ...processedStepData },
     };
-  }, [displayData]);
 
-  if (loading) {
-    return (
-      <div className="d-flex justify-content-center align-items-center" style={{ height: "100vh" }}>
-        <Spinner animation="border" />
-      </div>
-    );
-  }
+    if (!deepEqual(updatedFormData, formData)) {
+      setFormData(updatedFormData);
+      updateRegistrationData(`step${currentStep}`, updatedFormData[`step${currentStep}`], id);
+    }
 
-  if (!formattedData) {
-    return (
-      <div className="alert alert-info">
-        No form data available to display
-      </div>
-    );
-  }
+    if (currentStep === filteredStepsConfig.length) {
+      const finalPayload = createFormPayload(updatedFormData, true, userFormData, id); // isFinalSubmit: true, use ID as application number if editing
+      console.log("Final Payload:", JSON.stringify(finalPayload, null, 2));
 
-  const renderPreviewSection = (fields) => (
-    <Container fluid>
-      <Row className="g-3">
-        {Object.entries(fields).map(([key, value]) => (
-          <Col key={key} xs={12} sm={6} md={3} className="mb-3">
-            <PreviewCard 
-              title={key} 
-              value={value} 
-            />
-          </Col>
-        ))}
-      </Row>
-    </Container>
-  );
+      // In a real application, you would send this payload to your API
+      // await submitForm(finalPayload);
 
-  const renderCard = (title, fields) => (
-    <div className="mb-3">
-      <h5 style={{ fontWeight: 600 }}>{title}</h5>
-      {renderPreviewSection(fields)}
-    </div>
-  );
+      setIsComplete(true);
+      toast.success("Form submitted successfully");
+      navigate("/dashboard");
+    } else {
+      setCurrentStep((prevStep) => prevStep + 1);
+    }
+  };
+
+  const handlePreview = async () => {
+    if (!currentSubmitHandler) {
+      console.error("No submit handler available.");
+      return;
+    }
+
+    const currentStepData = await currentSubmitHandler();
+    if (!currentStepData) {
+      console.error("Form validation failed.");
+      return;
+    }
+
+    if (!validateStepData(currentStep, currentStepData)) {
+      return;
+    }
+
+    // const processedStepData = await processFileUploads(currentStepData, currentStep);
+
+    // const updatedFormData = {
+    //   ...formData,
+    //   [`step${currentStep}`]: { ...formData[`step${currentStep}`], ...processedStepData },
+    // };
+
+    // if (!deepEqual(updatedFormData, formData)) {
+    //   setFormData(updatedFormData);
+    //   updateRegistrationData(`step${currentStep}`, updatedFormData[`step${currentStep}`], id);
+    // }
+    // console.log("Updated Form Data:", updatedFormData);
+
+    // const previewPayload = createFormPayload(updatedFormData, false, userFormData, id); // isFinalSubmit: false, use ID if editing
+
+    // console.log("Preview Payload:", JSON.stringify(previewPayload, null, 2));
+    // localStorage.setItem("formPreviewData", JSON.stringify(previewPayload));
+
+    setCurrentStep(filteredStepsConfig.length);
+    setHasPreviewed(true); // Enable preview button
+  };
+
+  const handleSaveDraft = async () => {
+    setIsSavingDraft(true);
+    try {
+      const currentStepData = currentSubmitHandler ? await currentSubmitHandler() : {};
+      const processedStepData = await processFileUploads(currentStepData, currentStep);
+  
+      // const draftId = id || `draft-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+      const draftId="";
+  
+      
+      const creditorBasicDetailsUuid = formData.creditorBasicDetailsUuid || "";
+      const claimDetailsUuid = formData.claimDetailsUuid || "";
+      const signatoryDetailsUuid = formData.signatoryDetailsUuid || "";
+  
+      const draftData = {
+        ...formData,
+        creditorBasicDetailsUuid,
+        claimDetailsUuid,
+        signatoryDetailsUuid,
+        [`step${currentStep}`]: {
+          ...formData[`step${currentStep}`],
+          ...processedStepData,
+        },
+        id: draftId,
+        status: "draft",
+        lastSaved: new Date().toISOString(),
+        currentStep,
+        formType: userFormData?.formType,
+        userType: userFormData?.userType,
+      };
+  
+      const draftPayload = {
+        status:{
+          code :"",
+          message :""
+        },
+        userInfo: userFormData?.fullloginDetails || {}, 
+        applicationDetails:createFormPayload(draftData, false, userFormData, draftId,false),
+      }
+  
+      // const existingDraft = JSON.parse(localStorage.getItem("formDrafts") || "[]");
+      // const updatedDrafts = [
+      //   ...existingDraft.filter((draft) => draft.id !== draftId),
+      //   draftData,
+      // ];
+      // localStorage.setItem("formDrafts", JSON.stringify(updatedDrafts));
+      console.log(" Drafts payload:", draftPayload);
+  
+      // Save the draft data to local storage
+      localStorage.setItem(draftId, JSON.stringify(draftPayload));
+
+      // api call to save draft
+
+      const REQUEST = `${process.env.REACT_APP_APPLICATION_SERVICE}${URLS_ENDPOINT.APP_SERVICES.APPLICATION_FORMSUBMIT}`;
+     const response = await postData(REQUEST, draftPayload);
+     console.log("response", response);
+
+
+  ;
+     if(response.data.status.code === "200") {
+
+      localStorage.setItem("draftResponse", JSON.stringify(response));
+       setHasPreviewed(true); // Enable preview after saving draft
+
+      
+      // //update form data with the response data if needed
+      const updatedFormData = { ...formData, 
+        creditorBasicDetailsUuid: response.data.applicationDetails.creditorBasicDetails.uuid,
+        claimDetailsUuid: response.data.applicationDetails.claimDetails.uuid,
+        signatoryDetailsUuid: response.data.applicationDetails.signatoryDetails.uuid,
+        applicationNumber: response.data.applicationDetails.applicationNumber,
+         };
+      setFormData(updatedFormData);
+
+    toast.success("Draft saved successfully");
+      } else {
+        toast.error(`Failed to save draft: ${response.status.message}`);
+      }
+    } catch (error) {
+      console.error("Error saving draft:", error);
+      toast.error("Failed to save draft");
+    } finally {
+      setIsSavingDraft(false);
+    }
+  };
+  
+
+  // const handleSaveDraft = async () => {
+  //   setIsSavingDraft(true);
+  //   try {
+  //     const currentStepData = currentSubmitHandler ? await currentSubmitHandler() : {};
+  //     const processedStepData = await processFileUploads(currentStepData, currentStep);
+
+  //     const draftId = id || `draft-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+
+  //     // Generate uuids if they don't exist
+  //     const creditorBasicDetailsUuid = formData.creditorBasicDetailsUuid || uuidv4();
+  //     const claimDetailsUuid = formData.claimDetailsUuid || uuidv4();
+  //     const signatoryDetailsUuid = formData.signatoryDetailsUuid || uuidv4();
+
+  //     const draftData = {
+  //       ...formData,
+  //       creditorBasicDetailsUuid: creditorBasicDetailsUuid,
+  //       claimDetailsUuid: claimDetailsUuid,
+  //       signatoryDetailsUuid: signatoryDetailsUuid,
+  //       [`step${currentStep}`]: {
+  //         ...formData[`step${currentStep}`],
+  //         ...processedStepData,
+  //       },
+  //       id: draftId,
+  //       status: "draft",
+  //       lastSaved: new Date().toISOString(),
+  //       currentStep,
+  //       formType: userFormData?.formType,
+  //       userType: userFormData?.userType,
+  //     };
+
+  //     const draftPayload = createFormPayload(draftData, false, userFormData, draftId);
+
+  //     const existingDraft = JSON.parse(localStorage.getItem("formDrafts") || "[]");
+  //     const updatedDrafts = [
+  //       ...existingDraft.filter((draft) => draft.id !== draftId),
+  //       draftData,
+  //     ];
+  //     localStorage.setItem("formDrafts", JSON.stringify(updatedDrafts));
+  //     console.log(" Drafts payload:", draftPayload);
+
+  //     // Save the draft data to local storage
+  //     localStorage.setItem(draftId, JSON.stringify(draftPayload)); // Save with isFinalSubmit: false
+
+  //     toast.success("Draft saved successfully");
+  //     setFormData(draftData); // Update form data.
+  //     setHasPreviewed(true); // Enable preview after saving draft
+  //   } catch (error) {
+  //     console.error("Error saving draft:", error);
+  //     toast.error("Failed to save draft");
+  //   } finally {
+  //     setIsSavingDraft(false);
+  //   }
+  // };
+
+  const handleActionClick = (action) => {
+    setActionType(action);
+    setShowModal(true);
+  };
+
+  const handleModalClose = () => {
+    setShowModal(false);
+    setComments("");
+  };
+
+  const handleActionSubmit = () => {
+    console.log(`Action: ${actionType}, Comments: ${comments}`);
+    toast.success(`${actionType} submitted successfully`);
+    navigate("/dashboard");
+  };
+
+  const handlePrevious = () => {
+    setCurrentStep((prevStep) => Math.max(1, prevStep - 1));
+    setIsConfirmed(false);
+    localStorage.removeItem("isConfirmed");
+  };
+
+  const handleCancel = () => {
+    navigate("/dashboard");
+  };
+
+  const calculateProgressBarWidth = () => {
+    return ((currentStep - 1) / (filteredStepsConfig.length - 1)) * 100;
+  };
+
+  const ActiveComponent = filteredStepsConfig[currentStep - 1]?.Component;
+  const shouldRenderReviewStep = currentStep === filteredStepsConfig.length && isDataLoaded;
+
+  const flattenFormData = (formData) => {
+    const flattened = {
+      ...formData.step1,
+      ...formData.step2,
+      ...formData.step3,
+    };
+
+    return flattened;
+  };
 
   return (
-    <div className="form-stepper">
-      {draftResponse && (
-        <div className="alert alert-warning mb-3">
-          You are viewing a saved draft (last saved)
+    <FormDataProvider formData={flattenFormData(formData)}>
+      <div className="stepper">
+        {filteredStepsConfig.map((step, index) => (
+          <div
+            key={step.name}
+            ref={(el) => (stepRef.current[index] = el)}
+            className={`step ${
+              currentStep > index + 1 || isComplete ? "complete" : ""
+            } ${currentStep === index + 1 ? "active" : ""}`}
+          >
+            <div className="step-number">
+              {currentStep > index + 1 || isComplete ? (
+                <span>✓</span>
+              ) : (
+                index + 1
+              )}
+            </div>
+            <div className="step-name">{step.name}</div>
+          </div>
+        ))}
+
+        <div
+          className="progress-bar"
+          style={{
+            marginLeft: margins.marginLeft,
+            marginRight: margins.marginRight,
+          }}
+        >
+          <div
+            className="progress"
+            style={{ width: `${calculateProgressBarWidth()}%` }}
+          ></div>
+        </div>
+      </div>
+
+      {ActiveComponent && (
+        <ActiveComponent
+          formData={formData[`step${currentStep}`] || {}}
+          provideSubmitHandler={updateSubmitHandler}
+          setFormData={setFormData}
+        />
+      )}
+
+      {shouldRenderReviewStep && !isCRPUser && (
+        <ReviewStep />
+      )}
+
+      {currentStep === filteredStepsConfig.length && !isCRPUser && (
+        <div className="confirmation-container">
+          <Form.Group controlId="formConfirmation" className="mt-3 confirmation-checkbox">
+            <Form.Check
+              type="checkbox"
+              label="I confirm that the information provided is correct."
+              checked={isConfirmed}
+              onChange={(e) => setIsConfirmed(e.target.checked)}
+            />
+          </Form.Group>
         </div>
       )}
 
-      <Collapsible title="Step 1: Creditor and Identification Details">
-        {renderCard("Creditor Details", formattedData.step1.creditorDetails)}
-        {renderCard("Identification Details", formattedData.step1.identificationDetails)}
-      </Collapsible>
+      <div className="stepper-buttons">
+        {currentStep > 1 && (
+          <button className="buttonplus previous-button" onClick={handlePrevious}>
+            Previous
+          </button>
+        )}
+        {currentStep === 1 && (
+          <button className="buttonplus cancel-button" onClick={handleCancel}>
+            Cancel
+          </button>
+        )}
 
-      <Collapsible title="Step 2: Financial and Beneficiary Details">
-        {renderCard("Financial Details", formattedData.step2.financialDetails)}
-        {renderCard("Address Proof Details", formattedData.step2.addressproofDetails)}
-        {renderCard("Beneficiary Details", formattedData.step2.beneficiaryDetails)}
-        {renderCard("Bank Details", formattedData.step2.bankDetails)}
-      </Collapsible>
+        {currentStep === 3 && !isCRPUser && (
+          <div className="last-step-buttons">
+            <button
+              className="buttonplus draft-button"
+              onClick={handleSaveDraft}
+              disabled={isSavingDraft}
+            >
+              {isSavingDraft ? "Saving..." : "Save as Draft"}
+            </button>
+            <button
+              className="buttonplus preview-button"
+              onClick={handlePreview}
+              disabled={!hasPreviewed}
+            >
+              Preview
+            </button>
+          </div>
+        )}
 
-      <Collapsible title="Step 3: Signatory Details">
-        {renderCard("Signatory Details", formattedData.step3.signatoryDetails)}
-      </Collapsible>
-    </div>
+        {currentStep !== 3 && currentStep !== filteredStepsConfig.length && (
+          <button
+            className="buttonplus next-button"
+            onClick={handleNext}
+            disabled={isComplete}
+          >
+            Next
+          </button>
+        )}
+
+        {currentStep === filteredStepsConfig.length && isCRPUser ? (
+          <>
+            <button
+              className="buttonplus sendback-button"
+              onClick={() => handleActionClick("Sendback To Claimants")}
+            >
+              Sendback To Claimants
+            </button>
+            <button
+              className="buttonplus accept-contingent-button"
+              onClick={() => handleActionClick("Accept as Contingent")}
+            >
+              Accept as Contingent
+            </button>
+            <button
+              className="buttonplus accept-button"
+              onClick={() => handleActionClick("Accept")}
+            >
+              Accept
+            </button>
+            <button
+              className="buttonplus reject-button"
+              onClick={() => handleActionClick("Reject")}
+            >
+              Reject
+            </button>
+          </>
+        ) : currentStep === filteredStepsConfig.length ? (
+          <button
+            className="buttonplus next-button"
+            onClick={handleNext}
+            disabled={!isConfirmed || isComplete}
+          >
+            Submit
+          </button>
+        ) : null}
+      </div>
+
+      <Modal show={showModal} onHide={handleModalClose} centered>
+        <Modal.Header closeButton>
+          <Modal.Title>{actionType} Form</Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          <Form>
+            <Form.Group controlId="comments">
+              <Form.Label>Comments</Form.Label>
+              <Form.Control
+                as="textarea"
+                rows={3}
+                value={comments}
+                onChange={(e) => setComments(e.target.value)}
+                placeholder="Enter your comments..."
+              />
+            </Form.Group>
+          </Form>
+        </Modal.Body>
+        <Modal.Footer>
+          <Button className="modal-close-button" onClick={handleModalClose}>
+            Close
+          </Button>
+          <Button
+            className="modal-submit-button"
+            onClick={handleActionSubmit}
+            disabled={!comments.trim()}
+          >
+            Submit
+          </Button>
+        </Modal.Footer>
+      </Modal>
+    </FormDataProvider>
   );
 };
 
-export default React.memo(ReviewStep);
+export default Stepper;
+
+{
+    "status": {
+        "code": "200",
+        "message": "Data Created Successfully"
+    },
+    "userInfo": {
+        "status": {
+            "code": "200",
+            "message": "Successful"
+        },
+        "token": null,
+        "otp": "123456",
+        "processTypes": {
+            "auditDetails": null,
+            "uuid": "bb9683f5-0506-45be-99a7-477c5318219r",
+            "processTypeName": "Corporate Insolvency Resolution Process (CIRP)",
+            "processTypeCode": "50001",
+            "isActive": null,
+            "processTypeValue": "CIRP"
+        },
+        "corporateDebtorDetails": {
+            "uuid": "7c249b25-7e75-4e0f-9177-5988ccbda43a",
+            "nameOfCorporateDebtor": "Jalpower Corporation Limited",
+            "cinOrLlpinNumber": "U40109TG2004PLC043985",
+            "ipDetailsId": "2b44f7f3-9983-4f4b-be75-46056292c7a9",
+            "appointedAs": "4",
+            "nameOfIp": "Mr. Amit Jain",
+            "registrationNo": "IBBI/IPA-001/IP-P01447/2018-2019/12196",
+            "ipUuid": "2b44f7f3-9983-4f4b-be75-46056292c7a9",
+            "roleName": "RP",
+            "roleCode": "RP",
+            "roleUuid": "4"
+        },
+        "claimantTypes": {
+            "uuid": "1001",
+            "claimantName": "Financial Creditors",
+            "claimantCode": "1001"
+        },
+        "claimantCategories": {
+            "uuid": "20001",
+            "claimantCategoryName": "Secured Financial Creditors (Banks/ARCs/NBFCs/FIs)",
+            "claimantCategoryCode": "20001",
+            "isActive": true,
+            "cirpFormId": "40002",
+            "claimantTypeCode": "1001",
+            "liquidationId": "a6928a25-1d51-4e6b-aa6c-a9c1a4ab62f8"
+        },
+        "formDetails": {
+            "uuid": "40002",
+            "formName": "Form C",
+            "formCode": "40002",
+            "isActive": true
+        },
+        "userType": "CLAIMANT",
+        "users": [
+            {
+                "claimant": {
+                    "uuid": "f4998f23-6d32-4dee-ba3d-12b3f5df1608",
+                    "claimantName": "AYAN",
+                    "corporateName": null,
+                    "emailId": "ayansen26@gmail.com",
+                    "claimantEntityType": "INDV",
+                    "mobileNumber": "7059683402",
+                    "aadharNumber": "217865342421",
+                    "panNumber": "GPRSR8743R",
+                    "cinOrTaNumber": null,
+                    "roleCode": "CLAIMANT",
+                    "auditDetails": {
+                        "createdBy": "f4998f23-6d32-4dee-ba3d-12b3f5df1608",
+                        "lastModifiedBy": "f4998f23-6d32-4dee-ba3d-12b3f5df1608",
+                        "createdTime": "2025-04-09 17:15:23.259",
+                        "lastModifiedTime": "2025-04-09 17:15:23.259"
+                    },
+                    "active": true
+                },
+                "corporateDebtor": null
+            }
+        ]
+    },
+    "applicationDetails": {
+        "uuid": "726ea25b-350a-4c0f-b9ef-52d9a7183d7f",
+        "applicationNumber": "CLAIM/CIRP/20250411/000023",
+        "creditorBasicDetails": {
+            "uuid": "1b5b286c-24fb-4148-a465-734f0e404e4c",
+            "debtorName": "Jalpower Corporation Limited",
+            "creditorName": "AYAN",
+            "totalClaimAmount": 32.0,
+            "debtDetails": "2332",
+            "mutualCreditDetails": "2332",
+            "status": "",
+            "isActive": false,
+            "isFinalSubmit": false,
+            "document": {
+                "docId": "2b332fc8-9eb0-410b-9a8e-6e997dec80e8",
+                "docType": "Aadhar",
+                "docSource": "Identification",
+                "docName": "Mother_adhaar.pdf"
+            },
+            "auditDetails": {
+                "createdBy": "f4998f23-6d32-4dee-ba3d-12b3f5df1608",
+                "lastModifiedBy": "f4998f23-6d32-4dee-ba3d-12b3f5df1608",
+                "createdTime": "2025-04-11T16:34:02.595446206",
+                "lastModifiedTime": "2025-04-11T16:34:02.595482147"
+            }
+        },
+        "claimDetails": {
+            "uuid": "f5d76919-a321-43c5-bd12-a8e154e0d7e2",
+            "creditorBasicDetailsUuid": "1b5b286c-24fb-4148-a465-734f0e404e4c",
+            "securityInterestAmount": 3232.0,
+            "guaranteeAmount": 232.0,
+            "guarantorName": "2",
+            "guarantorAddress": "332",
+            "creditorAddress": "3223",
+            "creditorEmail": "dsds@gmail.com",
+            "beneficiaryName": "32",
+            "beneficiaryAddress": "32",
+            "corporateDebtorSecurityAmount": 23.0,
+            "corporateDebtorGuaranteeAmount": 3232.0,
+            "principalBorrowerName": "3rrere",
+            "principalBorrowerAddress": "rere",
+            "bankAccountNumber": 32,
+            "bankIfscCode": "323",
+            "bankBranchName": "323",
+            "document": {
+                "docId": "4c94b1c7-a4f8-4bb6-82cf-015a995ebd3e",
+                "docType": "Aadhar",
+                "docSource": "Addressproof",
+                "docName": "Mother_adhaar.pdf"
+            },
+            "auditDetails": {
+                "createdBy": "f4998f23-6d32-4dee-ba3d-12b3f5df1608",
+                "lastModifiedBy": "f4998f23-6d32-4dee-ba3d-12b3f5df1608",
+                "createdTime": "2025-04-11T16:34:02.597041708",
+                "lastModifiedTime": "2025-04-11T16:34:02.597055349"
+            }
+        },
+        "signatoryDetails": {
+            "uuid": "55e6eeef-4816-42c7-89a4-f2c1625c4913",
+            "creditorBasicDetailsUuid": "1b5b286c-24fb-4148-a465-734f0e404e4c",
+            "name": "1111111111",
+            "position": "1111111111111",
+            "address": "11111111111111",
+            "document": {
+                "docId": "53dd2682-6bf4-4cd9-9f17-d0bebb341120",
+                "docType": "Signature",
+                "docSource": "Signature",
+                "docName": "Mother_adhaar.pdf"
+            },
+            "auditDetails": {
+                "createdBy": "f4998f23-6d32-4dee-ba3d-12b3f5df1608",
+                "lastModifiedBy": "f4998f23-6d32-4dee-ba3d-12b3f5df1608",
+                "createdTime": "2025-04-11T16:34:02.598702492",
+                "lastModifiedTime": "2025-04-11T16:34:02.598716273"
+            }
+        },
+        "auditDetails": {
+            "createdBy": "f4998f23-6d32-4dee-ba3d-12b3f5df1608",
+            "lastModifiedBy": "f4998f23-6d32-4dee-ba3d-12b3f5df1608",
+            "createdTime": "2025-04-11T16:34:02.601522307",
+            "lastModifiedTime": "2025-04-11T16:34:02.601536317"
+        }
+    }
+}
