@@ -887,3 +887,91 @@ export default Stepper;
         }
     }
 }
+
+
+const handleNext = async () => {
+  if (!currentSubmitHandler) {
+    console.error("No submit handler available.");
+    return;
+  }
+
+  const currentStepData = await currentSubmitHandler();
+  if (!currentStepData) {
+    console.error("Form validation failed.");
+    return;
+  }
+
+  if (!validateStepData(currentStep, currentStepData)) {
+    return;
+  }
+
+  const processedStepData = await processFileUploads(currentStepData, currentStep);
+
+  const updatedFormData = {
+    ...formData,
+    [`step${currentStep}`]: { ...formData[`step${currentStep}`], ...processedStepData },
+  };
+
+  if (!deepEqual(updatedFormData, formData)) {
+    setFormData(updatedFormData);
+    updateRegistrationData(`step${currentStep}`, updatedFormData[`step${currentStep}`], id);
+  }
+
+  if (currentStep === filteredStepsConfig.length) {
+    // ---- Modified Section for Final Submit based on Save Draft Response ----
+    const lastDraftResponse = JSON.parse(localStorage.getItem("draftResponse") || "null");
+
+    if (lastDraftResponse && lastDraftResponse.applicationDetails) {
+      const finalSubmitPayload = {
+        ...lastDraftResponse, // Use the entire last draft response
+        applicationDetails: {
+          ...lastDraftResponse.applicationDetails,
+          creditorBasicDetails: {
+            ...lastDraftResponse.applicationDetails.creditorBasicDetails,
+            ...createFormPayload(updatedFormData, true, userFormData, lastDraftResponse.applicationDetails.applicationNumber, true).creditorBasicDetails,
+            isFinalSubmit: true, // Override isFinalSubmit to true
+          },
+          claimDetails: {
+            ...lastDraftResponse.applicationDetails.claimDetails,
+            ...createFormPayload(updatedFormData, true, userFormData, lastDraftResponse.applicationDetails.applicationNumber, true).claimDetails,
+          },
+          signatoryDetails: {
+            ...lastDraftResponse.applicationDetails.signatoryDetails,
+            ...createFormPayload(updatedFormData, true, userFormData, lastDraftResponse.applicationDetails.applicationNumber, true).signatoryDetails,
+          },
+          uuid: lastDraftResponse.applicationDetails.uuid,
+          applicationNumber: lastDraftResponse.applicationDetails.applicationNumber,
+          auditDetails: {
+            ...lastDraftResponse.applicationDetails.auditDetails,
+            lastModifiedTime: new Date().toISOString(), // Update last modified time
+          }
+        }
+      };
+
+      console.log("Final Submit Payload (from draft response):", JSON.stringify(finalSubmitPayload, null, 2));
+
+      try {
+        const REQUEST = `${process.env.REACT_APP_APPLICATION_SERVICE}${URLS_ENDPOINT.APP_SERVICES.APPLICATION_FORMSUBMIT}`;
+        const response = await postData(REQUEST, finalSubmitPayload);
+        console.log("Final Submit API response:", response);
+
+        if (response.data.status.code === "200") {
+          setIsComplete(true);
+          toast.success("Form submitted successfully");
+          navigate("/dashboard");
+        } else {
+          toast.error(`Failed to submit form: ${response.data.status.message}`);
+        }
+      } catch (error) {
+        console.error("Error submitting form:", error);
+        toast.error("Failed to submit form");
+      }
+    } else {
+      console.error("No draft response found to use for final submit.");
+      toast.error("Could not submit form. Please save a draft first.");
+    }
+    // ---- End of Modified Section ----
+  } else {
+    setCurrentStep((prevStep) => prevStep + 1);
+  }
+};
