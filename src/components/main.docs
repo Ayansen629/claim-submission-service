@@ -149,6 +149,8 @@ const Stepper = ({ stepsConfig = [], formAllData }) => {
   const [comments, setComments] = useState("");
   const [actionType, setActionType] = useState("");
   const [isSavingDraft, setIsSavingDraft] = useState(false);
+  const[draftResponse, setDraftResponse] = useState(null);
+
 
   const {
     registrationData,
@@ -281,8 +283,149 @@ const Stepper = ({ stepsConfig = [], formAllData }) => {
     }
     return true;
   };
-
   const handleNext = async () => {
+    if (!currentSubmitHandler) {
+      console.error("No submit handler available.");
+      return;
+    }
+  
+    const currentStepData = await currentSubmitHandler();
+    if (!currentStepData) {
+      console.error("Form validation failed.");
+      return;
+    }
+  
+    if (!validateStepData(currentStep, currentStepData)) {
+      return;
+    }
+  
+    const processedStepData = await processFileUploads(currentStepData, currentStep);
+  
+    const updatedFormData = {
+      ...formData,
+      [`step${currentStep}`]: { ...formData[`step${currentStep}`], ...processedStepData },
+    };
+  
+    if (!deepEqual(updatedFormData, formData)) {
+      setFormData(updatedFormData);
+      updateRegistrationData(`step${currentStep}`, updatedFormData[`step${currentStep}`], id);
+    }
+  
+    if (currentStep === filteredStepsConfig.length) {
+      // ---- Modified Section for Final Submit based on Save Draft Response ----
+      const lastDraftResponse = draftResponse || JSON.parse(localStorage.getItem("draftResponse") || "null");
+      console.log("lastDraftResponse", draftResponse);
+  
+      if (lastDraftResponse && lastDraftResponse.data.applicationDetails) {
+        const finalSubmitPayload = {
+          ...lastDraftResponse, // Use the entire last draft response
+          applicationDetails: {
+            ...lastDraftResponse.data.applicationDetails,
+            creditorBasicDetails: {
+              ...lastDraftResponse.data.applicationDetails.creditorBasicDetails,
+              ...createFormPayload(updatedFormData, true, userFormData, lastDraftResponse.data.applicationDetails.applicationNumber, true).creditorBasicDetails,
+              isFinalSubmit: true, // Override isFinalSubmit to true
+            },
+            claimDetails: {
+              ...lastDraftResponse.data.applicationDetails.claimDetails,
+              ...createFormPayload(updatedFormData, true, userFormData, lastDraftResponse.data.applicationDetails.applicationNumber, true).claimDetails,
+            },
+            signatoryDetails: {
+              ...lastDraftResponse.data.applicationDetails.signatoryDetails,
+              ...createFormPayload(updatedFormData, true, userFormData, lastDraftResponse.data.applicationDetails.applicationNumber, true).signatoryDetails,
+            },
+            uuid: lastDraftResponse.data.applicationDetails.uuid,
+            applicationNumber: lastDraftResponse.data.applicationDetails.applicationNumber,
+            auditDetails: {
+              ...lastDraftResponse.data.applicationDetails.auditDetails,
+              lastModifiedTime: new Date().toISOString(), // Update last modified time
+            }
+          }
+        };
+  
+        console.log("Final Submit Payload (from draft response):", JSON.stringify(finalSubmitPayload, null, 2));
+  
+        try {
+          const REQUEST = `${process.env.REACT_APP_APPLICATION_SERVICE}${URLS_ENDPOINT.APP_SERVICES.APPLICATION_FORMSUBMIT}`;
+          const response = await postData(REQUEST, finalSubmitPayload);
+          console.log("Final Submit API response:", response);
+  
+          if (response.data.status.code === "200") {
+            setIsComplete(true);
+            toast.success("Form submitted successfully");
+            navigate("/dashboard");
+          } else {
+            toast.error(`Failed to submit form: ${response.data.status.message}`);
+          }
+        } catch (error) {
+          console.error("Error submitting form:", error);
+          toast.error("Failed to submit form");
+        }
+      } else {
+        console.error("No draft response found to use for final submit.");
+        toast.error("Could not submit form. Please save a draft first.");
+      }
+      // ---- End of Modified Section ----
+    } else {
+      setCurrentStep((prevStep) => prevStep + 1);
+    }
+  };
+
+
+
+
+
+
+
+
+
+
+
+
+  // const handleNext = async () => {
+  //   if (!currentSubmitHandler) {
+  //     console.error("No submit handler available.");
+  //     return;
+  //   }
+
+  //   const currentStepData = await currentSubmitHandler();
+  //   if (!currentStepData) {
+  //     console.error("Form validation failed.");
+  //     return;
+  //   }
+
+  //   if (!validateStepData(currentStep, currentStepData)) {
+  //     return;
+  //   }
+
+  //   const processedStepData = await processFileUploads(currentStepData, currentStep);
+
+  //   const updatedFormData = {
+  //     ...formData,
+  //     [`step${currentStep}`]: { ...formData[`step${currentStep}`], ...processedStepData },
+  //   };
+
+  //   if (!deepEqual(updatedFormData, formData)) {
+  //     setFormData(updatedFormData);
+  //     updateRegistrationData(`step${currentStep}`, updatedFormData[`step${currentStep}`], id);
+  //   }
+
+  //   if (currentStep === filteredStepsConfig.length) {
+  //     const finalPayload = createFormPayload(updatedFormData, true, userFormData, id); // isFinalSubmit: true, use ID as application number if editing
+  //     console.log("Final Payload:", JSON.stringify(finalPayload, null, 2));
+
+  //     // In a real application, you would send this payload to your API
+  //     // await submitForm(finalPayload);
+
+  //     setIsComplete(true);
+  //     toast.success("Form submitted successfully");
+  //     navigate("/dashboard");
+  //   } else {
+  //     setCurrentStep((prevStep) => prevStep + 1);
+  //   }
+  // };
+
+  const handlePreview = async () => {
     if (!currentSubmitHandler) {
       console.error("No submit handler available.");
       return;
@@ -309,49 +452,6 @@ const Stepper = ({ stepsConfig = [], formAllData }) => {
       setFormData(updatedFormData);
       updateRegistrationData(`step${currentStep}`, updatedFormData[`step${currentStep}`], id);
     }
-
-    if (currentStep === filteredStepsConfig.length) {
-      const finalPayload = createFormPayload(updatedFormData, true, userFormData, id); // isFinalSubmit: true, use ID as application number if editing
-      console.log("Final Payload:", JSON.stringify(finalPayload, null, 2));
-
-      // In a real application, you would send this payload to your API
-      // await submitForm(finalPayload);
-
-      setIsComplete(true);
-      toast.success("Form submitted successfully");
-      navigate("/dashboard");
-    } else {
-      setCurrentStep((prevStep) => prevStep + 1);
-    }
-  };
-
-  const handlePreview = async () => {
-    if (!currentSubmitHandler) {
-      console.error("No submit handler available.");
-      return;
-    }
-
-    const currentStepData = await currentSubmitHandler();
-    if (!currentStepData) {
-      console.error("Form validation failed.");
-      return;
-    }
-
-    if (!validateStepData(currentStep, currentStepData)) {
-      return;
-    }
-
-    // const processedStepData = await processFileUploads(currentStepData, currentStep);
-
-    // const updatedFormData = {
-    //   ...formData,
-    //   [`step${currentStep}`]: { ...formData[`step${currentStep}`], ...processedStepData },
-    // };
-
-    // if (!deepEqual(updatedFormData, formData)) {
-    //   setFormData(updatedFormData);
-    //   updateRegistrationData(`step${currentStep}`, updatedFormData[`step${currentStep}`], id);
-    // }
     // console.log("Updated Form Data:", updatedFormData);
 
     // const previewPayload = createFormPayload(updatedFormData, false, userFormData, id); // isFinalSubmit: false, use ID if editing
@@ -425,6 +525,7 @@ const Stepper = ({ stepsConfig = [], formAllData }) => {
      if(response.data.status.code === "200") {
 
       localStorage.setItem("draftResponse", JSON.stringify(response));
+      setDraftResponse(response); // Store the last draft response in state
        setHasPreviewed(true); // Enable preview after saving draft
 
       
@@ -723,255 +824,205 @@ const Stepper = ({ stepsConfig = [], formAllData }) => {
 };
 
 export default Stepper;
+import React, { useEffect, useMemo, useState } from "react";
+import { Container, Row, Col, Spinner } from "react-bootstrap";
+import Collapsible from "./formCommon/Collapsible";
+import { useFormData } from "../../context/FormDataContext";
+import PreviewCard from "../../private/Dashboard/PreviewCard";
 
-{
-    "status": {
-        "code": "200",
-        "message": "Data Created Successfully"
-    },
-    "userInfo": {
-        "status": {
-            "code": "200",
-            "message": "Successful"
-        },
-        "token": null,
-        "otp": "123456",
-        "processTypes": {
-            "auditDetails": null,
-            "uuid": "bb9683f5-0506-45be-99a7-477c5318219r",
-            "processTypeName": "Corporate Insolvency Resolution Process (CIRP)",
-            "processTypeCode": "50001",
-            "isActive": null,
-            "processTypeValue": "CIRP"
-        },
-        "corporateDebtorDetails": {
-            "uuid": "7c249b25-7e75-4e0f-9177-5988ccbda43a",
-            "nameOfCorporateDebtor": "Jalpower Corporation Limited",
-            "cinOrLlpinNumber": "U40109TG2004PLC043985",
-            "ipDetailsId": "2b44f7f3-9983-4f4b-be75-46056292c7a9",
-            "appointedAs": "4",
-            "nameOfIp": "Mr. Amit Jain",
-            "registrationNo": "IBBI/IPA-001/IP-P01447/2018-2019/12196",
-            "ipUuid": "2b44f7f3-9983-4f4b-be75-46056292c7a9",
-            "roleName": "RP",
-            "roleCode": "RP",
-            "roleUuid": "4"
-        },
-        "claimantTypes": {
-            "uuid": "1001",
-            "claimantName": "Financial Creditors",
-            "claimantCode": "1001"
-        },
-        "claimantCategories": {
-            "uuid": "20001",
-            "claimantCategoryName": "Secured Financial Creditors (Banks/ARCs/NBFCs/FIs)",
-            "claimantCategoryCode": "20001",
-            "isActive": true,
-            "cirpFormId": "40002",
-            "claimantTypeCode": "1001",
-            "liquidationId": "a6928a25-1d51-4e6b-aa6c-a9c1a4ab62f8"
-        },
-        "formDetails": {
-            "uuid": "40002",
-            "formName": "Form C",
-            "formCode": "40002",
-            "isActive": true
-        },
-        "userType": "CLAIMANT",
-        "users": [
-            {
-                "claimant": {
-                    "uuid": "f4998f23-6d32-4dee-ba3d-12b3f5df1608",
-                    "claimantName": "AYAN",
-                    "corporateName": null,
-                    "emailId": "ayansen26@gmail.com",
-                    "claimantEntityType": "INDV",
-                    "mobileNumber": "7059683402",
-                    "aadharNumber": "217865342421",
-                    "panNumber": "GPRSR8743R",
-                    "cinOrTaNumber": null,
-                    "roleCode": "CLAIMANT",
-                    "auditDetails": {
-                        "createdBy": "f4998f23-6d32-4dee-ba3d-12b3f5df1608",
-                        "lastModifiedBy": "f4998f23-6d32-4dee-ba3d-12b3f5df1608",
-                        "createdTime": "2025-04-09 17:15:23.259",
-                        "lastModifiedTime": "2025-04-09 17:15:23.259"
-                    },
-                    "active": true
-                },
-                "corporateDebtor": null
-            }
-        ]
-    },
-    "applicationDetails": {
-        "uuid": "726ea25b-350a-4c0f-b9ef-52d9a7183d7f",
-        "applicationNumber": "CLAIM/CIRP/20250411/000023",
-        "creditorBasicDetails": {
-            "uuid": "1b5b286c-24fb-4148-a465-734f0e404e4c",
-            "debtorName": "Jalpower Corporation Limited",
-            "creditorName": "AYAN",
-            "totalClaimAmount": 32.0,
-            "debtDetails": "2332",
-            "mutualCreditDetails": "2332",
-            "status": "",
-            "isActive": false,
-            "isFinalSubmit": false,
-            "document": {
-                "docId": "2b332fc8-9eb0-410b-9a8e-6e997dec80e8",
-                "docType": "Aadhar",
-                "docSource": "Identification",
-                "docName": "Mother_adhaar.pdf"
-            },
-            "auditDetails": {
-                "createdBy": "f4998f23-6d32-4dee-ba3d-12b3f5df1608",
-                "lastModifiedBy": "f4998f23-6d32-4dee-ba3d-12b3f5df1608",
-                "createdTime": "2025-04-11T16:34:02.595446206",
-                "lastModifiedTime": "2025-04-11T16:34:02.595482147"
-            }
-        },
-        "claimDetails": {
-            "uuid": "f5d76919-a321-43c5-bd12-a8e154e0d7e2",
-            "creditorBasicDetailsUuid": "1b5b286c-24fb-4148-a465-734f0e404e4c",
-            "securityInterestAmount": 3232.0,
-            "guaranteeAmount": 232.0,
-            "guarantorName": "2",
-            "guarantorAddress": "332",
-            "creditorAddress": "3223",
-            "creditorEmail": "dsds@gmail.com",
-            "beneficiaryName": "32",
-            "beneficiaryAddress": "32",
-            "corporateDebtorSecurityAmount": 23.0,
-            "corporateDebtorGuaranteeAmount": 3232.0,
-            "principalBorrowerName": "3rrere",
-            "principalBorrowerAddress": "rere",
-            "bankAccountNumber": 32,
-            "bankIfscCode": "323",
-            "bankBranchName": "323",
-            "document": {
-                "docId": "4c94b1c7-a4f8-4bb6-82cf-015a995ebd3e",
-                "docType": "Aadhar",
-                "docSource": "Addressproof",
-                "docName": "Mother_adhaar.pdf"
-            },
-            "auditDetails": {
-                "createdBy": "f4998f23-6d32-4dee-ba3d-12b3f5df1608",
-                "lastModifiedBy": "f4998f23-6d32-4dee-ba3d-12b3f5df1608",
-                "createdTime": "2025-04-11T16:34:02.597041708",
-                "lastModifiedTime": "2025-04-11T16:34:02.597055349"
-            }
-        },
-        "signatoryDetails": {
-            "uuid": "55e6eeef-4816-42c7-89a4-f2c1625c4913",
-            "creditorBasicDetailsUuid": "1b5b286c-24fb-4148-a465-734f0e404e4c",
-            "name": "1111111111",
-            "position": "1111111111111",
-            "address": "11111111111111",
-            "document": {
-                "docId": "53dd2682-6bf4-4cd9-9f17-d0bebb341120",
-                "docType": "Signature",
-                "docSource": "Signature",
-                "docName": "Mother_adhaar.pdf"
-            },
-            "auditDetails": {
-                "createdBy": "f4998f23-6d32-4dee-ba3d-12b3f5df1608",
-                "lastModifiedBy": "f4998f23-6d32-4dee-ba3d-12b3f5df1608",
-                "createdTime": "2025-04-11T16:34:02.598702492",
-                "lastModifiedTime": "2025-04-11T16:34:02.598716273"
-            }
-        },
-        "auditDetails": {
-            "createdBy": "f4998f23-6d32-4dee-ba3d-12b3f5df1608",
-            "lastModifiedBy": "f4998f23-6d32-4dee-ba3d-12b3f5df1608",
-            "createdTime": "2025-04-11T16:34:02.601522307",
-            "lastModifiedTime": "2025-04-11T16:34:02.601536317"
-        }
-    }
-}
+const ReviewStep = () => {
+  const { formData } = useFormData();
+  const [draftResponse, setDraftResponse] = useState(null);
+  const [loading, setLoading] = useState(true);
 
-
-const handleNext = async () => {
-  if (!currentSubmitHandler) {
-    console.error("No submit handler available.");
-    return;
-  }
-
-  const currentStepData = await currentSubmitHandler();
-  if (!currentStepData) {
-    console.error("Form validation failed.");
-    return;
-  }
-
-  if (!validateStepData(currentStep, currentStepData)) {
-    return;
-  }
-
-  const processedStepData = await processFileUploads(currentStepData, currentStep);
-
-  const updatedFormData = {
-    ...formData,
-    [`step${currentStep}`]: { ...formData[`step${currentStep}`], ...processedStepData },
-  };
-
-  if (!deepEqual(updatedFormData, formData)) {
-    setFormData(updatedFormData);
-    updateRegistrationData(`step${currentStep}`, updatedFormData[`step${currentStep}`], id);
-  }
-
-  if (currentStep === filteredStepsConfig.length) {
-    // ---- Modified Section for Final Submit based on Save Draft Response ----
-    const lastDraftResponse = JSON.parse(localStorage.getItem("draftResponse") || "null");
-
-    if (lastDraftResponse && lastDraftResponse.applicationDetails) {
-      const finalSubmitPayload = {
-        ...lastDraftResponse, // Use the entire last draft response
-        applicationDetails: {
-          ...lastDraftResponse.applicationDetails,
-          creditorBasicDetails: {
-            ...lastDraftResponse.applicationDetails.creditorBasicDetails,
-            ...createFormPayload(updatedFormData, true, userFormData, lastDraftResponse.applicationDetails.applicationNumber, true).creditorBasicDetails,
-            isFinalSubmit: true, // Override isFinalSubmit to true
-          },
-          claimDetails: {
-            ...lastDraftResponse.applicationDetails.claimDetails,
-            ...createFormPayload(updatedFormData, true, userFormData, lastDraftResponse.applicationDetails.applicationNumber, true).claimDetails,
-          },
-          signatoryDetails: {
-            ...lastDraftResponse.applicationDetails.signatoryDetails,
-            ...createFormPayload(updatedFormData, true, userFormData, lastDraftResponse.applicationDetails.applicationNumber, true).signatoryDetails,
-          },
-          uuid: lastDraftResponse.applicationDetails.uuid,
-          applicationNumber: lastDraftResponse.applicationDetails.applicationNumber,
-          auditDetails: {
-            ...lastDraftResponse.applicationDetails.auditDetails,
-            lastModifiedTime: new Date().toISOString(), // Update last modified time
-          }
-        }
-      };
-
-      console.log("Final Submit Payload (from draft response):", JSON.stringify(finalSubmitPayload, null, 2));
-
+  // Load draft data from localStorage on mount
+  useEffect(() => {
+    const savedDraft = localStorage.getItem("draftResponse");
+    if (savedDraft) {
       try {
-        const REQUEST = `${process.env.REACT_APP_APPLICATION_SERVICE}${URLS_ENDPOINT.APP_SERVICES.APPLICATION_FORMSUBMIT}`;
-        const response = await postData(REQUEST, finalSubmitPayload);
-        console.log("Final Submit API response:", response);
-
-        if (response.data.status.code === "200") {
-          setIsComplete(true);
-          toast.success("Form submitted successfully");
-          navigate("/dashboard");
-        } else {
-          toast.error(`Failed to submit form: ${response.data.status.message}`);
-        }
+        const parsedDraft = JSON.parse(savedDraft);
+        setDraftResponse(parsedDraft);
       } catch (error) {
-        console.error("Error submitting form:", error);
-        toast.error("Failed to submit form");
+        console.error("Error parsing draft data:", error);
       }
-    } else {
-      console.error("No draft response found to use for final submit.");
-      toast.error("Could not submit form. Please save a draft first.");
     }
-    // ---- End of Modified Section ----
-  } else {
-    setCurrentStep((prevStep) => prevStep + 1);
+    setLoading(false);
+  }, []);
+
+  // Transform the draft response to match your form structure
+  const transformedDraftData = useMemo(() => {
+    if (!draftResponse) return null;
+
+    const basicDetails = draftResponse.data.applicationDetails?.creditorBasicDetails || {};
+    const claimDetails = draftResponse.data.applicationDetails?.claimDetails || {};
+    const signatoryDetails = draftResponse.data.applicationDetails?.signatoryDetails || {};
+
+    return {
+      debtorName: basicDetails.debtorName,
+      CreditorName: basicDetails.creditorName,
+      totalClaimAmount: basicDetails.totalClaimAmount,
+      debtDetails: basicDetails.debtDetails,
+      mutualCreditDetails: basicDetails.mutualCreditDetails,
+      identificationType: basicDetails.document?.docType,
+      identificationNumber: basicDetails.identificationNumber,
+      identificationDocument: basicDetails.document,
+
+      securityInterestAmount: claimDetails.securityInterestAmount,
+      guaranteeAmount: claimDetails.guaranteeAmount,
+      guarantorName: claimDetails.guarantorName,
+      guarantorAddress: claimDetails.guarantorAddress,
+      creditorAddress: claimDetails.creditorAddress,
+      creditorEmail: claimDetails.creditorEmail,
+      beneficiaryName: claimDetails.beneficiaryName,
+      beneficiaryAddress: claimDetails.beneficiaryAddress,
+      corporateDebtorSecurityAmount: claimDetails.corporateDebtorSecurityAmount,
+      corporateDebtorGuaranteeAmount: claimDetails.corporateDebtorGuaranteeAmount,
+      principalBorrowerName: claimDetails.principalBorrowerName,
+      principalBorrowerAddress: claimDetails.principalBorrowerAddress,
+      accountNumber: claimDetails.bankAccountNumber,
+      ifscCode: claimDetails.bankIfscCode,
+      branchName: claimDetails.bankBranchName,
+      addressProofType: claimDetails.document?.docType,
+      addressProofNumber: claimDetails.addressProofNumber,
+      addressProofDocument: claimDetails.document,
+
+      signatoryName: signatoryDetails.name,
+      signatoryPosition: signatoryDetails.position,
+      signatoryAddress: signatoryDetails.address,
+      signatoryDocument: signatoryDetails.document,
+    };
+  }, [draftResponse]);
+
+  // Use draft data if available, otherwise use regular form data
+  const displayData = transformedDraftData || formData;
+
+  // Format the data for display
+  const formattedData = useMemo(() => {
+    if (!displayData || Object.keys(displayData).length === 0) return null;
+
+    const formatFileInfo = (fileData) => {
+      if (!fileData) return "No file uploaded";
+      if (typeof fileData === "string") return fileData;
+      return fileData.docName || "File uploaded";
+    };
+
+    return {
+      step1: {
+        creditorDetails: {
+          "Debtor Name": displayData.debtorName,
+          "Creditor Name": displayData.CreditorName,
+          "Total Claim Amount": displayData.totalClaimAmount,
+          "Debt Details": displayData.debtDetails,
+          "Mutual Credit Details": displayData.mutualCreditDetails,
+        },
+        identificationDetails: {
+          "Identification Type": displayData.identificationType,
+          "Identification Number": displayData.identificationNumber,
+          "Identification Document": formatFileInfo(displayData.identificationDocument),
+        }
+      },
+      step2: {
+        financialDetails: {
+          "Security Interest Amount": displayData.securityInterestAmount,
+          "Guarantee Amount": displayData.guaranteeAmount,
+          "Guarantor Name": displayData.guarantorName,
+          "Guarantor Address": displayData.guarantorAddress,
+          "Creditor Address": displayData.creditorAddress,
+          "Creditor Email": displayData.creditorEmail,
+        },
+        beneficiaryDetails: {
+          "Beneficiary Name": displayData.beneficiaryName,
+          "Beneficiary Address": displayData.beneficiaryAddress,
+          "Corporate Debtor Security Amount": displayData.corporateDebtorSecurityAmount,
+          "Corporate Debtor Guarantee Amount": displayData.corporateDebtorGuaranteeAmount,
+        },
+        addressproofDetails: {
+          "Address Proof Type": displayData.addressProofType,
+          "Address Proof Number": displayData.addressProofNumber,
+          "Address Proof Document": formatFileInfo(displayData.addressProofDocument),
+        },
+        bankDetails: {
+          "Principal Borrower Name": displayData.principalBorrowerName,
+          "Principal Borrower Address": displayData.principalBorrowerAddress,
+          "Account Number": displayData.accountNumber,
+          "IFSC Code": displayData.ifscCode,
+          "Branch Name": displayData.branchName,
+        }
+      },
+      step3: {
+        signatoryDetails: {
+          "Signatory Name": displayData.signatoryName,
+          "Signatory Position": displayData.signatoryPosition,
+          "Signatory Address": displayData.signatoryAddress,
+          "Signatory Document": formatFileInfo(displayData.signatoryDocument),
+        }
+      }
+    };
+  }, [displayData]);
+
+  if (loading) {
+    return (
+      <div className="d-flex justify-content-center align-items-center" style={{ height: "100vh" }}>
+        <Spinner animation="border" />
+      </div>
+    );
   }
+
+  if (!formattedData) {
+    return (
+      <div className="alert alert-info">
+        No form data available to display
+      </div>
+    );
+  }
+
+  const renderPreviewSection = (fields) => (
+    <Container fluid>
+      <Row className="g-3">
+        {Object.entries(fields).map(([key, value]) => (
+          <Col key={key} xs={12} sm={6} md={3} className="mb-3">
+            <PreviewCard 
+              title={key} 
+              value={value} 
+            />
+          </Col>
+        ))}
+      </Row>
+    </Container>
+  );
+
+  const renderCard = (title, fields) => (
+    <div className="mb-3">
+      <h5 style={{ fontWeight: 600 }}>{title}</h5>
+      {renderPreviewSection(fields)}
+    </div>
+  );
+
+  return (
+    <div className="form-stepper">
+      {draftResponse && (
+        <div className="alert alert-warning mb-3">
+          You are viewing a saved draft (last saved)
+        </div>
+      )}
+
+      <Collapsible title="Step 1: Creditor and Identification Details">
+        {renderCard("Creditor Details", formattedData.step1.creditorDetails)}
+        {renderCard("Identification Details", formattedData.step1.identificationDetails)}
+      </Collapsible>
+
+      <Collapsible title="Step 2: Financial and Beneficiary Details">
+        {renderCard("Financial Details", formattedData.step2.financialDetails)}
+        {renderCard("Address Proof Details", formattedData.step2.addressproofDetails)}
+        {renderCard("Beneficiary Details", formattedData.step2.beneficiaryDetails)}
+        {renderCard("Bank Details", formattedData.step2.bankDetails)}
+      </Collapsible>
+
+      <Collapsible title="Step 3: Signatory Details">
+        {renderCard("Signatory Details", formattedData.step3.signatoryDetails)}
+      </Collapsible>
+    </div>
+  );
 };
+
+export default React.memo(ReviewStep);
