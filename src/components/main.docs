@@ -1,424 +1,857 @@
-import React, { useCallback, useState, useEffect } from "react";
-import { useForm, FormProvider, Controller } from "react-hook-form";
-import DatePicker from "react-datepicker";
-import "react-datepicker/dist/react-datepicker.css";
-import Collapsible from "../formCommon/Collapsible";
-import Tooltip from "@mui/material/Tooltip";
-import { FaInfoCircle } from "react-icons/fa";
-import { uploadDocument } from "../../../../services/documentUploadService";
+import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { useNavigate, useParams } from "react-router-dom";
+import { toast } from "react-toastify";
+import { Modal, Button, Form } from "react-bootstrap";
+import "./Stepper.css";
+import { useRegistration } from "../../context/ApplicationContext";
+import ReviewStep from "./ReviewStep";
+import { FormDataProvider } from "../../context/FormDataContext";
+import { v4 as uuidv4 } from "uuid"; // Import UUID generator
 
-const DynamicField = ({ fieldConfig, control, register, errors, setValue, trigger, getValues, watch }) => {
-  const { name, label, type, options, rules, tooltip, placeholder, accept } = fieldConfig;
+const deepEqual = (obj1, obj2) => {
+  return JSON.stringify(obj1) === JSON.stringify(obj2);
+};
 
-  // Check if the field has an error
-  const hasError = errors[name];
+const generateFileId = (file) => {
+  return `file-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+};
+// const  idetificationType= localStorage.getItem("selectedIdentificationType");
+// const addressproofType = localStorage.getItem("selectedAddressProofType");
+const extractFileDetails = (file, source,documentType) => {
+  console.log("extractFileDetails", file, source);
+  if (!file) return null;
 
-  // Allow only valid numeric keys
-  const handleKeyPress = (e) => {
-    if (type === "number" && !/^\d$/.test(e.key) && e.key !== "Backspace") {
-      e.preventDefault();
+  return {
+    docId: file.fileId ,
+    docName: file.docName,
+    docType: documentType, 
+    docSource: source,
+  };
+};
+
+const createFormPayload = (formData, isFinalSubmit, userFormData, applicationNumber = "") => {
+  console.log("createFormPayload", formData);
+  const creditorBasicDetailsUuid = formData.creditorBasicDetailsUuid || "";
+  const claimDetailsUuid = formData.claimDetailsUuid || "";
+  const signatoryDetailsUuid = formData.signatoryDetailsUuid || "";
+
+  return {
+    userInfo: userFormData?.fullloginDetails || {}, // Make sure to handle potential null
+    uuid: applicationNumber || "", // Application number is generated on final submit
+    applicationNumber: applicationNumber || "",
+    creditorBasicDetails: {
+      uuid: creditorBasicDetailsUuid,
+      debtorName: formData.step1?.debtorName || "",
+      creditorName: formData.step1?.CreditorName || "", 
+      totalClaimAmount: parseFloat(formData.step1?.totalClaimAmount) || 0,
+      debtDetails: formData.step1?.debtDetails || "",
+      mutualCreditDetails: formData.step1?.mutualCreditDetails || "",
+      status: "",
+      isActive: "",
+      isFinalSubmit: isFinalSubmit,
+      identificationNumber: formData.step1?.identificationNumber || "",
+      document: extractFileDetails(formData.step1?.identificationDocument, "Identification",formData.step1?.identificationType),
+    },
+    auditDetails: {
+      auditDetails: {
+        // createdBy: userFormData?.fullloginDetails?.uuid || "", 
+        // lastModifiedBy: userFormData?.fullloginDetails?.uuid || "",
+        // createdTime: Date.now(),
+        // lastModifiedTime: Date.now(),
+      },
+    },
+    claimDetails: {
+      uuid: claimDetailsUuid,
+      securityInterestAmount: parseFloat(formData.step2?.securityInterestAmount) || 0,
+      guaranteeAmount: parseFloat(formData.step2?.guaranteeAmount) || 0,
+      guarantorName: formData.step2?.guarantorName || "",
+      guarantorAddress: formData.step2?.guarantorAddress || "",
+      creditorAddress: formData.step2?.creditorAddress || "",
+      creditorEmail: formData.step2?.creditorEmail || "",
+      beneficiaryName: formData.step2?.beneficiaryName || "",
+      beneficiaryAddress: formData.step2?.beneficiaryAddress || "",
+      corporateDebtorSecurityAmount: parseFloat(formData.step2?.corporateDebtorSecurityAmount) || 0,
+      corporateDebtorGuaranteeAmount: parseFloat(formData.step2?.corporateDebtorGuaranteeAmount) || 0,
+      principalBorrowerName: formData.step2?.principalBorrowerName || "",
+      principalBorrowerAddress: formData.step2?.principalBorrowerAddress || "",
+      bankAccountNumber: formData.step2?.accountNumber || "",
+      bankIfscCode: formData.step2?.ifscCode || "",
+      bankBranchName: formData.step2?.branchName || "",
+      addressProofNumber: formData.step2?.addressProofNumber || "",
+      document: extractFileDetails(formData.step2?.addressProofDocument, "Addressproof",formData.step2?.addressProofType),
+      auditDetails: {},
+    },
+    signatoryDetails: {
+      uuid: signatoryDetailsUuid,
+      name: formData.step3?.signatoryName || "",
+      position: formData.step3?.signatoryPosition || "",
+      address: formData.step3?.signatoryAddress || "",
+      document: extractFileDetails(formData.step3?.signatoryDocument, "Signature","Signature"),
+    },
+  };
+};
+
+const getFileFieldsForStep = (stepNumber) => {
+  switch (stepNumber) {
+    case 1:
+      return ["identificationDocument"];
+    case 2:
+      return ["addressProof"];
+    case 3:
+      return ["signatoryDocument"];
+    default:
+      return [];
+  }
+};
+
+const processFileUploads = async (stepData, stepNumber) => {
+  const fileFields = getFileFieldsForStep(stepNumber);
+  const processedData = { ...stepData };
+
+  for (const field of fileFields) {
+    if (stepData[field] && stepData[field] instanceof File) {
+      // In a real application, you would upload the file here
+      // and get a server-side ID or URL.
+      processedData[field] = {
+        id: generateFileId(stepData[field]),
+        name: stepData[field].name,
+        size: stepData[field].size,
+        type: stepData[field].type,
+        uploadedAt: new Date().toISOString(),
+      };
+    } else if (stepData[field] && typeof stepData[field] === 'object' && stepData[field].name) {
+      // Keep existing file details if not a new file
+      processedData[field] = { ...stepData[field] };
+    }
+  }
+
+  return processedData;
+};
+
+const Stepper = ({ stepsConfig = [], formAllData }) => {
+  const { id } = useParams();
+  const isEditMode = !!id;
+  const [currentStep, setCurrentStep] = useState(1);
+  const [isConfirmed, setIsConfirmed] = useState(false);
+  const [isComplete, setIsComplete] = useState(false);
+  const [isViewModalOpen, setIsViewModalOpen] = useState(false);
+  const [hasPreviewed, setHasPreviewed] = useState(false);
+  const [formData, setFormData] = useState({});
+  const [margins, setMargins] = useState({ marginLeft: 0, marginRight: 0 });
+  const stepRef = useRef([]);
+  const navigate = useNavigate();
+  const [currentSubmitHandler, setCurrentSubmitHandler] = useState(null);
+  const [showModal, setShowModal] = useState(false);
+  const [comments, setComments] = useState("");
+  const [actionType, setActionType] = useState("");
+  const [isSavingDraft, setIsSavingDraft] = useState(false);
+
+  const {
+    registrationData,
+    handleStepDataFetch,
+    updateRegistrationData,
+    loadDataFromLocalStorage,
+    isDataLoaded,
+  } = useRegistration();
+
+  const userFormData = JSON.parse(localStorage.getItem("userFormData"));
+  const isCRPUser = userFormData?.userType === "CRP";
+
+  const filteredStepsConfig = useMemo(() => {
+    if (isCRPUser) {
+      return stepsConfig.filter((step) => step.name !== "Review & Submit");
+    }
+    return stepsConfig;
+  }, [stepsConfig, isCRPUser]);
+
+  useEffect(() => {
+    if (id) {
+      loadDataFromLocalStorage(id);
+    }
+  }, [id, loadDataFromLocalStorage]);
+
+  useEffect(() => {
+    if (isEditMode && registrationData && !deepEqual(formData, registrationData)) {
+      setFormData(registrationData);
+    }
+  }, [isEditMode, registrationData, formData]);
+
+  // useEffect(() => {
+  //   if (isEditMode && registrationData && !deepEqual(formData, registrationData)) {
+  //     setFormData({
+  //       ...registrationData,
+  //       creditorBasicDetailsUuid: registrationData.creditorBasicDetails?.uuid || uuidv4(),
+  //       claimDetailsUuid: registrationData.claimDetails?.uuid || uuidv4(),
+  //       signatoryDetailsUuid: registrationData.signatoryDetails?.uuid || uuidv4(),
+  //       step1: {
+  //         debtorName: registrationData.creditorBasicDetails?.debtorName,
+  //         CreditorName: registrationData.creditorBasicDetails?.creditorName,
+  //         totalClaimAmount: registrationData.creditorBasicDetails?.totalClaimAmount,
+  //         debtDetails: registrationData.creditorBasicDetails?.debtDetails,
+  //         mutualCreditDetails: registrationData.creditorBasicDetails?.mutualCreditDetails,
+  //         identificationType: registrationData.creditorBasicDetails?.document?.docType,
+  //         identificationNumber: registrationData.creditorBasicDetails?.document?.docId,
+  //         identificationDocument: registrationData.creditorBasicDetails?.document
+  //           ? { id: registrationData.creditorBasicDetails.document.docId, name: registrationData.creditorBasicDetails.document.docName, type: registrationData.creditorBasicDetails.document.docType }
+  //           : null,
+  //       },
+  //       step2: {
+  //         securityInterestAmount: registrationData.claimDetails?.securityInterestAmount,
+  //         guaranteeAmount: registrationData.claimDetails?.guaranteeAmount,
+  //         guarantorName: registrationData.claimDetails?.guarantorName,
+  //         guarantorAddress: registrationData.claimDetails?.guarantorAddress,
+  //         creditorAddress: registrationData.claimDetails?.creditorAddress,
+  //         creditorEmail: registrationData.claimDetails?.creditorEmail,
+  //         beneficiaryName: registrationData.claimDetails?.beneficiaryName,
+  //         beneficiaryAddress: registrationData.claimDetails?.beneficiaryAddress,
+  //         corporateDebtorSecurityAmount: registrationData.claimDetails?.corporateDebtorSecurityAmount,
+  //         corporateDebtorGuaranteeAmount: registrationData.claimDetails?.corporateDebtorGuaranteeAmount,
+  //         principalBorrowerName: registrationData.claimDetails?.principalBorrowerName,
+  //         principalBorrowerAddress: registrationData.claimDetails?.principalBorrowerAddress,
+  //         accountNumber: registrationData.claimDetails?.bankAccountNumber,
+  //         ifscCode: registrationData.claimDetails?.bankIfscCode,
+  //         branchName: registrationData.claimDetails?.bankBranchName,
+  //         addressProof: registrationData.claimDetails?.document
+  //           ? { id: registrationData.claimDetails.document.docId, name: registrationData.claimDetails.document.docName, type: registrationData.claimDetails.document.docType }
+  //           : null,
+  //       },
+  //       step3: {
+  //         signatoryName: registrationData.signatoryDetails?.name,
+  //         signatoryPosition: registrationData.signatoryDetails?.position,
+  //         signatoryAddress: registrationData.signatoryDetails?.address,
+  //         signatoryDocument: registrationData.signatoryDetails?.document
+  //           ? { id: registrationData.signatoryDetails.document.docId, name: registrationData.signatoryDetails.document.docName, type: registrationData.signatoryDetails.document.docType }
+  //           : null,
+  //       },
+  //     });
+  //   } else if (!isEditMode && !isDataLoaded) {
+  //     // Initialize with new UUIDs for a new form
+  //     setFormData({
+  //       creditorBasicDetailsUuid: uuidv4(),
+  //       claimDetailsUuid: uuidv4(),
+  //       signatoryDetailsUuid: uuidv4(),
+  //     });
+  //   }
+  // }, [isEditMode, registrationData, formData, isDataLoaded]);
+
+  useEffect(() => {
+    const savedIsConfirmed = localStorage.getItem("isConfirmed");
+    if (savedIsConfirmed) {
+      setIsConfirmed(JSON.parse(savedIsConfirmed));
+    }
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem("isConfirmed", JSON.stringify(isConfirmed));
+  }, [isConfirmed]);
+
+  useEffect(() => {
+    const newSubmitHandler = filteredStepsConfig[currentStep - 1]?.submitHandler;
+    if (newSubmitHandler && newSubmitHandler !== currentSubmitHandler) {
+      setCurrentSubmitHandler(() => newSubmitHandler);
+    }
+  }, [currentStep, filteredStepsConfig]);
+
+  const updateSubmitHandler = useCallback((submitHandler) => {
+    setCurrentSubmitHandler(() => submitHandler);
+  }, []);
+
+  useEffect(() => {
+    if (stepRef.current.length > 0) {
+      const firstStep = stepRef.current[0]?.offsetWidth || 0;
+      const lastStep = stepRef.current[filteredStepsConfig.length - 1]?.offsetWidth || 0;
+      setMargins({
+        marginLeft: firstStep / 2,
+        marginRight: lastStep / 2,
+      });
+    }
+  }, [filteredStepsConfig.length]);
+
+  const validateStepData = (step, data) => {
+    const requiredFields = filteredStepsConfig[step - 1]?.requiredFields || [];
+    for (let field of requiredFields) {
+      if (!data[field]) {
+        toast.error(`${field} is required.`);
+        return false;
+      }
+    }
+    return true;
+  };
+
+  const handleNext = async () => {
+    if (!currentSubmitHandler) {
+      console.error("No submit handler available.");
+      return;
+    }
+
+    const currentStepData = await currentSubmitHandler();
+    if (!currentStepData) {
+      console.error("Form validation failed.");
+      return;
+    }
+
+    if (!validateStepData(currentStep, currentStepData)) {
+      return;
+    }
+
+    const processedStepData = await processFileUploads(currentStepData, currentStep);
+
+    const updatedFormData = {
+      ...formData,
+      [`step${currentStep}`]: { ...formData[`step${currentStep}`], ...processedStepData },
+    };
+
+    if (!deepEqual(updatedFormData, formData)) {
+      setFormData(updatedFormData);
+      updateRegistrationData(`step${currentStep}`, updatedFormData[`step${currentStep}`], id);
+    }
+
+    if (currentStep === filteredStepsConfig.length) {
+      const finalPayload = createFormPayload(updatedFormData, true, userFormData, id); // isFinalSubmit: true, use ID as application number if editing
+      console.log("Final Payload:", JSON.stringify(finalPayload, null, 2));
+
+      // In a real application, you would send this payload to your API
+      // await submitForm(finalPayload);
+
+      setIsComplete(true);
+      toast.success("Form submitted successfully");
+      navigate("/dashboard");
+    } else {
+      setCurrentStep((prevStep) => prevStep + 1);
     }
   };
 
-  const handleFileChange = async (e) => {
-    const file = e.target.files[0];
-    if (file && fieldConfig.onFileUpload) {
-      try {
-        fieldConfig.setIsUploading(true);
-        fieldConfig.setUploadError(null);
-        
-        const result = await fieldConfig.onFileUpload(file);
-        
-        if (result.success) {
-          setValue(name, {
-            fileId: result.fileId,
-            docName: result.docName,
-            docType: result.docType,
-            docSource: result.docSource,
-            fileUrl: result.fileUrl
-          }, { shouldValidate: true });
-        }
-      } catch (error) {
-        fieldConfig.setUploadError(error.message);
-        setValue(name, null, { shouldValidate: true });
-      } finally {
-        fieldConfig.setIsUploading(false);
-      }
+  const handlePreview = async () => {
+    if (!currentSubmitHandler) {
+      console.error("No submit handler available.");
+      return;
     }
+
+    const currentStepData = await currentSubmitHandler();
+    if (!currentStepData) {
+      console.error("Form validation failed.");
+      return;
+    }
+
+    if (!validateStepData(currentStep, currentStepData)) {
+      return;
+    }
+
+    const processedStepData = await processFileUploads(currentStepData, currentStep);
+
+    const updatedFormData = {
+      ...formData,
+      [`step${currentStep}`]: { ...formData[`step${currentStep}`], ...processedStepData },
+    };
+
+    if (!deepEqual(updatedFormData, formData)) {
+      setFormData(updatedFormData);
+      updateRegistrationData(`step${currentStep}`, updatedFormData[`step${currentStep}`], id);
+    }
+    console.log("Updated Form Data:", updatedFormData);
+
+    const previewPayload = createFormPayload(updatedFormData, false, userFormData, id); // isFinalSubmit: false, use ID if editing
+
+    console.log("Preview Payload:", JSON.stringify(previewPayload, null, 2));
+    localStorage.setItem("formPreviewData", JSON.stringify(previewPayload));
+
+    setCurrentStep(filteredStepsConfig.length);
+    setHasPreviewed(true); // Enable preview button
+  };
+
+  const handleSaveDraft = async () => {
+    setIsSavingDraft(true);
+    try {
+      const currentStepData = currentSubmitHandler ? await currentSubmitHandler() : {};
+      const processedStepData = await processFileUploads(currentStepData, currentStep);
+  
+      // const draftId = id || `draft-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+      const draftId="";
+  
+      // Leave UUID fields blank if not available
+      const creditorBasicDetailsUuid = formData.creditorBasicDetailsUuid || "";
+      const claimDetailsUuid = formData.claimDetailsUuid || "";
+      const signatoryDetailsUuid = formData.signatoryDetailsUuid || "";
+  
+      const draftData = {
+        ...formData,
+        creditorBasicDetailsUuid,
+        claimDetailsUuid,
+        signatoryDetailsUuid,
+        [`step${currentStep}`]: {
+          ...formData[`step${currentStep}`],
+          ...processedStepData,
+        },
+        id: draftId,
+        status: "draft",
+        lastSaved: new Date().toISOString(),
+        currentStep,
+        formType: userFormData?.formType,
+        userType: userFormData?.userType,
+      };
+  
+      const draftPayload = createFormPayload(draftData, false, userFormData, draftId);
+  
+      const existingDraft = JSON.parse(localStorage.getItem("formDrafts") || "[]");
+      const updatedDrafts = [
+        ...existingDraft.filter((draft) => draft.id !== draftId),
+        draftData,
+      ];
+      localStorage.setItem("formDrafts", JSON.stringify(updatedDrafts));
+      console.log(" Drafts payload:", draftPayload);
+  
+      // Save the draft data to local storage
+      localStorage.setItem(draftId, JSON.stringify(draftPayload));
+  
+      toast.success("Draft saved successfully");
+      setFormData(draftData);
+      setHasPreviewed(true);
+    } catch (error) {
+      console.error("Error saving draft:", error);
+      toast.error("Failed to save draft");
+    } finally {
+      setIsSavingDraft(false);
+    }
+  };
+  
+
+  // const handleSaveDraft = async () => {
+  //   setIsSavingDraft(true);
+  //   try {
+  //     const currentStepData = currentSubmitHandler ? await currentSubmitHandler() : {};
+  //     const processedStepData = await processFileUploads(currentStepData, currentStep);
+
+  //     const draftId = id || `draft-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+
+  //     // Generate uuids if they don't exist
+  //     const creditorBasicDetailsUuid = formData.creditorBasicDetailsUuid || uuidv4();
+  //     const claimDetailsUuid = formData.claimDetailsUuid || uuidv4();
+  //     const signatoryDetailsUuid = formData.signatoryDetailsUuid || uuidv4();
+
+  //     const draftData = {
+  //       ...formData,
+  //       creditorBasicDetailsUuid: creditorBasicDetailsUuid,
+  //       claimDetailsUuid: claimDetailsUuid,
+  //       signatoryDetailsUuid: signatoryDetailsUuid,
+  //       [`step${currentStep}`]: {
+  //         ...formData[`step${currentStep}`],
+  //         ...processedStepData,
+  //       },
+  //       id: draftId,
+  //       status: "draft",
+  //       lastSaved: new Date().toISOString(),
+  //       currentStep,
+  //       formType: userFormData?.formType,
+  //       userType: userFormData?.userType,
+  //     };
+
+  //     const draftPayload = createFormPayload(draftData, false, userFormData, draftId);
+
+  //     const existingDraft = JSON.parse(localStorage.getItem("formDrafts") || "[]");
+  //     const updatedDrafts = [
+  //       ...existingDraft.filter((draft) => draft.id !== draftId),
+  //       draftData,
+  //     ];
+  //     localStorage.setItem("formDrafts", JSON.stringify(updatedDrafts));
+  //     console.log(" Drafts payload:", draftPayload);
+
+  //     // Save the draft data to local storage
+  //     localStorage.setItem(draftId, JSON.stringify(draftPayload)); // Save with isFinalSubmit: false
+
+  //     toast.success("Draft saved successfully");
+  //     setFormData(draftData); // Update form data.
+  //     setHasPreviewed(true); // Enable preview after saving draft
+  //   } catch (error) {
+  //     console.error("Error saving draft:", error);
+  //     toast.error("Failed to save draft");
+  //   } finally {
+  //     setIsSavingDraft(false);
+  //   }
+  // };
+
+  const handleActionClick = (action) => {
+    setActionType(action);
+    setShowModal(true);
+  };
+
+  const handleModalClose = () => {
+    setShowModal(false);
+    setComments("");
+  };
+
+  const handleActionSubmit = () => {
+    console.log(`Action: ${actionType}, Comments: ${comments}`);
+    toast.success(`${actionType} submitted successfully`);
+    navigate("/dashboard");
+  };
+
+  const handlePrevious = () => {
+    setCurrentStep((prevStep) => Math.max(1, prevStep - 1));
+    setIsConfirmed(false);
+    localStorage.removeItem("isConfirmed");
+  };
+
+  const handleCancel = () => {
+    navigate("/dashboard");
+  };
+
+  const calculateProgressBarWidth = () => {
+    return ((currentStep - 1) / (filteredStepsConfig.length - 1)) * 100;
+  };
+
+  const ActiveComponent = filteredStepsConfig[currentStep - 1]?.Component;
+  const shouldRenderReviewStep = currentStep === filteredStepsConfig.length && isDataLoaded;
+
+  const flattenFormData = (formData) => {
+    const flattened = {
+      ...formData.step1,
+      ...formData.step2,
+      ...formData.step3,
+    };
+
+    return flattened;
   };
 
   return (
-    <div className="flex-item">
-      <label>
-        {label}
-        {tooltip && (
-          <Tooltip title={tooltip} arrow>
-            <span style={{ marginLeft: "5px", cursor: "pointer" }}>
-              <FaInfoCircle />
-            </span>
-          </Tooltip>
-        )}
-      </label>
-      {type === "select" ? (
-        <Controller
-          name={name}
-          control={control}
-          rules={rules}
-          render={({ field }) => (
-            <select
-              {...field}
-              className={`form-input ${hasError ? "input-error" : ""}`}
-              onChange={(e) => {
-                field.onChange(e);
-                if (fieldConfig.onChange) fieldConfig.onChange(e.target.value);
-              }}
-            >
-              <option value="" disabled>
-                {placeholder || `Select ${label}`}
-              </option>
-              {options.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          )}
-        />
-      ) : type === "date" ? (
-        <Controller
-          name={name}
-          control={control}
-          rules={rules}
-          render={({ field }) => (
-            <DatePicker
-              {...field}
-              selected={field.value}
-              onChange={(date) => {
-                setValue(name, date);
-                trigger(name);
-              }}
-              className={`form-input ${hasError ? "input-error" : ""}`}
-              dateFormat="yyyy-MM-dd"
-              placeholderText={placeholder || "Select a date"}
-            />
-          )}
-        />
-      ) :  type === "file" ? (
-        <div className="custom-file-input">
-          <input
-            type="file"
-            id={name}
-            onChange={handleFileChange}
-            className={`form-input ${hasError ? "input-error" : ""}`}
-            style={{ display: "none" }}
-            disabled={fieldConfig.isUploading}
-            accept={fieldConfig.accept}
-          />
-          <label
-            htmlFor={name}
-            className={`file-label ${hasError ? "input-error" : ""} ${fieldConfig.isUploading ? "uploading" : ""}`}
+    <FormDataProvider formData={flattenFormData(formData)}>
+      <div className="stepper">
+        {filteredStepsConfig.map((step, index) => (
+          <div
+            key={step.name}
+            ref={(el) => (stepRef.current[index] = el)}
+            className={`step ${
+              currentStep > index + 1 || isComplete ? "complete" : ""
+            } ${currentStep === index + 1 ? "active" : ""}`}
           >
-            {fieldConfig.isUploading ? "Uploading..." : "Choose File"}
-          </label>
-          
-          {getValues(name) && !fieldConfig.isUploading && (
-            <div style={{ marginTop: "8px" }}>
-              <div>File: {getValues(name).docName || getValues(name).name}</div>
+            <div className="step-number">
+              {currentStep > index + 1 || isComplete ? (
+                <span>✓</span>
+              ) : (
+                index + 1
+              )}
             </div>
-          )}
-          
-          {fieldConfig.uploadError && <p className="error-message">{fieldConfig.uploadError}</p>}
-          {hasError && !fieldConfig.uploadError && <p className="error-message">{errors[name]?.message}</p>}
-        </div>
-      )  : type === "multifile" ? (
-        <input
-          type="file"
-          multiple
-          onChange={handleFileChange}
-          className={`form-input ${hasError ? "input-error" : ""}`}
-          placeholder={placeholder || "Upload multiple files"}
-        />
-      ) : (
-        <input
-          {...register(name, rules)}
-          type={type}
-          className={`form-input ${hasError ? "input-error" : ""}`}
-          onChange={(e) => {
-            setValue(name, e.target.value);
-            trigger(name);
+            <div className="step-name">{step.name}</div>
+          </div>
+        ))}
+
+        <div
+          className="progress-bar"
+          style={{
+            marginLeft: margins.marginLeft,
+            marginRight: margins.marginRight,
           }}
-          onKeyPress={handleKeyPress}
-          placeholder={placeholder || `Enter ${label.toLowerCase()}`}
+        >
+          <div
+            className="progress"
+            style={{ width: `${calculateProgressBarWidth()}%` }}
+          ></div>
+        </div>
+      </div>
+
+      {ActiveComponent && (
+        <ActiveComponent
+          formData={formData[`step${currentStep}`] || {}}
+          provideSubmitHandler={updateSubmitHandler}
+          setFormData={setFormData}
         />
       )}
-      {hasError && <p className="error-message">{errors[name]?.message}</p>}
-    </div>
-  );
-};
 
-const FormCDetails = ({ provideSubmitHandler, formData }) => {
-  const [isUploading, setIsUploading] = useState(false);
-  const [uploadError, setUploadError] = useState(null);
-  const [selectedClaimType, setSelectedClaimType] = useState("");
-  
-  const methods = useForm();
-  const { register, handleSubmit, formState: { errors }, trigger, clearErrors, setValue, control, getValues, watch, reset } = methods;
+      {shouldRenderReviewStep && !isCRPUser && (
+        <ReviewStep />
+      )}
 
-  const onSubmit = useCallback(async () => {
-    const isValid = await trigger();
-    if (!isValid) {
-      console.error("Validation failed");
-      return false;
-    }
-    return getValues();
-  }, [trigger, getValues]);
-
-  useEffect(() => {
-    if (formData) {
-      Object.keys(formData).forEach((key) => {
-        setValue(key, formData[key]);
-      });
-      if (formData.claimType) {
-        setSelectedClaimType(formData.claimType);
-      }
-    }
-  }, [formData, setValue]);
-
-  const handleFileUpload = async (file) => {
-    try {
-      const result = await uploadDocument(file, 'addressProofDocument');
-      return result;
-    } catch (error) {
-      throw error;
-    }
-  };
-
-  useEffect(() => {
-    if (provideSubmitHandler) {
-      provideSubmitHandler(onSubmit);
-    }
-  }, [provideSubmitHandler, onSubmit]);
-
-  // Claim type options for checkboxes
-  const claimTypeOptions = [
-    { value: "principalBorrower", label: "Corporate Debtor as Principal Borrower" },
-    { value: "beneficiary", label: "Corporate Debtor as Beneficiary" },
-    { value: "guarantor", label: "Corporate Debtor as Guarantor" },
-  ];
-
-  // Handle checkbox change
-  const handleClaimTypeChange = (value) => {
-    setSelectedClaimType(value);
-    setValue("claimType", value, { shouldValidate: true });
-    trigger("claimType");
-    
-    // Reset all fields except claimType when changing claim type
-    reset({ claimType: value });
-  };
-
-  // Field configurations (keep all your existing schema definitions)
-  const claimDetailsSchema = [
-    // ... (keep all your existing field configurations)
-  ];
-
-  const beneficiaryDetailsSchema = [
-    // ... (keep all your existing field configurations)
-  ];
-
-  const corporateDebtorSchema = [
-    // ... (keep all your existing field configurations)
-  ];
-
-  const bankAccountDetailsSchema = [
-    // ... (keep all your existing field configurations)
-  ];
-
-  // Watch addressProofType for validation
-  const addressProofType = watch("addressProofType");
-  useEffect(() => {
-    if (addressProofType) {
-      localStorage.setItem("selectedAddressProofType", addressProofType);
-      trigger("addressProofNumber");
-    }
-  }, [addressProofType, trigger]);
-
-  return (
-    <FormProvider {...methods}>
-      <form className="form-stepper">
-        {/* Claim Type Selection - Now using checkboxes */}
-        <div className="mb-4 bg-light">
-          <div className="flex-item">
-            <label className="checkbox-group-label">
-              Select Claim Type <span className="required-asterisk">*</span>
-            </label>
-            <div className="checkbox-group">
-              {claimTypeOptions.map((option) => (
-                <div key={option.value} className="checkbox-item">
-                  <input
-                    type="checkbox"
-                    id={`claimType-${option.value}`}
-                    checked={selectedClaimType === option.value}
-                    onChange={() => handleClaimTypeChange(option.value)}
-                    className={`form-checkbox ${errors.claimType ? "input-error" : ""}`}
-                  />
-                  <label htmlFor={`claimType-${option.value}`}>
-                    {option.label}
-                  </label>
-                </div>
-              ))}
-            </div>
-            <input
-              type="hidden"
-              {...register("claimType", { required: "Claim type is required" })}
+      {currentStep === filteredStepsConfig.length && !isCRPUser && (
+        <div className="confirmation-container">
+          <Form.Group controlId="formConfirmation" className="mt-3 confirmation-checkbox">
+            <Form.Check
+              type="checkbox"
+              label="I confirm that the information provided is correct."
+              checked={isConfirmed}
+              onChange={(e) => setIsConfirmed(e.target.checked)}
             />
-            {errors.claimType && <p className="error-message">{errors.claimType.message}</p>}
-          </div>
+          </Form.Group>
         </div>
+      )}
 
-        {/* Conditional rendering based on selected claim type */}
-        {selectedClaimType === "principalBorrower" && (
-          <div className="mb-4 bg-light">
-            <Tooltip title="Details of claim, if it is made in respect of financial debt covered under clauses (h) and (i) of sub-section (8) of section 5 of the Code, extended by the creditor" arrow>
-              <div>
-                <Collapsible title="Details of claim: corporate debtor as principal borrower">
-                  <div className="flex-container">
-                    {claimDetailsSchema.map((fieldConfig) => (
-                      <DynamicField
-                        key={fieldConfig.name}
-                        fieldConfig={fieldConfig}
-                        control={control}
-                        register={register}
-                        errors={errors}
-                        setValue={setValue}
-                        trigger={trigger}
-                        getValues={getValues}
-                        watch={watch}
-                      />
-                    ))}
-                  </div>
-                </Collapsible>
-              </div>
-            </Tooltip>
+      <div className="stepper-buttons">
+        {currentStep > 1 && (
+          <button className="buttonplus previous-button" onClick={handlePrevious}>
+            Previous
+          </button>
+        )}
+        {currentStep === 1 && (
+          <button className="buttonplus cancel-button" onClick={handleCancel}>
+            Cancel
+          </button>
+        )}
+
+        {currentStep === 3 && !isCRPUser && (
+          <div className="last-step-buttons">
+            <button
+              className="buttonplus draft-button"
+              onClick={handleSaveDraft}
+              disabled={isSavingDraft}
+            >
+              {isSavingDraft ? "Saving..." : "Save as Draft"}
+            </button>
+            <button
+              className="buttonplus preview-button"
+              onClick={handlePreview}
+              disabled={!hasPreviewed}
+            >
+              Preview
+            </button>
           </div>
         )}
 
-        {selectedClaimType === "beneficiary" && (
-          <div className="mb-4 bg-light">
-            <Tooltip title="Beneficiary details (Details of claim, if it is made in respect of financial debt covered under clauses (h) and (i) of sub-section (8) of section 5 of the Code, extended by the creditor)" arrow>
-              <div>
-                <Collapsible title="Details of claim: corporate debtor as beneficiary">
-                  <div className="flex-container">
-                    {beneficiaryDetailsSchema.map((fieldConfig) => (
-                      <DynamicField
-                        key={fieldConfig.name}
-                        fieldConfig={fieldConfig}
-                        control={control}
-                        register={register}
-                        errors={errors}
-                        setValue={setValue}
-                        trigger={trigger}
-                        getValues={getValues}
-                        watch={watch}
-                      />
-                    ))}
-                  </div>
-                </Collapsible>
-              </div>
-            </Tooltip>
-          </div>
+        {currentStep !== 3 && currentStep !== filteredStepsConfig.length && (
+          <button
+            className="buttonplus next-button"
+            onClick={handleNext}
+            disabled={isComplete}
+          >
+            Next
+          </button>
         )}
 
-        {selectedClaimType === "guarantor" && (
-          <div className="mb-4 bg-light">
-            <Collapsible title="Details of claim: corporate debtor as guarantor">
-              <div className="flex-container">
-                {corporateDebtorSchema.map((fieldConfig) => (
-                  <DynamicField
-                    key={fieldConfig.name}
-                    fieldConfig={fieldConfig}
-                    control={control}
-                    register={register}
-                    errors={errors}
-                    setValue={setValue}
-                    trigger={trigger}
-                    getValues={getValues}
-                    watch={watch}
-                  />
-                ))}
-              </div>
-            </Collapsible>
-          </div>
-        )}
+        {currentStep === filteredStepsConfig.length && isCRPUser ? (
+          <>
+            <button
+              className="buttonplus sendback-button"
+              onClick={() => handleActionClick("Sendback To Claimants")}
+            >
+              Sendback To Claimants
+            </button>
+            <button
+              className="buttonplus accept-contingent-button"
+              onClick={() => handleActionClick("Accept as Contingent")}
+            >
+              Accept as Contingent
+            </button>
+            <button
+              className="buttonplus accept-button"
+              onClick={() => handleActionClick("Accept")}
+            >
+              Accept
+            </button>
+            <button
+              className="buttonplus reject-button"
+              onClick={() => handleActionClick("Reject")}
+            >
+              Reject
+            </button>
+          </>
+        ) : currentStep === filteredStepsConfig.length ? (
+          <button
+            className="buttonplus next-button"
+            onClick={handleNext}
+            disabled={!isConfirmed || isComplete}
+          >
+            Submit
+          </button>
+        ) : null}
+      </div>
 
-        {/* Bank Account Details Section (always shown) */}
-        {selectedClaimType && (
-          <div className="mb-4 bg-light">
-            <Tooltip title="Bank account details (Details of the bank account to which the amount of the claim or any part thereof can be transferred pursuant to a resolution plan)" arrow>
-              <div>
-                <Collapsible title="Bank Account Details">
-                  <div className="flex-container">
-                    {bankAccountDetailsSchema.map((fieldConfig) => (
-                      <DynamicField
-                        key={fieldConfig.name}
-                        fieldConfig={fieldConfig}
-                        control={control}
-                        register={register}
-                        errors={errors}
-                        setValue={setValue}
-                        trigger={trigger}
-                        getValues={getValues}
-                        watch={watch}
-                      />
-                    ))}
-                  </div>
-                </Collapsible>
-              </div>
-            </Tooltip>
-          </div>
-        )}
-      </form>
-    </FormProvider>
+      <Modal show={showModal} onHide={handleModalClose} centered>
+        <Modal.Header closeButton>
+          <Modal.Title>{actionType} Form</Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          <Form>
+            <Form.Group controlId="comments">
+              <Form.Label>Comments</Form.Label>
+              <Form.Control
+                as="textarea"
+                rows={3}
+                value={comments}
+                onChange={(e) => setComments(e.target.value)}
+                placeholder="Enter your comments..."
+              />
+            </Form.Group>
+          </Form>
+        </Modal.Body>
+        <Modal.Footer>
+          <Button className="modal-close-button" onClick={handleModalClose}>
+            Close
+          </Button>
+          <Button
+            className="modal-submit-button"
+            onClick={handleActionSubmit}
+            disabled={!comments.trim()}
+          >
+            Submit
+          </Button>
+        </Modal.Footer>
+      </Modal>
+    </FormDataProvider>
   );
 };
 
-export default FormCDetails;
-/* Add these styles to your CSS file */
-.checkbox-group-label {
-  display: block;
-  margin-bottom: 8px;
-  font-weight: bold;
-}
+export default Stepper;
 
-.checkbox-group {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  margin-top: 8px;
+curl --location 'http://15.206.115.75:8003/cms-application-service/_application/_create' \
+--header 'Content-Type: application/json' \
+--data-raw '{
+    "status": {
+        "code": "200",
+        "message": "Data Created Successfully"
+    },
+    "userInfo": {
+        "status": {
+            "code": null,
+            "message": null
+        },
+        "token": null,
+        "otp": "123456",
+        "processTypes": {
+            "auditDetails": null,
+            "uuid": "bb9683f5-0506-45be-99a7-477c5318219r",
+            "processTypeName": "Corporate Insolvency Resolution Process (CIRP)",
+            "processTypeCode": "50001",
+            "isActive": null,
+            "processTypeValue": "CIRP"
+        },
+        "corporateDebtorDetails": {
+            "uuid": "7c249b25-7e75-4e0f-9177-5988ccbda43a",
+            "nameOfCorporateDebtor": "Jalpower Corporation Limited",
+            "cinOrLlpinNumber": "U40109TG2004PLC043985",
+            "ipDetailsId": "2b44f7f3-9983-4f4b-be75-46056292c7a9",
+            "appointedAs": "4",
+            "nameOfIp": "Mr. Amit Jain",
+            "registrationNo": "IBBI/IPA-001/IP-P01447/2018-2019/12196",
+            "ipUuid": "2b44f7f3-9983-4f4b-be75-46056292c7a9",
+            "roleName": "RP",
+            "roleCode": "RP",
+            "roleUuid": "4"
+        },
+        "claimantTypes": {
+            "uuid": "1001",
+            "claimantName": "Financial Creditors",
+            "claimantCode": "1001"
+        },
+        "claimantCategories": {
+            "uuid": "20001",
+            "claimantCategoryName": "Secured Financial Creditors (Banks/ARCs/NBFCs/FIs)",
+            "claimantCategoryCode": "20001",
+            "isActive": true,
+            "cirpFormId": "40002",
+            "claimantTypeCode": "1001",
+            "liquidationId": "a6928a25-1d51-4e6b-aa6c-a9c1a4ab62f8"
+        },
+        "formDetails": {
+            "uuid": "40002",
+            "formName": "Form C",
+            "formCode": "40002",
+            "isActive": true
+        },
+        "userType": "CLAIMANT",
+        "users": [
+            {
+                "claimant": {
+                    "uuid": "e6f398bf-eacc-42cc-a49c-fd3caa9d6b75",
+                    "claimantName": "sassa",
+                    "corporateName": null,
+                    "emailId": "ayan@gmail.com",
+                    "claimantEntityType": "INDV",
+                    "mobileNumber": "8481881868",
+                    "aadharNumber": "213367555151",
+                    "panNumber": "GZVPS5431E",
+                    "cinOrTaNumber": null,
+                    "roleCode": "CLAIMANT",
+                    "auditDetails": {
+                        "createdBy": "e6f398bf-eacc-42cc-a49c-fd3caa9d6b75",
+                        "lastModifiedBy": "e6f398bf-eacc-42cc-a49c-fd3caa9d6b75",
+                        "createdTime": "2025-04-09 17:05:42.898",
+                        "lastModifiedTime": "2025-04-09 17:05:42.898"
+                    },
+                    "active": true
+                },
+                "corporateDebtor": null
+            }
+        ]
+    },
+    "applicationDetails": {
+        "uuid": "",
+        "applicationNumber": "",
+        "creditorBasicDetails": {
+            "uuid": "",
+            "debtorName": "Jalpower Corporation Limited",
+            "creditorName": "sassa",
+            "totalClaimAmount": 233.0,
+            "debtDetails": "3323777777777",
+            "mutualCreditDetails": "2323",
+            "status": "",
+            "document": {
+                "docId": "",
+                "docType": "Aadhar",
+                "docSource": "Identification",
+                "docName": "Mother_adhaar.pdf"
+            },
+            "auditDetails": {
+                "createdBy": "e6f398bf-eacc-42cc-a49c-fd3caa9d6b75",
+                "lastModifiedBy": "e6f398bf-eacc-42cc-a49c-fd3caa9d6b75",
+                "createdTime": "2025-04-10T14:00:11.235066300",
+                "lastModifiedTime": "2025-04-10T14:00:11.235066300"
+            },
+            "isActive": false,
+            "isFinalSubmit": true
+        },
+        "claimDetails": {
+            "uuid": "",
+            "creditorBasicDetailsUuid": "",
+            "securityInterestAmount": 3323.0,
+            "guaranteeAmount": 323.0,
+            "guarantorName": "dsdds",
+            "guarantorAddress": "dssd",
+            "creditorAddress": "32323323",
+            "creditorEmail": "dsdd@gmail.com",
+            "beneficiaryName": "ewew",
+            "beneficiaryAddress": "wewe",
+            "corporateDebtorSecurityAmount": 332.0,
+            "corporateDebtorGuaranteeAmount": 323.0,
+            "principalBorrowerName": "2332",
+            "principalBorrowerAddress": "233",
+            "bankAccountNumber": 3223,
+            "bankIfscCode": "32",
+            "bankBranchName": "32",
+            "document": {
+                "docId": "",
+                "docType": "Aadhar",
+                "docSource": "Addressproof",
+                "docName": "Mother_adhaar.pdf"
+            },
+            "auditDetails": {
+                "createdBy": "e6f398bf-eacc-42cc-a49c-fd3caa9d6b75",
+                "lastModifiedBy": "e6f398bf-eacc-42cc-a49c-fd3caa9d6b75",
+                "createdTime": "2025-04-10T14:00:11.243487100",
+                "lastModifiedTime": "2025-04-10T14:00:11.243487100"
+            }
+        },
+        "signatoryDetails": {
+            "uuid": "",
+            "creditorBasicDetailsUuid": "",
+            "name": "dsd",
+            "position": "sdds",
+            "address": "dssd",
+            "document": {
+                "docId": "",
+                "docType": "Signature",
+                "docSource": "Signature",
+                "docName": "father_adhaar.pdf"
+            },
+            "auditDetails": {
+                "createdBy": "e6f398bf-eacc-42cc-a49c-fd3caa9d6b75",
+                "lastModifiedBy": "e6f398bf-eacc-42cc-a49c-fd3caa9d6b75",
+                "createdTime": "2025-04-10T14:00:11.248001800",
+                "lastModifiedTime": "2025-04-10T14:00:11.248001800"
+            }
+        },
+        "auditDetails": {
+            "createdBy": "e6f398bf-eacc-42cc-a49c-fd3caa9d6b75",
+            "lastModifiedBy": "e6f398bf-eacc-42cc-a49c-fd3caa9d6b75",
+            "createdTime": "2025-04-10T14:00:11.252999100",
+            "lastModifiedTime": "2025-04-10T14:00:11.252999100"
+        }
+    }
 }
-
-.checkbox-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.checkbox-item label {
-  cursor: pointer;
-  margin-bottom: 0;
-}
-
-.form-checkbox {
-  width: 18px;
-  height: 18px;
-  cursor: pointer;
-  accent-color: #4CAF50; /* Green color for checked state */
-}
-
-.form-checkbox.input-error {
-  outline: 2px solid #f44336; /* Red outline for error state */
-}
-
-.required-asterisk {
-  color: #f44336;
-  margin-left: 4px;
-}
+ '
