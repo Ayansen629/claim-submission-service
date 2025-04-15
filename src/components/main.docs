@@ -1,126 +1,707 @@
-const handleSaveDraft = async () => {
-  setIsSavingDraft(true);
-  try {
-    const currentStepData = currentSubmitHandler ? await currentSubmitHandler() : {};
-    const processedStepData = await processFileUploads(currentStepData, currentStep);
+import React, { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import "bootstrap/dist/css/bootstrap.min.css";
+import { Container, Row, Col, Modal, Button, Table } from "react-bootstrap";
+import "./DashboardMain.css";
+import FileUploadModal from "./FileUploadModal.jsx";
+import ActionTable from "./ActionTable.js"; 
+import { toast } from "react-toastify";
+import { APP_MESSAGES, openFileInNewTab } from "../../../utils/constants.ts";
+import { URLS_ENDPOINT } from "../../../utils/urlsConstants.ts";
+import { postData } from "../../../services/http.service.ts";
+import Collapsible from "../../../common/Collapsible.js";
+import PreviewCard from "./PreviewCard.js";
+// import HistoryView from "../common/HistoryView";
+import { FaDownload, FaClipboardList, FaFile, FaFilePdf } from "react-icons/fa6";
 
-    const draftPayload = {
-      status: {
-        code: "",
-        message: ""
-      },
-      userInfo: userFormData?.fullloginDetails || {}, 
-      applicationDetails: createFormPayload({
-        ...formData,
-        [`step${currentStep}`]: { ...formData[`step${currentStep}`], ...processedStepData }
-      }, false, userFormData, id || "", false),
-    };
+const DashboardMain = () => {
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [isViewModalOpen, setIsViewModalOpen] = useState(false);
+  const [modalData, setModalData] = useState({});
+  const [historyModal, setHistoryModal] = useState(false);
+  const [historyData, setHistoryData] = useState({});
+  const [showDocumentModal, setShowDocumentModal] = useState(false);
+  const [documentListData, setDocumentListData] = useState([]);
+  const navigate = useNavigate();
 
-    const REQUEST = `${process.env.REACT_APP_APPLICATION_SERVICE}${URLS_ENDPOINT.APP_SERVICES.APPLICATION_FORMSUBMIT}`;
-    const response = await postData(REQUEST, draftPayload);
+  const handleDocumentModal = () => setShowDocumentModal(!showDocumentModal);
 
-    if(response.data.status.code === "200") {
-      // Store response in both state and localStorage
-      setDraftResponse(response);
-      localStorage.setItem("draftResponse", JSON.stringify(response));
-      setHasPreviewed(true);
+  const [rowData, setRowData] = useState([]);
+  const columns = [
+    {
+      colName: "ID",
+      fieldName: "id",
+      clsName: "column-text-start",
+      isClickable: false,
+      titleCode: "ID",
+      minWidth: "5rem",
+    },
+    {
+      colName: "Claim Number",
+      fieldName: "claimNumber",
+      clsName: "column-text-start",
+      isClickable: false,
+      titleCode: "Claim Number",
+      minWidth: "10rem",
+    },
+    {
+      colName: "Claimant",
+      fieldName: "claimant",
+      clsName: "column-text-start",
+      isClickable: false,
+      titleCode: "Claimant",
+      minWidth: "10rem",
+    },
+    {
+      colName: "Status",
+      fieldName: "status",
+      clsName: "column-text-start",
+      isClickable: false,
+      titleCode: "Status",
+      minWidth: "10rem",
+    },
+    {
+      colName: "Amount",
+      fieldName: "amount",
+      clsName: "column-text-start",
+      isClickable: false,
+      titleCode: "Amount",
+      minWidth: "10rem",
+    },
+    {
+      colName: "Date Submitted",
+      fieldName: "dateSubmitted",
+      clsName: "column-text-start",
+      isClickable: false,
+      titleCode: "Date Submitted",
+      minWidth: "10rem",
+    },
+    {
+      colName: "Action",
+      fieldName: "action",
+      actions: ["view", "edit"],
+      clsName: "col-sm-2 column-text-start actions-column",
+    },
+  ];
 
-      // Update form data with response
-      setFormData(prev => ({
-        ...prev,
-        creditorBasicDetailsUuid: response.data.applicationDetails.creditorBasicDetails.uuid,
-        claimDetailsUuid: response.data.applicationDetails.claimDetails.uuid,
-        signatoryDetailsUuid: response.data.applicationDetails.signatoryDetails.uuid,
-        applicationNumber: response.data.applicationDetails.applicationNumber,
-      }));
+  // const handleAddButtonClick = () => {
+  //   setIsLoading(true);
+  //   setTimeout(() => {
+  //     setIsLoading(false);
+  //     navigate("/registration");
+  //   }, 1000);
+  // };
 
-      toast.success("Draft saved successfully");
-    } else {
-      toast.error(`Failed to save draft: ${response.data.status.message}`);
-    }
-  } catch (error) {
-    console.error("Error saving draft:", error);
-    toast.error("Failed to save draft");
-  } finally {
-    setIsSavingDraft(false);
-  }
-};
+  // const handleEditRow = (row) => {
+  //   if (row?.uuid) {
+  //     navigate(`/registration/edit/${row.uuid}`);
+  //   } else {
+  //     console.error("UUID not found in the row object.");
+  //     toast.warning("No UUID Available..", { position: "top-right" });
+  //   }
+  // };
 
-const handleNext = async () => {
-  if (!currentSubmitHandler) {
-    console.error("No submit handler available.");
-    return;
-  }
+  // const handleOnHistoryViewRow = async (row) => {
+  //   if (row?.uuid && row?.isHistory) {
+  //     const request = {
+  //       registrationBook: [
+  //         {
+  //           registrationNo: row?.registrationNo,
+  //           isHistory: true,
+  //         },
+  //       ],
+  //     };
+  //     try {
+  //       const URL =
+  //         process.env.REACT_APP_BASE_URL +
+  //         URLS_ENDPOINT.APP_SERVICES.REGISTRATION_SEARCH;
+  //       const response = await postData(URL, request);
+  //       if (response?.data?.responseStatus?.status === "200") {
+  //         const registrationResponses = response?.data?.iwtRegistrationResponses;
+  //         if (registrationResponses?.length > 0) {
+  //           const historyData = registrationResponses[0];
+  //           setModalData(historyData);
+  //           setIsViewModalOpen(true);
+  //         } else {
+  //           toast.error("No History Data Available..", { position: "top-right" });
+  //         }
+  //       } else {
+  //         toast.error(APP_MESSAGES.API_ERR, { position: "top-right" });
+  //       }
+  //     } catch (error) {
+  //       console.error("Error fetching history data:", error);
+  //       toast.error(APP_MESSAGES.API_ERR, { position: "top-right" });
+  //     }
+  //   } else {
+  //     toast.info("No History Data Available..", { position: "top-right" });
+  //   }
+  // };
 
-  const currentStepData = await currentSubmitHandler();
-  if (!currentStepData) {
-    console.error("Form validation failed.");
-    return;
-  }
+  // const handleOnViewRow = async (row) => {
+  //   if (!row?.registrationNo) {
+  //     console.warn("Registration No is missing");
+  //     return;
+  //   }
+  //   try {
+  //     const URL =
+  //       process.env.REACT_APP_BASE_URL +
+  //       URLS_ENDPOINT.APP_SERVICES.REGISTRATION_SEARCH;
+  //     const request = {
+  //       registrationBook: [
+  //         {
+  //           registrationNo: row?.registrationNo,
+  //         },
+  //       ],
+  //     };
+  //     const response = await postData(URL, request);
+  //     if (response?.data?.responseStatus?.status === "200") {
+  //       const registrationResponses = response?.data?.iwtRegistrationResponses || [];
+  //       if (registrationResponses?.length > 0) {
+  //         setModalData(registrationResponses);
+  //         setIsViewModalOpen(true);
+  //       } else {
+  //         toast.info(APP_MESSAGES.NO_DATA_FOUND, { position: "top-right" });
+  //         console.warn("No registration data found");
+  //       }
+  //     } else {
+  //       console.error("API returned an error status:", response?.data.responseStatus);
+  //       toast.error(APP_MESSAGES.API_ERR, { position: "top-right" });
+  //     }
+  //   } catch (error) {
+  //     console.error("Error fetching view data:", error);
+  //     toast.error(APP_MESSAGES.API_ERR, { position: "top-right" });
+  //   }
+  // };
 
-  if (!validateStepData(currentStep, currentStepData)) {
-    return;
-  }
 
-  const processedStepData = await processFileUploads(currentStepData, currentStep);
-
-  const updatedFormData = {
-    ...formData,
-    [`step${currentStep}`]: { ...formData[`step${currentStep}`], ...processedStepData },
+  const modalDataDetails = [
+    {
+      creditorName: "John Doe",
+      totalClaimAmount: "$10,000",
+      debtIncurredDetails: "Loan for business expansion",
+      mutualCreditDebtsDetails: "Mutual agreement with XYZ Corp",
+      identificationType: "Aadhar",
+      aadhar: "1234 5678 9012",
+      identificationNumber: "ID123456",
+      identificationDocument: "Aadhar Card",
+      signatoryName: "Jane Smith",
+      signatoryDocument: "Document.pdf",
+      signatoryPosition: "Manager",
+      signatoryAddress: "123 Main St, City, Country",
+    },
+  ];
+  const handleOnViewRow = () => {
+    console.log("Using static data for modal");
+    setModalData(modalDataDetails); // Set the static data
+    setIsViewModalOpen(true); // Open the modal
   };
+  
+  // const fetchDocumentList = async (data) => {
+  //   if (data?.registrationBooksData?.[0]?.uuid) {
+  //     try {
+  //       const URL =
+  //         process.env.REACT_APP_BASE_URL +
+  //         URLS_ENDPOINT.APP_SERVICES.DOWNLOAD_DOC +
+  //         data?.registrationBooksData?.[0]?.uuid;
+  //       const response = await postData(URL, {});
+  //       if (response?.data?.documentList?.length > 0) {
+  //         setDocumentListData(response?.data?.documentList);
+  //         handleDocumentModal();
+  //       } else {
+  //         toast.info(APP_MESSAGES.NO_DATA_MSG, { position: "top-right" });
+  //       }
+  //     } catch (error) {
+  //       toast.error(APP_MESSAGES.API_ERR, { position: "top-right" });
+  //     }
+  //   } else {
+  //     toast.info(APP_MESSAGES.NO_DATA_MSG, { position: "top-right" });
+  //   }
+  // };
 
-  if (!deepEqual(updatedFormData, formData)) {
-    setFormData(updatedFormData);
-    updateRegistrationData(`step${currentStep}`, updatedFormData[`step${currentStep}`], id);
-  }
+  // const getDocumentFile = async (docInfo) => {
+  //   if (docInfo?.registrationUuidFk) {
+  //     try {
+  //       const URL =
+  //         process.env.REACT_APP_BASE_URL +
+  //         URLS_ENDPOINT.APP_SERVICES.DOWNLOAD_DOC +
+  //         docInfo?.registrationUuidFk +
+  //         "&documentUuid=" +
+  //         docInfo?.uuid;
+  //       const response = await postData(URL, {});
+  //       const base64String = response?.data?.documentList[0]?.documentBase64 || "";
+  //       if (base64String) {
+  //         openFileInNewTab(base64String);
+  //       } else {
+  //         toast.info(APP_MESSAGES.NO_DATA_MSG, { position: "top-right" });
+  //       }
+  //     } catch (error) {
+  //       toast.error(APP_MESSAGES.API_ERR, { position: "top-right" });
+  //     }
+  //   } else {
+  //     toast.info(APP_MESSAGES.NO_DATA_MSG, { position: "top-right" });
+  //   }
+  // };
 
-  if (currentStep === filteredStepsConfig.length) {
+  useEffect(() => {
+    const generateMockData = () => {
+      const mockData = [];
+      for (let i = 1; i <= 100; i++) {
+        mockData.push({
+          id: i,
+          claimNumber: `CLM-${1000 + i}`,
+          claimant: `Claimant ${i}`,
+          status: i % 2 === 0 ? "Approved" : "Pending",
+          amount: `$${(Math.random() * 10000).toFixed(2)}`,
+          dateSubmitted: new Date(
+            Date.now() - Math.floor(Math.random() * 10000000000)
+          ).toLocaleDateString(),
+          action: ["view", "edit"],
+        });
+      }
+      return mockData;
+    };
+  
     try {
-      setIsSavingDraft(true);
-      
-      // Get the draft response from state or localStorage
-      const lastDraftResponse = draftResponse || JSON.parse(localStorage.getItem("draftResponse") || "null");
-      
-      if (!lastDraftResponse) {
-        throw new Error("No draft data found. Please save a draft first.");
+      const formattedData = generateMockData();
+  
+      // Retrieve user data from localStorage
+      const userData = JSON.parse(localStorage.getItem("userFormData"));
+  
+      // If userType is CRP, update claimNumber to be a clickable link
+      if (userData?.userType === "CRP") {
+        formattedData.forEach((item) => {
+          item.claimNumber = (
+            <a href={`/apply-claim/${item.id}`} style={{ color: "#269ccc", textDecoration: "underline" }}>
+              {item.claimNumber}
+            </a>
+          );
+        });
       }
-
-      // Create final payload by modifying the draft response
-      const finalSubmitPayload = {
-        ...lastDraftResponse.data, // Use all data from draft response
-        applicationDetails: {
-          ...lastDraftResponse.data.applicationDetails,
-          creditorBasicDetails: {
-            ...lastDraftResponse.data.applicationDetails.creditorBasicDetails,
-            isFinalSubmit: true, // Only change this flag
-            isActive: true
-          }
-        }
-      };
-
-      console.log("Final Submit Payload:", finalSubmitPayload);
-
-      const REQUEST = `${process.env.REACT_APP_APPLICATION_SERVICE}${URLS_ENDPOINT.APP_SERVICES.APPLICATION_FORMSUBMIT}`;
-      const response = await postData(REQUEST, finalSubmitPayload);
-
-      if (response.data.status.code === "200") {
-        // Clean up draft data
-        localStorage.removeItem("draftResponse");
-        setDraftResponse(null);
-        
-        setIsComplete(true);
-        toast.success("Form submitted successfully");
-        navigate("/dashboard");
-      } else {
-        toast.error(`Failed to submit form: ${response.data.status.message}`);
-      }
+  
+      setRowData(formattedData);
     } catch (error) {
-      console.error("Error submitting form:", error);
-      toast.error(error.message || "Failed to submit form");
-    } finally {
-      setIsSavingDraft(false);
+      toast.error("Failed to generate mock data", { position: "top-right" });
     }
-  } else {
-    setCurrentStep((prevStep) => prevStep + 1);
-  }
+  }, []);
+  
+
+  // useEffect(() => {
+  //   const fetchTableData = async () => {
+  //     try {
+  //       const URL =
+  //         process.env.REACT_APP_BASE_URL +
+  //         URLS_ENDPOINT.APP_SERVICES.DASHBOARD_SEARCH;
+  //       const response = await postData(URL, {});
+  //       if (response?.data?.length > 0) {
+  //         const formattedData = response?.data?.map((item, index) => ({
+  //           ...item,
+  //           id: item.uuid,
+  //           slNo: index + 1,
+  //         }));
+  //         setRowData(formattedData);
+  //       } else {
+  //         setRowData([]);
+  //       }
+  //     } catch (error) {
+  //       toast.error(APP_MESSAGES.API_ERR, { position: "top-right" });
+  //     }
+  //   };
+  //   fetchTableData();
+  // }, []);
+
+  return (
+    <div className="container-fluid mt-5" style={{ paddingLeft: 0, paddingRight: 0 }}>
+      {!isLoading ? (
+        <>
+          <h3 className="mb-2 text-center">Claim Submission Service</h3>
+          <br />
+          <div className="row mb-3 align-items-center">
+            <div className="col-12 col-md-4 d-flex justify-content-md-end justify-content-center gap-2 ms-auto">
+              {/* <button className="btn btn-success btn-sm" onClick={handleAddButtonClick}>
+                <i className="fas fa-plus"></i> Add
+              </button> */}
+              {/* <button className="btn btn-success btn-sm" onClick={() => setIsModalOpen(true)}>
+                <i className="fas fa-upload"></i> Bulk Upload
+              </button> */}
+            </div>
+          </div>
+          <ActionTable
+            columns={columns}
+            rowData={rowData}
+            hideExportBtn={false}
+            // handleEditRow={handleEditRow}
+            onViewRow={handleOnViewRow}
+            // onHistoryView={handleOnHistoryViewRow}
+          />
+
+<Modal
+  show={isViewModalOpen}
+  onHide={() => setIsViewModalOpen(false)}
+  dialogClassName="modal-1110w"
+  aria-labelledby="example-custom-modal-styling-title"
+>
+  <Modal.Header closeButton>
+    <Modal.Title id="example-custom-modal-styling-title">
+      Preview Details
+    </Modal.Title>
+  </Modal.Header>
+  <Modal.Body>
+    {modalDataDetails?.length > 0 ? (
+      <>
+        {modalDataDetails.map((data, index) => (
+          <Collapsible
+            key={index}
+            title={index === 0 ? "Current Information" : `History Details - ${index}`}
+          >
+            {/* <button
+              style={{
+                display: "flex",
+                alignItems: "center",
+                padding: "0.35rem",
+                backgroundColor: "rgb(7 76 101)",
+                color: "white",
+                border: "none",
+                borderRadius: "8px",
+                cursor: "pointer",
+                fontSize: "24px",
+                position: "absolute",
+                right: "1rem",
+                top: "1rem",
+              }}
+            >
+              <FaClipboardList />
+            </button> */}
+            <div className="card mb-4 tiles_Size">
+              <div className="card-body">
+                <h5 style={{ fontWeight: 600 }}>Creditor Details</h5>
+                <br />
+                <Container fluid>
+                  <Row className="g-3">
+                    {Object.entries({
+                      "Creditor Name": data.creditorName,
+                      "Total Claim Amount": data.totalClaimAmount,
+                      "Debt Incurred Details": data.debtIncurredDetails,
+                      "Mutual Credit/Debts Details": data.mutualCreditDebtsDetails,
+                    }).map(([key, value]) => (
+                      <Col key={key} xs={12} sm={6} md={3} className="mb-3">
+                        <PreviewCard title={key} value={value} />
+                      </Col>
+                    ))}
+                  </Row>
+                </Container>
+              </div>
+            </div>
+            <div className="card mb-4 tiles_Size">
+              <div className="card-body">
+                <h5 style={{ fontWeight: 600 }}>Identification Details</h5>
+                <br />
+                <Container fluid>
+                  <Row className="g-3">
+                    {Object.entries({
+                      "Identification Type": data.identificationType,
+                      "Aadhar": data.aadhar,
+                      "Identification Number": data.identificationNumber,
+                      "Identification Document": data.identificationDocument,
+                    }).map(([key, value]) => (
+                      <Col key={key} xs={12} sm={6} md={3} className="mb-3">
+                        <PreviewCard title={key} value={value} />
+                      </Col>
+                    ))}
+                  </Row>
+                </Container>
+              </div>
+            </div>
+            <div className="card mb-4 tiles_Size">
+              <div className="card-body">
+                <h5 style={{ fontWeight: 600 }}>Signatory Details</h5>
+                <br />
+                <Container fluid>
+                  <Row className="g-3">
+                    {Object.entries({
+                      "Signatory Name": data.signatoryName,
+                      "Signatory Document": data.signatoryDocument,
+                      "Signatory Position": data.signatoryPosition,
+                      "Signatory Address": data.signatoryAddress,
+                    }).map(([key, value]) => (
+                      <Col key={key} xs={12} sm={6} md={3} className="mb-3">
+                        <PreviewCard title={key} value={value} />
+                      </Col>
+                    ))}
+                  </Row>
+                </Container>
+              </div>
+            </div>
+          </Collapsible>
+        ))}
+      </>
+    ) : (
+      <p>No data available.</p>
+    )}
+  </Modal.Body>
+  <Modal.Footer>
+    <Button variant="secondary" onClick={() => setIsViewModalOpen(false)}>
+      Close
+    </Button>
+  </Modal.Footer>
+</Modal>
+          {/* <Modal
+            show={showDocumentModal}
+            centered
+            onHide={handleDocumentModal}
+            dialogClassName="doc-list-modal"
+            size="md"
+          >
+            <Modal.Header closeButton>
+              <Modal.Title>Document List</Modal.Title>
+            </Modal.Header>
+            <Modal.Body>
+              <Table striped bordered hover size="sm">
+                <thead>
+                  <tr>
+                    <th>SL #</th>
+                    <th>Document Name</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {documentListData?.map((item, index) => (
+                    <tr key={index}>
+                      <td>{index + 1}</td>
+                      <td>{item.documentName}</td>
+                      <td>
+                        <Button
+                          variant="success"
+                          size="sm"
+                          // onClick={() => getDocumentFile(item)}
+                        >
+                          <FaFile />
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </Table>
+            </Modal.Body>
+          </Modal> */}
+          <FileUploadModal modal={isModalOpen} setModal={setIsModalOpen} />
+        </>
+      ) : (
+        <div className="loader-container">
+          <div className="loader"></div>
+        </div>
+      )}
+    </div>
+  );
 };
+
+export default DashboardMain;
+
+
+
+
+// <Modal
+//             show={isViewModalOpen}
+//             onHide={() => setIsViewModalOpen(false)}
+//             dialogClassName="modal-1110w"
+//             aria-labelledby="example-custom-modal-styling-title"
+//           >
+//             {/* {showDocumentModal && <div className="custom-backdrop"></div>} */}
+//             <Modal.Header closeButton>
+//               <Modal.Title id="example-custom-modal-styling-title">
+//                 Preview Details
+//               </Modal.Title>
+//             </Modal.Header>
+//             <Modal.Body>
+//               {modalData?.length > 0 ? (
+//                 <>
+//                   {modalData.map((vesselInfo, index) => (
+//                     <Collapsible
+//                       key={index}
+//                       title={
+//                         index === 0 ? "Current Vessel Information" : `Vessel History Details - ${index}`
+//                       }
+//                     >
+//                       <button
+//                         // onClick={() => fetchDocumentList(vesselInfo)}
+//                         style={{
+//                           display: "flex",
+//                           alignItems: "center",
+//                           padding: "0.35rem",
+//                           backgroundColor: "rgb(7 76 101)",
+//                           color: "white",
+//                           border: "none",
+//                           borderRadius: "8px",
+//                           cursor: "pointer",
+//                           fontSize: "24px",
+//                           position: "relative",
+//                           left: "90%",
+//                           bottom: "3.5rem",
+//                         }}
+//                       >
+//                         <FaClipboardList />
+//                       </button>
+//                       <div className="card mb-4 tiles_Size">
+//                         <div className="card-body">
+//                           <h5 style={{ fontWeight: 600 }}>Vessel Details</h5>
+//                           <br />
+//                           <Container className="g-4">
+//                             <Row>
+//                               {Object.entries({
+//                                 "Registration No": vesselInfo?.registrationBooksData[0]?.registrationNo || "N/A",
+//                                 "Name of Vessel": vesselInfo?.registrationBooksData[0]?.nameOfVessel || "N/A",
+//                                 "No. and Year": vesselInfo?.registrationBooksData[0]?.noAndYear || "N/A",
+//                                 "Port of Registry": vesselInfo?.registrationBooksData[0]?.portOfRegistry || "N/A",
+//                                 "Year of Registry": vesselInfo?.registrationBooksData[0]?.yearOfRegistry || "N/A",
+//                                 "Name of Owner": vesselInfo?.registrationBooksData[0]?.nameOfOwner || "N/A",
+//                                 "Address of Owner": vesselInfo?.registrationBooksData[0]?.addressOfOwner || "N/A",
+//                                 "Status": vesselInfo?.registrationBooksData[0]?.status || "N/A",
+//                                 "Date of Registration": vesselInfo?.registrationBooksData[0]?.dateOfRegistration || "N/A",
+//                                 "Book No.": vesselInfo?.registrationBooksData[0]?.registrationBookNo || "N/A",
+//                               }).map(([key, value]) => (
+//                                 <Col key={key} xs={12} sm={6} md={3} className="mb-3">
+//                                   <PreviewCard title={key} value={value} />
+//                                 </Col>
+//                               ))}
+//                             </Row>
+//                           </Container>
+//                         </div>
+//                       </div>
+//                       <div className="card mb-4 tiles_Size">
+//                         <div className="card-body">
+//                           <h5 style={{ fontWeight: 600 }}>Vessel Description Details</h5>
+//                           <br />
+//                           <Container className="g-4">
+//                             <Row>
+//                               {Object.entries({
+//                                 "Vessel Type": vesselInfo?.vesselDescriptionsData[0]?.vesselType || "N/A",
+//                                 "Category": vesselInfo?.vesselDescriptionsData[0]?.category || "N/A",
+//                                 "Gross Tonnage": vesselInfo?.vesselDescriptionsData[0]?.grossTonnage || "N/A",
+//                                 "Registered Tonnage": vesselInfo?.vesselDescriptionsData[0]?.registeredTonnage || "N/A",
+//                               }).map(([key, value]) => (
+//                                 <Col key={key} xs={12} sm={6} md={3} className="mb-3">
+//                                   <PreviewCard title={key} value={value} />
+//                                 </Col>
+//                               ))}
+//                             </Row>
+//                           </Container>
+//                         </div>
+//                       </div>
+//                       <div className="card mb-4 tiles_Size">
+//                         <div className="card-body">
+//                           <h5 style={{ fontWeight: 600 }}>Vessel Particulars Details</h5>
+//                           <br />
+//                           <Container className="g-4">
+//                             <Row>
+//                               {Object.entries({
+//                                 "Length Overall": vesselInfo?.vesselParticularsData?.[0]?.lengthOverall || "N/A",
+//                                 "Breadth Extreme": vesselInfo?.vesselParticularsData?.[0]?.breadthExtreme || "N/A",
+//                                 "Depth of Underside of DeckamidShips": vesselInfo?.vesselParticularsData?.[0]?.depthOfUndersideOfDeckamidShips || "N/A",
+//                                 "Builder Name": vesselInfo?.vesselParticularsData?.[0]?.builderNameAddress || "N/A",
+//                                 "Builder Address": vesselInfo?.vesselParticularsData?.[0]?.builderAddress || "N/A",
+//                                 "Year of Build": vesselInfo?.vesselParticularsData?.[0]?.yearOfBuild || "N/A",
+//                                 "Type of Hull": vesselInfo?.vesselParticularsData?.[0]?.typeOfHull || "N/A",
+//                                 "No of Decks": vesselInfo?.vesselParticularsData?.[0]?.noOfDecks || "N/A",
+//                                 "No of Bulkheads": vesselInfo?.vesselParticularsData?.[0]?.noOfBulkheads || "N/A",
+//                                 "Description": vesselInfo?.vesselParticularsData?.[0]?.description || "N/A",
+//                                 "Build": vesselInfo?.vesselParticularsData?.[0]?.build || "N/A",
+//                                 "Stren": vesselInfo?.vesselParticularsData?.[0]?.stren || "N/A",
+//                               }).map(([key, value]) => (
+//                                 <Col key={key} xs={12} sm={6} md={3} className="mb-3">
+//                                   <PreviewCard title={key} value={value} />
+//                                 </Col>
+//                               ))}
+//                             </Row>
+//                           </Container>
+//                         </div>
+//                       </div>
+//                       <div className="card mb-4 tiles_Size">
+//                         <div className="card-body">
+//                           <h5 style={{ fontWeight: 600 }}>Engine Details</h5>
+//                           <br />
+//                           <Container className="g-4">
+//                             <Row>
+//                               {Object.entries({
+//                                 "Engine Type": vesselInfo?.enginesData?.[0]?.typeOfEngine || "N/A",
+//                                 "Engine Number": vesselInfo?.enginesData?.[0]?.engineNo || "N/A",
+//                                 "Description": vesselInfo?.enginesData?.[0]?.description || "N/A",
+//                                 "No. of Sets": vesselInfo?.enginesData?.[0]?.noOfSeats || "N/A",
+//                                 "Made by": vesselInfo?.enginesData?.[0]?.madeBy || "N/A",
+//                                 "Year of Make": vesselInfo?.enginesData?.[0]?.yearOfMake || "N/A",
+//                                 "No.of Cylinder per sets": vesselInfo?.enginesData?.[0]?.noOfCylindersPerSet || "N/A",
+//                                 "Diameter of Cylinder In Inches": vesselInfo?.enginesData?.[0]?.diameterOfCylinderInInches || "N/A",
+//                                 "strokes In Inches": vesselInfo?.enginesData?.[0]?.strokesInInches || "N/A",
+//                                 "SurfaceJet": vesselInfo?.enginesData?.[0]?.surfaceJet || "N/A",
+//                                 "N.H.P": vesselInfo?.enginesData?.[0]?.nhp?.toUpperCase() || "N/A",
+//                                 "B.H.P": vesselInfo?.enginesData?.[0]?.bhp || "N/A",
+//                                 "I.H.P": vesselInfo?.enginesData?.[0]?.ihp || "N/A",
+//                                 "R.P.M": vesselInfo?.enginesData?.[0]?.rpm || "N/A",
+//                               }).map(([key, value]) => (
+//                                 <Col key={key} xs={12} sm={6} md={3} className="mb-3">
+//                                   <PreviewCard title={key} value={value} />
+//                                 </Col>
+//                               ))}
+//                             </Row>
+//                           </Container>
+//                         </div>
+//                       </div>
+//                       <div className="card mb-4 tiles_Size">
+//                         <div className="card-body">
+//                           <h5 style={{ fontWeight: 600 }}>Boiler Details</h5>
+//                           <br />
+//                           <Container className="g-4">
+//                             <Row>
+//                               {Object.entries({
+//                                 "Boiler Type": vesselInfo?.boilersData?.[0]?.typeOfBoiler || "N/A",
+//                                 "Number of Boiler": vesselInfo?.boilersData?.[0]?.noOfBoiler || "N/A",
+//                                 "Total Heating Surface": vesselInfo?.boilersData?.[0]?.totalHeatingSurface || "N/A",
+//                                 "GrateArea": vesselInfo?.boilersData?.[0]?.grateArea || "N/A",
+//                                 "Working Pressure": vesselInfo?.boilersData?.[0]?.workingPressure || "N/A",
+//                                 "Made By": vesselInfo?.boilersData?.[0]?.madeBy || "N/A",
+//                                 "Year of Make": vesselInfo?.boilersData?.[0]?.yearOfMake || "N/A",
+//                                 "Made of Material": vesselInfo?.boilersData?.[0]?.madeOfMaterial || "N/A",
+//                               }).map(([key, value]) => (
+//                                 <Col key={key} xs={12} sm={6} md={3} className="mb-3">
+//                                   <PreviewCard title={key} value={value} />
+//                                 </Col>
+//                               ))}
+//                             </Row>
+//                           </Container>
+//                         </div>
+//                       </div>
+//                       <div className="card mb-4 tiles_Size">
+//                         <div className="card-body">
+//                           <h5 style={{ fontWeight: 600 }}>Propulsion Details</h5>
+//                           <br />
+//                           <Container className="g-4">
+//                             <Row>
+//                               {Object.entries({
+//                                 "Propulsion Type": vesselInfo?.propulsionsData?.[0]?.propulsionType || "N/A",
+//                                 "RPM": vesselInfo?.propulsionsData?.[0]?.rpm || "N/A",
+//                                 "Speed of Vessel": vesselInfo?.propulsionsData?.[0]?.speedOfVessel || "N/A",
+//                                 "Propulsion Geared Or Direct Driven": vesselInfo?.propulsionsData?.[0]?.propulsionGearedOrDirectDriven || "N/A",
+//                                 "Propeler Type": vesselInfo?.propulsionsData?.[0]?.propelerType || "N/A",
+//                                 "Registering Authority": vesselInfo?.propulsionsData?.[0]?.registeringAuthority || "N/A",
+//                               }).map(([key, value]) => (
+//                                 <Col key={key} xs={12} sm={6} md={3} className="mb-3">
+//                                   <PreviewCard title={key} value={value} />
+//                                 </Col>
+//                               ))}
+//                             </Row>
+//                           </Container>
+//                         </div>
+//                       </div>
+//                       {/* <HistoryView historyData={vesselInfo} /> */}
+//                     </Collapsible>
+//                   ))}
+//                 </>
+//               ) : (
+//                 <p>No data available.</p>
+//               )}
+//             </Modal.Body>
+//             <Modal.Footer>
+//               <Button variant="secondary" onClick={() => setIsViewModalOpen(false)}>
+//                 Close
+//               </Button>
+//             </Modal.Footer>
+//           </Modal>
