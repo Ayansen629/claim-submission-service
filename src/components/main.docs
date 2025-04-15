@@ -1,260 +1,129 @@
-import React, { createContext, useContext, useState, useEffect } from "react";
+import React, { createContext, useContext, useState } from "react";
 import { toast } from "react-toastify";
-import { APP_MESSAGES } from "../../utils/constants.ts";
-import axios from "axios";
-
-const formatFileInfo = (fileData) => {
-  if (!fileData) return "No file uploaded";
-  if (typeof fileData === "string") return fileData;
-  return fileData.name || fileData.fileName || "File uploaded";
-};
-
+import { APP_MESSAGES, formatDate, formatDateTime } from "../../utils/constants.ts";
+import { URLS_ENDPOINT } from "../../utils/urlsConstants.ts";
+import { postData } from "../../services/http.service.ts";
+import { format, parseISO } from "date-fns";
+import moment from "moment";
+ 
 // Create the Registration Context
 const RegistrationContext = createContext();
-
+ 
 // Custom hook to use the Registration Context
 export const useRegistration = () => {
   return useContext(RegistrationContext);
 };
-
-// ApplicationContextProvider
+ 
+// Fixed ApplicationContextProvider
 export const ApplicationContextProvider = ({ children }) => {
   const [registrationData, setRegistrationData] = useState({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
-  const [isDataLoaded, setIsDataLoaded] = useState(false);
+ 
+  // const handleRegistrationView = async (row) => {
+  //   if (row?.uuid) {
+  //     const request = {
+  //       registrationBook: [{ uuid: row?.uuid }],
+  //     };
+ 
+  //     try {
+  //       setLoading(true);
+  //       const URL =
+  //         process.env.REACT_APP_BASE_URL +
+  //         URLS_ENDPOINT.APP_SERVICES.REGISTRATION_SEARCH;
+  //       const response = await postData(URL, request);
+ 
+  //       if (response?.data && response?.data?.length > 0) {
+  //         setIsViewModalOpen(true); // Open the modal
+  //         const registrationData = response?.data[0]; // Assuming we get a single object
+  //         console.log(registrationData, "testingdata");
+  //         const formattedData = formatRawData(registrationData);
+  //         setRegistrationData(formattedData);
+  //       } else {
+  //         toast.error(APP_MESSAGES.NO_DATA_FOUND, { position: "top-right" });
+  //       }
+  //     } catch (err) {
+  //       toast.error(APP_MESSAGES.API_ERR, { position: "top-right" });
+  //       setError(err.message || "Error fetching registration data");
+  //     } finally {
+  //       setLoading(false);
+  //     }
+  //   }
+  // };
 
-  const getLocalStorageKey = (id) => `registrationData-${id}`;
 
-  const fetchApplicationData = async (uuid) => {
-    try {
-      setLoading(true);
-      const userFormData = JSON.parse(localStorage.getItem("userFormData"));
-      const userInfo = userFormData?.fullLoginDetails?.userInfo;
-      
-      if (!userInfo) {
-        throw new Error("User information not found");
-      }
-
-      const response = await axios.post('/cms-application-service/_application/_search', {
-        userInfo: userInfo,
-        uuids: [uuid]
-      });
-
-      if (response.data?.status?.code !== "200") {
-        throw new Error(response.data?.status?.message || "Failed to fetch application data");
-      }
-
-      const appDetails = response.data?.applicationDetails?.[0];
-      if (!appDetails) {
-        throw new Error("No application details found");
-      }
-
-      // Transform API response to our form structure
-      const transformedData = {
-        step1: {
-          debtorName: appDetails.creditorBasicDetails?.debtorName || "",
-          creditorName: appDetails.creditorBasicDetails?.creditorName || "",
-          totalClaimAmount: appDetails.creditorBasicDetails?.totalClaimAmount?.toString() || "",
-          debtDetails: appDetails.creditorBasicDetails?.debtDetails || "",
-          mutualCreditDetails: appDetails.creditorBasicDetails?.mutualCreditDetails || "",
-          identificationType: appDetails.creditorBasicDetails?.document?.docType || "",
-          identificationNumber: appDetails.creditorBasicDetails?.identificationNumber || "",
-          identificationDocument: formatFileInfo(appDetails.creditorBasicDetails?.document?.docName || "")
-        },
-        step2: {
-          securityInterestAmount: appDetails.claimDetails?.securityInterestAmount?.toString() || "",
-          guaranteeAmount: appDetails.claimDetails?.guaranteeAmount?.toString() || "",
-          guarantorName: appDetails.claimDetails?.guarantorName || "",
-          guarantorAddress: appDetails.claimDetails?.guarantorAddress || "",
-          creditorAddress: appDetails.claimDetails?.creditorAddress || "",
-          creditorEmail: appDetails.claimDetails?.creditorEmail || "",
-          beneficiaryClaimAmount: "", // Not in API response
-          beneficiaryName: appDetails.claimDetails?.beneficiaryName || "",
-          beneficiaryAddress: appDetails.claimDetails?.beneficiaryAddress || "",
-          corporateDebtorClaimAmount: "", // Not in API response
-          corporateDebtorSecurityAmount: appDetails.claimDetails?.corporateDebtorSecurityAmount?.toString() || "",
-          corporateDebtorGuaranteeAmount: appDetails.claimDetails?.corporateDebtorGuaranteeAmount?.toString() || "",
-          principalBorrowerName: appDetails.claimDetails?.principalBorrowerName || "",
-          principalBorrowerAddress: appDetails.claimDetails?.principalBorrowerAddress || "",
-          accountNumber: appDetails.claimDetails?.bankAccountNumber || "",
-          ifscCode: appDetails.claimDetails?.bankIfscCode || "",
-          branchName: appDetails.claimDetails?.bankBranchName || "",
-          addressProofNumber: appDetails.claimDetails?.addressProofNumber || "",
-          addressProofType: "", // Not in API response
-          addressProofDocument: formatFileInfo("") // Not in API response
-        },
-        step3: {
-          signatoryName: appDetails.signatoryDetails?.name || "",
-          signatoryPosition: appDetails.signatoryDetails?.position || "",
-          signatoryAddress: appDetails.signatoryDetails?.address || "",
-          signatoryDocument: formatFileInfo(appDetails.signatoryDetails?.document?.docName || "")
-        }
-      };
-
-      return transformedData;
-    } catch (err) {
-      console.error("Error fetching application data:", err);
-      throw err;
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const loadDataFromLocalStorage = async (id) => {
-    try {
-      setLoading(true);
-      const userFormData = JSON.parse(localStorage.getItem("userFormData"));
-      const isCRPUser = userFormData?.userType === "CRP";
-
-      // For CRP users viewing a form (with ID), fetch data from API
-      if (isCRPUser && id && !id.startsWith('draft-')) {
-        const apiData = await fetchApplicationData(id);
-        setRegistrationData(apiData);
-        setIsDataLoaded(true);
-        return;
-      }
-
-      // For drafts, use the draft data from localStorage
-      if (id && id.startsWith('draft-')) {
-        const drafts = JSON.parse(localStorage.getItem('formDrafts') || '[]');
-        const draftData = drafts.find(draft => draft.id === id);
-        if (draftData) {
-          setRegistrationData(draftData);
-          setIsDataLoaded(true);
-          return;
-        }
-      }
-      
-      // For regular saved data
-      const savedData = localStorage.getItem(getLocalStorageKey(id));
-      if (savedData) {
-        setRegistrationData(JSON.parse(savedData));
-      }
-      setIsDataLoaded(true);
-    } catch (err) {
-      toast.error(APP_MESSAGES.API_ERR, { position: "top-right" });
-      setError(err.message || "Error loading data");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const saveDataToLocalStorage = (id, data) => {
-    localStorage.setItem(getLocalStorageKey(id), JSON.stringify(data));
-  };
-
-  const handleStepDataFetch = async (stepId, id) => {
-    try {
-      setLoading(true);
-      const userFormData = JSON.parse(localStorage.getItem("userFormData"));
-      const isCRPUser = userFormData?.userType === "CRP";
-
-      // For CRP users, fetch data from API
-      if (isCRPUser && id && !id.startsWith('draft-')) {
-        const apiData = await fetchApplicationData(id);
-        setRegistrationData(prev => ({
-          ...prev,
-          [stepId]: apiData[stepId]
-        }));
-        return;
-      }
-
-      // For drafts, use the draft data directly
-      if (id && id.startsWith('draft-')) {
-        const drafts = JSON.parse(localStorage.getItem('formDrafts') || '[]');
-        const draftData = drafts.find(draft => draft.id === id);
-        if (draftData && draftData[stepId]) {
-          setRegistrationData(prev => ({
-            ...prev,
-            [stepId]: draftData[stepId]
-          }));
-          return;
-        }
-      }
-      
-      // For regular data
-      const savedData = localStorage.getItem(getLocalStorageKey(id));
-      if (savedData) {
-        const parsedData = JSON.parse(savedData);
-        if (parsedData[stepId]) {
-          setRegistrationData(prev => ({
-            ...prev,
-            [stepId]: parsedData[stepId]
-          }));
-        }
-      }
-    } catch (err) {
-      toast.error(APP_MESSAGES.API_ERR, { position: "top-right" });
-      setError(err.message || "Error fetching step data");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const updateRegistrationData = (stepId, updatedData, id) => {
-    setRegistrationData(prev => ({
-      ...prev,
-      [stepId]: updatedData
-    }));
-    
-    if (id) {
-      const userFormData = JSON.parse(localStorage.getItem("userFormData"));
-      const isCRPUser = userFormData?.userType === "CRP";
-
-      // Don't save updates for CRP users viewing forms
-      if (isCRPUser && id && !id.startsWith('draft-')) {
-        return;
-      }
-
-      if (id.startsWith('draft-')) {
-        // Update draft data
-        const drafts = JSON.parse(localStorage.getItem('formDrafts') || '[]');
-        const draftIndex = drafts.findIndex(draft => draft.id === id);
-        
-        if (draftIndex >= 0) {
-          const updatedDraft = {
-            ...drafts[draftIndex],
-            [stepId]: updatedData,
-            lastSaved: new Date().toISOString()
-          };
-          
-          drafts[draftIndex] = updatedDraft;
-          localStorage.setItem('formDrafts', JSON.stringify(drafts));
-        }
-      } else {
-        // Update regular data
-        saveDataToLocalStorage(id, {
-          ...registrationData,
-          [stepId]: updatedData
-        });
-      }
-    }
-  };
-
-  const handleFileUpload = (stepId, fieldName, file, id) => {
-    const userFormData = JSON.parse(localStorage.getItem("userFormData"));
-    const isCRPUser = userFormData?.userType === "CRP";
-
-    // Don't allow file uploads for CRP users viewing forms
-    if (isCRPUser && id && !id.startsWith('draft-')) {
-      toast.info("CRP users cannot modify submitted forms");
+  const handleRegistrationView = async (row) => {
+    if (!row?.uuid) {
+      console.warn("Row UUID is missing");
       return;
     }
-
-    const filePath = URL.createObjectURL(file);
-    const updatedData = {
-      ...registrationData[stepId],
-      [fieldName]: {
-        path: filePath,
-        file
-      }
+  
+    console.log("Row UUID:", row.uuid);
+  
+    const request = {
+      registrationBook: [{ uuid: row.uuid }],
     };
-    
-    updateRegistrationData(stepId, updatedData, id);
+  
+    console.log("API Request Payload:", request);
+  
+    try {
+      setLoading(true);
+      const URL =
+        process.env.REACT_APP_BASE_URL +
+        URLS_ENDPOINT.APP_SERVICES.REGISTRATION_SEARCH;
+  
+      console.log("API URL:", URL);
+  
+      const response = await postData(URL, request);
+  
+      console.log("Full API Response:", response);
+  
+      // Validate API response status
+      if (response?.data?.responseStatus?.status === "200") {
+        const registrationResponses = response?.data?.iwtRegistrationResponses;
+  
+        console.log("Extracted Registration Responses:", registrationResponses);
+  
+        if (Array.isArray(registrationResponses) && registrationResponses.length > 0) {
+          const registrationData = registrationResponses[0]; // Extract the first object
+          console.log("Raw Registration Data:", registrationData);
+  
+          const formattedData = formatRawData(registrationData);
+          console.log("Formatted Registration Data:", formattedData);
+  
+          setRegistrationData(formattedData);
+          setIsViewModalOpen(true); // Open the modal
+        } else {
+          console.warn("No registration data found");
+          setRegistrationData(getDefaultRegistrationData()); // Reset state
+          toast.error(APP_MESSAGES.NO_DATA_FOUND, { position: "top-right" });
+        }
+      } else {
+        console.error("API returned an error status:", response?.data?.responseStatus);
+        setRegistrationData(getDefaultRegistrationData()); // Reset state
+        toast.error(APP_MESSAGES.API_ERR, { position: "top-right" });
+      }
+    } catch (err) {
+      console.error("Error fetching registration data:", err);
+      setRegistrationData(getDefaultRegistrationData()); // Reset state
+      toast.error(APP_MESSAGES.API_ERR, { position: "top-right" });
+      setError(err.message || "Error fetching registration data");
+    } finally {
+      setLoading(false);
+    }
   };
+  
 
+  
+ 
+  const updateRegistrationData = (updatedData) => {
+    setRegistrationData((prev) => ({
+      ...prev,
+      ...updatedData,
+    }));
+  };
+ 
   return (
     <RegistrationContext.Provider
       value={{
@@ -263,15 +132,192 @@ export const ApplicationContextProvider = ({ children }) => {
         error,
         isViewModalOpen,
         setIsViewModalOpen,
-        handleStepDataFetch,
+        handleRegistrationView,
         updateRegistrationData,
-        handleFileUpload,
-        setRegistrationData,
-        loadDataFromLocalStorage,
-        isDataLoaded,
+        setRegistrationData
       }}
     >
       {children}
     </RegistrationContext.Provider>
   );
+};
+
+ 
+const formatRawData = (rawData) => {
+  return {
+    step1: {
+      registrationNo: rawData.registrationBooksData?.[0]?.registrationNo,
+      noAndYear: rawData.registrationBooksData?.[0]?.noAndYear,
+      uuidofRegistrationBook: rawData.registrationBooksData?.[0]?.uuid || "",
+      nameOfVessel: rawData.registrationBooksData?.[0]?.nameOfVessel,
+      yearOfRegistry: rawData.registrationBooksData?.[0]?.yearOfRegistry,
+      portOfRegistry: rawData.registrationBooksData?.[0]?.portOfRegistry,
+      registrationBookNo: rawData.registrationBooksData?.[0]?.registrationBookNo,
+      nameOfOwner: rawData.registrationBooksData?.[0]?.nameOfOwner,
+      addressOfOwner: rawData.registrationBooksData?.[0]?.addressOfOwner,
+      vesselType: rawData.vesselDescriptionsData?.[0]?.vesselType,
+      category: rawData.vesselDescriptionsData?.[0]?.category,
+      uuidOfVesselDescription: rawData.vesselDescriptionsData?.[0]?.uuid || "",
+      grossTonnage: rawData.vesselDescriptionsData?.[0]?.grossTonnage,
+      registeredTonnage: rawData.vesselDescriptionsData?.[0]?.registeredTonnage,
+      // typeOfCarving: rawData.carvingMakingsData?.[0]?.typeOfCarving || "Not Available",
+      // uuidofCarving: rawData.carvingMakingsData?.[0]?.uuid || "",
+      // nameResidenceOccupation: rawData.subsequentToRegistrationsData?.[0]?.nameResidenceOccupation || "Not Available",
+      // numberOfTransactionTransferee: rawData.subsequentToRegistrationsData?.[0]?.numberOfTransactionTransferee || "Not Available",
+      // remarks: rawData.subsequentToRegistrationsData?.[0]?.remarks || "Not Available",
+      // dateOfTransaction: formatDate(rawData.subsequentToRegistrationsData?.[0]?.dateOfTransaction) ,
+      // transactionNo: rawData.subsequentToRegistrationsData?.[0]?.transactionNo || "Not Available",
+      // natureOfTransaction:rawData.subsequentToRegistrationsData?.[0]?.transactionNo,
+      // uuid:rawData.subsequentToRegistrationsData?.[0]?.uuid
+    },
+
+    step2: {
+      uuidOfVesselParticulars: rawData.vesselParticularsData?.[0]?.uuid || "",
+      lengthOverall: rawData.vesselParticularsData?.[0]?.lengthOverall,
+      breadthExtreme: rawData.vesselParticularsData?.[0]?.breadthExtreme,
+      depthOfUndersideOfDeckamidShips: rawData.vesselParticularsData?.[0]?.depthOfUndersideOfDeckamidShips,
+      builderNameAddress: rawData.vesselParticularsData?.[0]?.builderNameAddress,
+      builderAddress: rawData.vesselParticularsData?.[0]?.builderAddress,
+      yearOfBuild: rawData.vesselParticularsData?.[0]?.yearOfBuild,
+      typeOfHull: rawData.vesselParticularsData?.[0]?.typeOfHull,
+      noOfDecks: rawData.vesselParticularsData?.[0]?.noOfDecks,
+      noOfBulkheads: rawData.vesselParticularsData?.[0]?.noOfBulkheads,
+      stren: rawData.vesselParticularsData?.[0]?.stren,
+      build: rawData.vesselParticularsData?.[0]?.build,
+      particulardescription: rawData.vesselParticularsData?.[0]?.description,
+      engineNo: rawData.enginesData?.[0]?.engineNo,
+      typeOfEngine: rawData.enginesData?.[0]?.typeOfEngine,
+      uuidOfEngine: rawData.enginesData?.[0]?.uuid || "" ,
+      noOfSeats: rawData.enginesData?.[0]?.noOfSeats || null,
+      engineMadeBy: rawData.enginesData?.[0]?.madeBy,
+      engineYearOfMake: rawData.enginesData?.[0]?.yearOfMake,
+      surfaceJet: rawData.enginesData?.[0]?.surfaceJet,
+      noOfCylindersPerSet: rawData.enginesData?.[0]?.noOfCylindersPerSet || null,
+      diameterOfCylinderInInches: rawData.enginesData?.[0]?.diameterOfCylinderInInches,
+      strokesInInches: rawData.enginesData?.[0]?.strokesInInches,
+      enginedescription: rawData.enginesData?.[0]?.description,
+      nhp: rawData.enginesData?.[0]?.nhp || null,
+      bhp: rawData.enginesData?.[0]?.bhp || null,
+      ihp: rawData.enginesData?.[0]?.ihp || null,
+      engineRpm: rawData.enginesData?.[0]?.rpm || null,
+      typeOfBoiler: rawData.boilersData?.[0]?.typeOfBoiler || null,
+      noOfBoiler: rawData.boilersData?.[0]?.noOfBoiler,
+      uuidofBoiler: rawData.boilersData?.[0]?.uuid || "" ,
+      totalHeatingSurface: rawData.boilersData?.[0]?.totalHeatingSurface,
+
+      grateArea: rawData.boilersData?.[0]?.grateArea,
+      boilerMadeBy: rawData.boilersData?.[0]?.madeBy,
+      boilerYearOfMake: rawData.boilersData?.[0]?.yearOfMake,
+      workingPressure: rawData.boilersData?.[0]?.workingPressure,
+      madeOfMaterial: rawData.boilersData?.[0]?.madeOfMaterial,
+      propelerType: rawData.propulsionsData?.[0]?.propelerType,
+      propulsionsRpm: rawData.propulsionsData?.[0]?.rpm,
+      speedOfVessel: rawData.propulsionsData?.[0]?.speedOfVessel,
+      uuidofPropulsionsData: rawData.propulsionsData?.[0]?.uuid || "",
+      propulsionGearedOrDirectDriven: rawData.propulsionsData?.[0]?.propulsionGearedOrDirectDriven,
+      propulsionType: rawData.propulsionsData?.[0]?.propulsionType,
+      registeringAuthority: rawData.propulsionsData?.[0]?.registeringAuthority,
+      dateOfRegistration: formatDate(rawData.propulsionsData?.[0]?.dateOfRegistration) ,
+    },
+
+    step3: {
+      nameOfPersonTitleDerived: rawData.transactionSubsequentToRegistrationsData?.[0]?.nameOfPersonTitleDerived || "",
+      noOfSharesAffected: rawData.transactionSubsequentToRegistrationsData?.[0]?.noOfSharesAffected || "",
+      uuid:rawData.transactionSubsequentToRegistrationsData?.[0]?.uuid || "",
+      dateHourOfRegistry: formatDateTime(rawData.transactionSubsequentToRegistrationsData?.[0]?.dateHourOfRegistry),
+      nameResidenceOccupation: rawData.transactionSubsequentToRegistrationsData?.[0]?.nameResidenceOccupation || "",
+      numberOfTransactionTransferee: rawData.transactionSubsequentToRegistrationsData?.[0]?.numberOfTransactionTransferee || "",
+      remarks: rawData.transactionSubsequentToRegistrationsData?.[0]?.remarks,
+      dateOfTransaction: formatDate(rawData.transactionSubsequentToRegistrationsData?.[0]?.dateOfTransaction) ,
+      transactionNo: rawData.transactionSubsequentToRegistrationsData?.[0]?.transactionNo || "",
+      natureOfTransaction:rawData.transactionSubsequentToRegistrationsData?.[0]?.natureOfTransaction || "",
+      uuidOfTransaction:rawData.transactionSubsequentToRegistrationsData?.[0]?.uuid || "",
+      isTransDataAvail : rawData?.transactionSubsequentToRegistrationsData?.length > 0 ? true : false
+    },
+  }
+}
+
+
+// A function to return default values for registration data
+const getDefaultRegistrationData = () => {
+  return {
+    step1: {
+      registrationNo: "Not Available",
+      noAndYear:  "Not Available",
+      nameOfVessel: "Not Available",
+      yearOfRegistry: "Not Available",
+      portOfRegistry: "Not Available",
+      registrationBookNo: "Not Available",
+      nameOfOwner: "Not Available",
+      addressOfOwner: "Not Available",
+      vesselType: "Not Available",
+      category: "Not Available",
+      grossTonnage: "Not Available",
+      registeredTonnage: "Not Available",
+      // typeOfCarving: "Not Available",
+      // nameResidenceOccupation: "Not Available",
+      // numberOfTransactionTransferee: "Not Available",
+      // remarks: "Not Available",
+      // dateOfTransaction: "Not Available",
+      // transactionNo: "Not Available",
+    },
+
+    step2: {
+      lengthOverall: "Not Available",
+      breadthExtreme: "Not Available",
+      depthOfUndersideOfDeckamidShips: "Not Available",
+      builderNameAddress: "Not Available",
+      builderAddress: "Not Available",
+      yearOfBuild: "Not Available",
+      typeOfHull: "Not Available",
+      noOfDecks: "Not Available",
+      noOfBulkheads: "Not Available",
+      stren: "Not Available",
+      build: "Not Available",
+      particulardescription: "Not Available",
+      enginedescription: "Not Available",
+      engineNo: "Not Available",
+      typeOfEngine: "Not Available",
+      noOfSeats: "Not Available",
+      engineMadeBy:  "Not Available",
+      engineYearOfMake:  "Not Available",
+      boilerMadeBy:  "Not Available",
+      boilerYearOfMake:  "Not Available",
+      surfaceJet: "Not Available",
+      noOfCylindersPerSet: "Not Available",
+      diameterOfCylinderInInches: "Not Available",
+      strokesInInches: "Not Available",
+      nhp: "Not Available",
+      bhp: "Not Available",
+      ihp: "Not Available",
+      engineRpm: "Not Available",
+      typeOfBoiler: "Not Available",
+      noOfBoiler: "Not Available",
+      totalHeatingSurface: "Not Available",
+      grateArea: "Not Available",
+      workingPressure: "Not Available",
+      madeOfMaterial: "Not Available",
+      propelerType: "Not Available",
+      propulsionsRpm: "Not Available",
+      speedOfVessel: "Not Available",
+      propulsionGearedOrDirectDriven: "Not Available",
+      propulsionType: "Not Available",
+      registeringAuthority: "Not Available",
+    },
+
+    step3: {
+   
+      nameOfPersonTitleDerived:  "Not Available",
+      noOfSharesAffected:  "Not Available",
+      // uuid:rawData.transactionSubsequentToRegistrationsData?.[0]?.uuid ,
+      dateHourOfRegistry: "",
+      nameResidenceOccupation:  "Not Available",
+      numberOfTransactionTransferee:  "Not Available",
+      remarks: "Not Available",
+      dateOfTransaction: "" ,
+      transactionNo: "Not Available",
+      natureOfTransaction:"Not Available",
+      // uuidOfTransaction:rawData.transactionSubsequentToRegistrationsData?.[0]?.uuid,
+    },
+  };
 };
