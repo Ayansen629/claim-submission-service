@@ -1,282 +1,414 @@
-import React, { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import "bootstrap/dist/css/bootstrap.min.css";
-import { Container, Row, Col, Modal, Button, Table } from "react-bootstrap";
-import "./DashboardMain.css";
-import FileUploadModal from "./FileUploadModal.jsx";
-import ActionTable from "./ActionTable.js"; 
+import React, { createContext, useContext, useState, useEffect } from "react";
 import { toast } from "react-toastify";
-import { APP_MESSAGES } from "../../../utils/constants.ts";
-import { postData } from "../../../services/http.service.ts";
-import Collapsible from "../../../common/Collapsible.js";
-import PreviewCard from "./PreviewCard.js";
+import { APP_MESSAGES } from "../../utils/constants.ts";
 
-const DashboardMain = () => {
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [isLoading, setIsLoading] = useState(true); // Start with loading true
+
+const formatFileInfo = (fileData) => {
+  if (!fileData) return "No file uploaded";
+  if (typeof fileData === "string") return fileData;
+  return fileData.name || fileData.fileName || "File uploaded";
+};
+
+// Static JSON data with file paths
+const staticFormData = {
+  step1: {
+    debtorName : "Deloitte",
+    CreditorName: "AYAN",
+    totalClaimAmount: "87888",
+    debtDetails: "FOR TEST",
+    mutualCreditDetails: "332323",
+    identificationType: "Aadhar",
+    identificationNumber: "213456785436",
+    identificationDocument: formatFileInfo("/uploads/identificationDocument.pdf"), // Static path for demo purposes
+  },
+  step2: {
+    securityInterestAmount: "323223",
+    guaranteeAmount: "232332",
+    guarantorName: "AYAN",
+    guarantorAddress: "KOLKATA",
+    creditorAddress: "KOLKATA",
+    creditorEmail: "ayan@gmail.com",
+    beneficiaryClaimAmount: "22222",
+    beneficiaryName: "ayan",
+    beneficiaryAddress: "kolkata",
+    corporateDebtorClaimAmount: "2112",
+    corporateDebtorSecurityAmount: "1221",
+    corporateDebtorGuaranteeAmount: "212121",
+    principalBorrowerName: "ayan",
+    principalBorrowerAddress: "kolkata",
+    accountNumber: "212121212121",
+    ifscCode: "BKID8377D",
+    branchName: "KOLKATA",
+    addressProofNumber: "216673737373",
+    addressProofType: "Aadhar",
+    addressProofDocument: formatFileInfo("/uploads/addressProofDocument.pdf"), // Static path for demo purposes
+  },
+  step3: {
+    signatoryName: "AYAN",
+    signatoryPosition: "FRIEND",
+    signatoryAddress: "KOLKATA",
+    signatoryDocument:formatFileInfo("/uploads/signatoryDocument.pdf"), // Static path for demo purposes
+  },
+};
+
+// Create the Registration Context
+const RegistrationContext = createContext();
+
+// Custom hook to use the Registration Context
+export const useRegistration = () => {
+  return useContext(RegistrationContext);
+};
+
+// ApplicationContextProvider
+export const ApplicationContextProvider = ({ children }) => {
+  const [registrationData, setRegistrationData] = useState({});
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
-  const [modalData, setModalData] = useState({});
-  const [rowData, setRowData] = useState([]);
-  const navigate = useNavigate();
+  const [isDataLoaded, setIsDataLoaded] = useState(false);
 
-  const columns = [
-    {
-      colName: "ID",
-      fieldName: "uuid",
-      clsName: "column-text-start",
-      isClickable: false,
-      titleCode: "ID",
-      minWidth: "5rem",
-    },
-    {
-      colName: "Application Number",
-      fieldName: "applicationNumber",
-      clsName: "column-text-start",
-      isClickable: false,
-      titleCode: "Application Number",
-      minWidth: "10rem",
-    },
-    {
-      colName: "Debtor Name",
-      fieldName: "debtorName",
-      clsName: "column-text-start",
-      isClickable: false,
-      titleCode: "Debtor Name",
-      minWidth: "10rem",
-    },
-    {
-      colName: "Creditor Name",
-      fieldName: "creditorName",
-      clsName: "column-text-start",
-      isClickable: false,
-      titleCode: "Creditor Name",
-      minWidth: "10rem",
-    },
-    {
-      colName: "Total Claim Amount",
-      fieldName: "totalClaimAmount",
-      clsName: "column-text-start",
-      isClickable: false,
-      titleCode: "Total Claim Amount",
-      minWidth: "10rem",
-    },
-    {
-      colName: "Submitted Date",
-      fieldName: "submittedDate",
-      clsName: "column-text-start",
-      isClickable: false,
-      titleCode: "Submitted Date",
-      minWidth: "10rem",
-    },
-    {
-      colName: "Status",
-      fieldName: "applicationStatus",
-      clsName: "column-text-start",
-      isClickable: false,
-      titleCode: "Status",
-      minWidth: "10rem",
-    },
-    {
-      colName: "Action",
-      fieldName: "action",
-      actions: ["view"],
-      clsName: "col-sm-2 column-text-start actions-column",
-    },
-  ];
+  const getLocalStorageKey = (id) => `registrationData-${id}`;
 
-  const modalDataDetails = [
-    {
-      creditorName: "John Doe",
-      totalClaimAmount: "$10,000",
-      debtIncurredDetails: "Loan for business expansion",
-      mutualCreditDebtsDetails: "Mutual agreement with XYZ Corp",
-      identificationType: "Aadhar",
-      aadhar: "1234 5678 9012",
-      identificationNumber: "ID123456",
-      identificationDocument: "Aadhar Card",
-      signatoryName: "Jane Smith",
-      signatoryDocument: "Document.pdf",
-      signatoryPosition: "Manager",
-      signatoryAddress: "123 Main St, City, Country",
-    },
-  ];
-
-  const handleOnViewRow = () => {
-    console.log("Using static data for modal");
-    setModalData(modalDataDetails);
-    setIsViewModalOpen(true);
-  };
-
-  const fetchDashboardData = async () => {
+  const loadDataFromLocalStorage = (id) => {
     try {
-      setIsLoading(true);
-      
-      // Get user data from localStorage
+      setLoading(true);
       const userFormData = JSON.parse(localStorage.getItem("userFormData"));
-      const userInfo = userFormData?.fullloginDetails?.userInfo;
+      const isCRPUser = userFormData?.userType === "CRP";
+
+      // For CRP users viewing a form (with ID), always show static data
+      if (isCRPUser && id) {
+        setRegistrationData(staticFormData);
+        setIsDataLoaded(true);
+        return;
+      }
+
+      // First check if this is a draft
+      if (id && id.startsWith('draft-')) {
+        const drafts = JSON.parse(localStorage.getItem('formDrafts') || '[]');
+        const draftData = drafts.find(draft => draft.id === id);
+        if (draftData) {
+          setRegistrationData(draftData);
+          setIsDataLoaded(true);
+          return;
+        }
+      }
       
-      if (!userInfo) {
-        throw new Error("User information not found in localStorage");
+      // Otherwise check regular saved data
+      const savedData = localStorage.getItem(getLocalStorageKey(id));
+      if (savedData) {
+        setRegistrationData(JSON.parse(savedData));
       }
-
-      const payload = {
-        userInfo: userInfo,
-        filterCriteria: {}
-      };
-
-      const response = await postData(
-        "cms-application-service/dashboard/getApplications",
-        payload
-      );
-
-      if (response?.status === "200" && response?.dashboardApplications?.length > 0) {
-        // Format the data to match your table structure
-        const formattedData = response.dashboardApplications.map((item, index) => ({
-          ...item,
-          id: item.uuid, // Ensure you have an id field for the table
-          slNo: index + 1,
-          action: ["view"] // Add action buttons
-        }));
-        
-        setRowData(formattedData);
-      } else {
-        setRowData([]);
-        toast.info("No applications found", { position: "top-right" });
-      }
-    } catch (error) {
-      console.error("Error fetching dashboard data:", error);
+      setIsDataLoaded(true);
+    } catch (err) {
       toast.error(APP_MESSAGES.API_ERR, { position: "top-right" });
-      setRowData([]);
+      setError(err.message || "Error loading data");
     } finally {
-      setIsLoading(false);
+      setLoading(false);
     }
   };
 
-  useEffect(() => {
-    fetchDashboardData();
-  }, []);
+  const saveDataToLocalStorage = (id, data) => {
+    localStorage.setItem(getLocalStorageKey(id), JSON.stringify(data));
+  };
+
+  const handleStepDataFetch = (stepId, id) => {
+    try {
+      setLoading(true);
+      const userFormData = JSON.parse(localStorage.getItem("userFormData"));
+      const isCRPUser = userFormData?.userType === "CRP";
+
+      // For CRP users, always return static data
+      if (isCRPUser && id) {
+        setRegistrationData(prev => ({
+          ...prev,
+          [stepId]: staticFormData[stepId]
+        }));
+        return;
+      }
+
+      // For drafts, use the draft data directly
+      if (id && id.startsWith('draft-')) {
+        const drafts = JSON.parse(localStorage.getItem('formDrafts') || '[]');
+        const draftData = drafts.find(draft => draft.id === id);
+        if (draftData && draftData[stepId]) {
+          setRegistrationData(prev => ({
+            ...prev,
+            [stepId]: draftData[stepId]
+          }));
+          return;
+        }
+      }
+      
+      // For regular data
+      const savedData = localStorage.getItem(getLocalStorageKey(id));
+      if (savedData) {
+        const parsedData = JSON.parse(savedData);
+        if (parsedData[stepId]) {
+          setRegistrationData(prev => ({
+            ...prev,
+            [stepId]: parsedData[stepId]
+          }));
+        }
+      }
+    } catch (err) {
+      toast.error(APP_MESSAGES.API_ERR, { position: "top-right" });
+      setError(err.message || "Error fetching step data");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const updateRegistrationData = (stepId, updatedData, id) => {
+    setRegistrationData(prev => ({
+      ...prev,
+      [stepId]: updatedData
+    }));
+    
+    if (id) {
+      const userFormData = JSON.parse(localStorage.getItem("userFormData"));
+      const isCRPUser = userFormData?.userType === "CRP";
+
+      // Don't save updates for CRP users viewing forms
+      if (isCRPUser && id && !id.startsWith('draft-')) {
+        return;
+      }
+
+      if (id.startsWith('draft-')) {
+        // Update draft data
+        const drafts = JSON.parse(localStorage.getItem('formDrafts') || '[]');
+        const draftIndex = drafts.findIndex(draft => draft.id === id);
+        
+        if (draftIndex >= 0) {
+          const updatedDraft = {
+            ...drafts[draftIndex],
+            [stepId]: updatedData,
+            lastSaved: new Date().toISOString()
+          };
+          
+          drafts[draftIndex] = updatedDraft;
+          localStorage.setItem('formDrafts', JSON.stringify(drafts));
+        }
+      } else {
+        // Update regular data
+        saveDataToLocalStorage(id, {
+          ...registrationData,
+          [stepId]: updatedData
+        });
+      }
+    }
+  };
+
+  const handleFileUpload = (stepId, fieldName, file, id) => {
+    const userFormData = JSON.parse(localStorage.getItem("userFormData"));
+    const isCRPUser = userFormData?.userType === "CRP";
+
+    // Don't allow file uploads for CRP users viewing forms
+    if (isCRPUser && id && !id.startsWith('draft-')) {
+      toast.info("CRP users cannot modify submitted forms");
+      return;
+    }
+
+    const filePath = URL.createObjectURL(file);
+    const updatedData = {
+      ...registrationData[stepId],
+      [fieldName]: {
+        path: filePath,
+        file
+      }
+    };
+    
+    updateRegistrationData(stepId, updatedData, id);
+  };
 
   return (
-    <div className="container-fluid mt-5" style={{ paddingLeft: 0, paddingRight: 0 }}>
-      {!isLoading ? (
-        <>
-          <h3 className="mb-2 text-center">Claim Submission Service</h3>
-          <br />
-          <div className="row mb-3 align-items-center">
-            <div className="col-12 col-md-4 d-flex justify-content-md-end justify-content-center gap-2 ms-auto">
-              {/* Add any buttons you need here */}
-            </div>
-          </div>
-          
-          <ActionTable
-            columns={columns}
-            rowData={rowData}
-            hideExportBtn={false}
-            onViewRow={handleOnViewRow}
-          />
-
-          <Modal
-            show={isViewModalOpen}
-            onHide={() => setIsViewModalOpen(false)}
-            dialogClassName="modal-1110w"
-            aria-labelledby="example-custom-modal-styling-title"
-          >
-            <Modal.Header closeButton>
-              <Modal.Title id="example-custom-modal-styling-title">
-                Preview Details
-              </Modal.Title>
-            </Modal.Header>
-            <Modal.Body>
-              {modalDataDetails?.length > 0 ? (
-                <>
-                  {modalDataDetails.map((data, index) => (
-                    <Collapsible
-                      key={index}
-                      title={index === 0 ? "Current Information" : `History Details - ${index}`}
-                    >
-                      <div className="card mb-4 tiles_Size">
-                        <div className="card-body">
-                          <h5 style={{ fontWeight: 600 }}>Creditor Details</h5>
-                          <br />
-                          <Container fluid>
-                            <Row className="g-3">
-                              {Object.entries({
-                                "Creditor Name": data.creditorName,
-                                "Total Claim Amount": data.totalClaimAmount,
-                                "Debt Incurred Details": data.debtIncurredDetails,
-                                "Mutual Credit/Debts Details": data.mutualCreditDebtsDetails,
-                              }).map(([key, value]) => (
-                                <Col key={key} xs={12} sm={6} md={3} className="mb-3">
-                                  <PreviewCard title={key} value={value} />
-                                </Col>
-                              ))}
-                            </Row>
-                          </Container>
-                        </div>
-                      </div>
-                      <div className="card mb-4 tiles_Size">
-                        <div className="card-body">
-                          <h5 style={{ fontWeight: 600 }}>Identification Details</h5>
-                          <br />
-                          <Container fluid>
-                            <Row className="g-3">
-                              {Object.entries({
-                                "Identification Type": data.identificationType,
-                                "Aadhar": data.aadhar,
-                                "Identification Number": data.identificationNumber,
-                                "Identification Document": data.identificationDocument,
-                              }).map(([key, value]) => (
-                                <Col key={key} xs={12} sm={6} md={3} className="mb-3">
-                                  <PreviewCard title={key} value={value} />
-                                </Col>
-                              ))}
-                            </Row>
-                          </Container>
-                        </div>
-                      </div>
-                      <div className="card mb-4 tiles_Size">
-                        <div className="card-body">
-                          <h5 style={{ fontWeight: 600 }}>Signatory Details</h5>
-                          <br />
-                          <Container fluid>
-                            <Row className="g-3">
-                              {Object.entries({
-                                "Signatory Name": data.signatoryName,
-                                "Signatory Document": data.signatoryDocument,
-                                "Signatory Position": data.signatoryPosition,
-                                "Signatory Address": data.signatoryAddress,
-                              }).map(([key, value]) => (
-                                <Col key={key} xs={12} sm={6} md={3} className="mb-3">
-                                  <PreviewCard title={key} value={value} />
-                                </Col>
-                              ))}
-                            </Row>
-                          </Container>
-                        </div>
-                      </div>
-                    </Collapsible>
-                  ))}
-                </>
-              ) : (
-                <p>No data available.</p>
-              )}
-            </Modal.Body>
-            <Modal.Footer>
-              <Button variant="secondary" onClick={() => setIsViewModalOpen(false)}>
-                Close
-              </Button>
-            </Modal.Footer>
-          </Modal>
-          
-          <FileUploadModal modal={isModalOpen} setModal={setIsModalOpen} />
-        </>
-      ) : (
-        <div className="loader-container">
-          <div className="loader"></div>
-        </div>
-      )}
-    </div>
+    <RegistrationContext.Provider
+      value={{
+        registrationData,
+        loading,
+        error,
+        isViewModalOpen,
+        setIsViewModalOpen,
+        handleStepDataFetch,
+        updateRegistrationData,
+        handleFileUpload,
+        setRegistrationData,
+        loadDataFromLocalStorage,
+        isDataLoaded,
+      }}
+    >
+      {children}
+    </RegistrationContext.Provider>
   );
 };
 
-export default DashboardMain;
+curl --location 'http://15.206.115.75:8003/cms-application-service/_application/_search' \
+--header 'Content-Type: application/json' \
+--data-raw '{
+    "userInfo": {
+        "status": {
+            "code": "200",
+            "message": "Successful"
+        },
+        "token": null,
+        "otp": "123456",
+        "processTypes": {
+            "auditDetails": null,
+            "uuid": "4cff2462-4b00-4bac-b675-f4229d23a27e",
+            "processTypeName": "Liquidation",
+            "processTypeCode": "50002",
+            "isActive": null,
+            "processTypeValue": "Liquidation"
+        },
+        "corporateDebtorDetails": {
+            "uuid": "7c249b25-7e75-4e0f-9177-5988ccbda43a",
+            "nameOfCorporateDebtor": "Jalpower Corporation Limited",
+            "cinOrLlpinNumber": "U40109TG2004PLC043985",
+            "ipDetailsId": "2b44f7f3-9983-4f4b-be75-46056292c7a9",
+            "appointedAs": "4",
+            "nameOfIp": "Mr. Amit Jain",
+            "registrationNo": "IBBI/IPA-001/IP-P01447/2018-2019/12196",
+            "ipUuid": "2b44f7f3-9983-4f4b-be75-46056292c7a9",
+            "roleName": "RP",
+            "roleCode": "RP",
+            "roleUuid": "4"
+        },
+        "claimantTypes": {
+            "uuid": "1003",
+            "claimantName": "Employees and Workmen",
+            "claimantCode": "1003"
+        },
+        "claimantCategories": {
+            "uuid": "20007",
+            "claimantCategoryName": "Employees and Workmen",
+            "claimantCategoryCode": "20007",
+            "isActive": true,
+            "cirpFormId": "40004",
+            "claimantTypeCode": "1003",
+            "liquidationId": "ffc1c375-8493-424c-87d3-fcfa67ab0bac"
+        },
+        "formDetails": {
+            "uuid": "a6928a25-1d51-4e6b-aa6c-a9c1a4ab62f8",
+            "formName": "Form D",
+            "formCode": "a6928a25-1d51-4e6b-aa6c-a9c1a4ab62f8",
+            "isActive": true
+        },
+        "userType": "CLAIMANT",
+        "users": [
+            {
+                "claimant": {
+                    "uuid": "e6f398bf-eacc-42cc-a49c-fd3caa9d6b75",
+                    "claimantName": "sassa",
+                    "corporateName": null,
+                    "emailId": "ayan@gmail.com",
+                    "claimantEntityType": "INDV",
+                    "mobileNumber": "8481881868",
+                    "aadharNumber": "213367555151",
+                    "panNumber": "GZVPS5431E",
+                    "cinOrTaNumber": null,
+                    "roleCode": "CLAIMANT",
+                    "auditDetails": {
+                        "createdBy": "e6f398bf-eacc-42cc-a49c-fd3caa9d6b75",
+                        "lastModifiedBy": "e6f398bf-eacc-42cc-a49c-fd3caa9d6b75",
+                        "createdTime": "2025-04-09 17:05:42.898",
+                        "lastModifiedTime": "2025-04-09 17:05:42.898"
+                    },
+                    "active": true
+                },
+                "corporateDebtor": null
+            }
+        ]
+    },
+    "uuids": ["646ce47d-a6b8-4704-96df-88a97d218ec2"],
+    "applicationNumbers": [],
+    "claimantUUIDs": []
+}'
+
+response : 
+
+{
+    "status": {
+        "code": "200",
+        "message": "Data Received Successfully"
+    },
+    "userInfo": null,
+    "applicationDetails": [
+        {
+            "uuid": "646ce47d-a6b8-4704-96df-88a97d218ec2",
+            "applicationNumber": "APP-JC-SX-50001-20250409222226",
+            "creditorBasicDetails": {
+                "uuid": "5c23d3ec-85ac-4845-8096-2cba92e415f7",
+                "debtorName": "Jalpower Corporation Limited",
+                "creditorName": "sassa",
+                "identificationNumber": null,
+                "totalClaimAmount": 233.0,
+                "debtDetails": "332",
+                "mutualCreditDetails": "2323",
+                "status": "",
+                "isActive": false,
+                "isFinalSubmit": false,
+                "document": {
+                    "docId": "901f340f-8691-454f-96b7-2c23e981b23e",
+                    "docType": "Aadhar",
+                    "docSource": "Identification",
+                    "docName": "Mother_adhaar.pdf"
+                },
+                "auditDetails": {
+                    "createdBy": "e6f398bf-eacc-42cc-a49c-fd3caa9d6b75",
+                    "lastModifiedBy": "e6f398bf-eacc-42cc-a49c-fd3caa9d6b75",
+                    "createdTime": "2025-04-09T22:22:26.798040300",
+                    "lastModifiedTime": "2025-04-09T22:22:26.798040300"
+                }
+            },
+            "claimDetails": {
+                "uuid": null,
+                "creditorBasicDetailsUuid": null,
+                "securityInterestAmount": null,
+                "addressProofNumber": null,
+                "guaranteeAmount": null,
+                "guarantorName": null,
+                "guarantorAddress": null,
+                "creditorAddress": null,
+                "creditorEmail": null,
+                "beneficiaryName": null,
+                "beneficiaryAddress": null,
+                "corporateDebtorSecurityAmount": null,
+                "corporateDebtorGuaranteeAmount": null,
+                "principalBorrowerName": null,
+                "principalBorrowerAddress": null,
+                "bankAccountNumber": null,
+                "bankIfscCode": null,
+                "bankBranchName": null,
+                "document": null,
+                "auditDetails": null
+            },
+            "signatoryDetails": {
+                "uuid": "367dac5b-7124-4a9d-9da2-f1617b479efb",
+                "creditorBasicDetailsUuid": "5c23d3ec-85ac-4845-8096-2cba92e415f7",
+                "name": "dsd",
+                "position": "sdds",
+                "address": "dssd",
+                "document": {
+                    "docId": "c90fb194-2ba8-4b00-9a8e-3d1586c18437",
+                    "docType": "Signature",
+                    "docSource": "Signature",
+                    "docName": "father_adhaar.pdf"
+                },
+                "auditDetails": {
+                    "createdBy": "e6f398bf-eacc-42cc-a49c-fd3caa9d6b75",
+                    "lastModifiedBy": "e6f398bf-eacc-42cc-a49c-fd3caa9d6b75",
+                    "createdTime": "2025-04-09T22:22:26.855939600",
+                    "lastModifiedTime": "2025-04-09T22:22:26.856940800"
+                }
+            },
+            "status": null,
+            "isActive": false,
+            "isFinalSubmit": false,
+            "auditDetails": {
+                "createdBy": "e6f398bf-eacc-42cc-a49c-fd3caa9d6b75",
+                "lastModifiedBy": "e6f398bf-eacc-42cc-a49c-fd3caa9d6b75",
+                "createdTime": "2025-04-09T22:22:26.862088100",
+                "lastModifiedTime": "2025-04-09T22:22:26.862088100"
+            }
+        }
+    ]
+}
