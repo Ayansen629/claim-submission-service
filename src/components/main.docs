@@ -1,500 +1,578 @@
-import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
-import { useNavigate, useParams } from "react-router-dom";
-import { toast } from "react-toastify";
-import { Modal, Button, Form } from "react-bootstrap";
-import "./Stepper.css";
-import { useRegistration } from "../../context/ApplicationContext";
-import ReviewStep from "./ReviewStep";
-import { FormDataProvider } from "../../context/FormDataContext";
-import { postData } from "../../../services/http.service.ts";
-import { URLS_ENDPOINT } from "../../../utils/urlsConstants.ts";
-import axios from "axios";
-import { v4 as uuidv4 } from "uuid";
+import React, { useState, useEffect, useRef ,useCallback} from "react";
+import style from "./ActionTable.module.css";
+import _ from "lodash";
+// import GenericExportDropdown from "./export/GenericExport";
+import editIcon from "../../../assests/icons/edit.svg";
+import viewIcon from "../../../assests/icons/view.svg";
+import deleteIcon from "../../../assests/icons/delete.svg";
+import upload from "../../../assests/icons/upload.svg";
+import download from "../../../assests/icons/download.svg";
+import Tooltip from "@mui/material/Tooltip";
+import { Dropdown } from "react-bootstrap";
+import { FaCodePullRequest } from "react-icons/fa6";
 
-const deepEqual = (obj1, obj2) => {
-  return JSON.stringify(obj1) === JSON.stringify(obj2);
-};
+const ActionTable = (props) => {
+  const [searchedData, setSearchedData] = useState(props.rowData || []);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [selected, setSelected] = useState([]);
+  const [sortedColumn, setSortedColumn] = useState(null);
+  const [sortOrder, setSortOrder] = useState("");
+  const hideColumns = props.hideColumns || [];
+  const [searchQuery, setSearchQuery] = useState("");
 
-const generateFileId = (file) => {
-  return `file-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
-};
+  useEffect(() => {
+    if (props.rowData) {
+      setSearchedData(props.rowData);
+      setCurrentPage(1);
+      const selectedRows = props.rowData
+        .filter((item) => item.isChecked)
+        .map((item) => item.id);
+      setSelected(selectedRows);
+    }
+  }, [props.rowData]);
 
-const extractFileDetails = (file, source, documentType) => {
-  if (!file) return null;
+  const [itemsPerPage, setItemPerPage] = useState(10);
+  const indexOfLastItem = currentPage * itemsPerPage;
+  const indexOfFirstItem = indexOfLastItem - itemsPerPage;
+  const currentItems = searchedData.slice(indexOfFirstItem, indexOfLastItem);
+  const totalPages = Math.ceil((props.rowData?.length || 0) / itemsPerPage);
 
-  return {
-    docId: file.fileId,
-    docName: file.docName,
-    docType: documentType,
-    docSource: source,
+  const handleNextPage = () => {
+    setCurrentPage((prevPage) => Math.min(prevPage + 1, totalPages));
   };
-};
-
-const createFormPayload = (formData, isFinalSubmit, userFormData, applicationNumber = "", isActive) => {
-  const creditorBasicDetailsUuid = formData.creditorBasicDetailsUuid || "";
-  const claimDetailsUuid = formData.claimDetailsUuid || "";
-  const signatoryDetailsUuid = formData.signatoryDetailsUuid || "";
-
-  return {
-    uuid: applicationNumber || "",
-    applicationNumber: applicationNumber || "",
-    creditorBasicDetails: {
-      uuid: creditorBasicDetailsUuid,
-      debtorName: formData.step1?.debtorName || "",
-      creditorName: formData.step1?.CreditorName || "",
-      totalClaimAmount: parseFloat(formData.step1?.totalClaimAmount) || 0,
-      debtDetails: formData.step1?.debtDetails || "",
-      mutualCreditDetails: formData.step1?.mutualCreditDetails || "",
-      status: "",
-      isActive: isActive,
-      isFinalSubmit: isFinalSubmit,
-      identificationNumber: formData.step1?.identificationNumber || "",
-      document: extractFileDetails(formData.step1?.identificationDocument, "Identification", formData.step1?.identificationType),
-    },
-    claimDetails: {
-      uuid: claimDetailsUuid,
-      securityInterestAmount: parseFloat(formData.step2?.securityInterestAmount) || 0,
-      guaranteeAmount: parseFloat(formData.step2?.guaranteeAmount) || 0,
-      guarantorName: formData.step2?.guarantorName || "",
-      guarantorAddress: formData.step2?.guarantorAddress || "",
-      creditorAddress: formData.step2?.creditorAddress || "",
-      creditorEmail: formData.step2?.creditorEmail || "",
-      beneficiaryName: formData.step2?.beneficiaryName || "",
-      beneficiaryAddress: formData.step2?.beneficiaryAddress || "",
-      corporateDebtorSecurityAmount: parseFloat(formData.step2?.corporateDebtorSecurityAmount) || 0,
-      corporateDebtorGuaranteeAmount: parseFloat(formData.step2?.corporateDebtorGuaranteeAmount) || 0,
-      principalBorrowerName: formData.step2?.principalBorrowerName || "",
-      principalBorrowerAddress: formData.step2?.principalBorrowerAddress || "",
-      bankAccountNumber: formData.step2?.accountNumber || "",
-      bankIfscCode: formData.step2?.ifscCode || "",
-      bankBranchName: formData.step2?.branchName || "",
-      addressProofNumber: formData.step2?.addressProofNumber || "",
-      document: extractFileDetails(formData.step2?.addressProofDocument, "Addressproof", formData.step2?.addressProofType),
-    },
-    signatoryDetails: {
-      uuid: signatoryDetailsUuid,
-      name: formData.step3?.signatoryName || "",
-      position: formData.step3?.signatoryPosition || "",
-      address: formData.step3?.signatoryAddress || "",
-      document: extractFileDetails(formData.step3?.signatoryDocument, "Signature", "Signature"),
-    },
-  };
-};
-
-const getFileFieldsForStep = (stepNumber) => {
-  switch (stepNumber) {
-    case 1:
-      return ["identificationDocument"];
-    case 2:
-      return ["addressProof"];
-    case 3:
-      return ["signatoryDocument"];
-    default:
-      return [];
-  }
-};
-
-const processFileUploads = async (stepData, stepNumber) => {
-  const fileFields = getFileFieldsForStep(stepNumber);
-  const processedData = { ...stepData };
-
-  for (const field of fileFields) {
-    if (stepData[field] && stepData[field] instanceof File) {
-      processedData[field] = {
-        id: generateFileId(stepData[field]),
-        name: stepData[field].name,
-        size: stepData[field].size,
-        type: stepData[field].type,
-        uploadedAt: new Date().toISOString(),
-      };
-    } else if (stepData[field] && typeof stepData[field] === 'object' && stepData[field].name) {
-      processedData[field] = { ...stepData[field] };
-    }
-  }
-
-  return processedData;
-};
-
-const Stepper = ({ stepsConfig = [], formAllData }) => {
-  const { id } = useParams();
-  const isEditMode = !!id;
-  const [currentStep, setCurrentStep] = useState(1);
-  const [isConfirmed, setIsConfirmed] = useState(false);
-  const [isComplete, setIsComplete] = useState(false);
-  const [isViewModalOpen, setIsViewModalOpen] = useState(false);
-  const [hasPreviewed, setHasPreviewed] = useState(false);
-  const [formData, setFormData] = useState({});
-  const [margins, setMargins] = useState({ marginLeft: 0, marginRight: 0 });
-  const stepRef = useRef([]);
-  const navigate = useNavigate();
-  const [currentSubmitHandler, setCurrentSubmitHandler] = useState(null);
-  const [showModal, setShowModal] = useState(false);
-  const [comments, setComments] = useState("");
-  const [actionType, setActionType] = useState("");
-  const [isSavingDraft, setIsSavingDraft] = useState(false);
-  const [draftResponse, setDraftResponse] = useState(null);
-  const [isSubmittingAction, setIsSubmittingAction] = useState(false);
-
-  const {
-    registrationData,
-    handleStepDataFetch,
-    updateRegistrationData,
-    handleApplicatioNFormView,
-    isDataLoaded,
-  } = useRegistration();
-
-  const userFormData = JSON.parse(localStorage.getItem("userFormData"));
-  const isCRPUser = userFormData?.userType === "CRP";
-
-  const filteredStepsConfig = useMemo(() => {
-    if (isCRPUser) {
-      return stepsConfig.filter((step) => step.name !== "Review & Submit");
-    }
-    return stepsConfig;
-  }, [stepsConfig, isCRPUser]);
-
-  useEffect(() => {
-    if (id) {
-      handleApplicatioNFormView({ uuid: id });
-    }
-  }, [id]);
-
-  useEffect(() => {
-    if (isEditMode && registrationData && !deepEqual(formData, registrationData)) {
-      setFormData(registrationData);
-    }
-  }, [isEditMode, registrationData, formData]);
-
-  useEffect(() => {
-    const savedIsConfirmed = localStorage.getItem("isConfirmed");
-    if (savedIsConfirmed) {
-      setIsConfirmed(JSON.parse(savedIsConfirmed));
-    }
-  }, []);
-
-  useEffect(() => {
-    localStorage.setItem("isConfirmed", JSON.stringify(isConfirmed));
-  }, [isConfirmed]);
-
-  useEffect(() => {
-    const newSubmitHandler = filteredStepsConfig[currentStep - 1]?.submitHandler;
-    if (newSubmitHandler && newSubmitHandler !== currentSubmitHandler) {
-      setCurrentSubmitHandler(() => newSubmitHandler);
-    }
-  }, [currentStep, filteredStepsConfig]);
-
-  const updateSubmitHandler = useCallback((submitHandler) => {
-    setCurrentSubmitHandler(() => submitHandler);
-  }, []);
-
-  useEffect(() => {
-    if (stepRef.current.length > 0) {
-      const firstStep = stepRef.current[0]?.offsetWidth || 0;
-      const lastStep = stepRef.current[filteredStepsConfig.length - 1]?.offsetWidth || 0;
-      setMargins({
-        marginLeft: firstStep / 2,
-        marginRight: lastStep / 2,
-      });
-    }
-  }, [filteredStepsConfig.length]);
-
-  const validateStepData = (step, data) => {
-    const requiredFields = filteredStepsConfig[step - 1]?.requiredFields || [];
-    for (let field of requiredFields) {
-      if (!data[field]) {
-        toast.error(`${field} is required.`);
-        return false;
-      }
-    }
-    return true;
-  };
-
-  const handleNext = async () => {
-    if (!currentSubmitHandler) {
-      console.error("No submit handler available.");
-      return;
-    }
-
-    const currentStepData = await currentSubmitHandler();
-    if (!currentStepData) {
-      console.error("Form validation failed.");
-      return;
-    }
-
-    if (!validateStepData(currentStep, currentStepData)) {
-      return;
-    }
-
-    const processedStepData = await processFileUploads(currentStepData, currentStep);
-
-    const updatedFormData = {
-      ...formData,
-      [`step${currentStep}`]: { ...formData[`step${currentStep}`], ...processedStepData },
-    };
-
-    if (!deepEqual(updatedFormData, formData)) {
-      setFormData(updatedFormData);
-      updateRegistrationData(`step${currentStep}`, updatedFormData[`step${currentStep}`], id);
-    }
-
-    if (currentStep === filteredStepsConfig.length) {
-      try {
-        setIsSavingDraft(true);
-        
-        const lastDraftResponse = draftResponse || JSON.parse(localStorage.getItem("draftResponse") || "null");
-        
-        if (!lastDraftResponse) {
-          throw new Error("No draft data found. Please save a draft first.");
-        }
-
-        const finalSubmitPayload = {
-          ...lastDraftResponse.data,
-          applicationDetails: {
-            ...lastDraftResponse.data.applicationDetails,
-            creditorBasicDetails: {
-              ...lastDraftResponse.data.applicationDetails.creditorBasicDetails,
-              isFinalSubmit: true,
-              isActive: true
+  // Debounced search function
+  const debouncedSearch = useCallback(
+    _.debounce((query) => {
+      if (query) {
+        const searchValue = query.toLowerCase();
+        const filterObject = (obj) => {
+          return Object.values(obj).some((value) => {
+            if (typeof value === "object" && value !== null) {
+              return filterObject(value);
             }
-          }
+            return value?.toString().toLowerCase().includes(searchValue);
+          });
         };
-
-        const REQUEST = `${process.env.REACT_APP_APPLICATION_SERVICE}${URLS_ENDPOINT.APP_SERVICES.APPLICATION_FORMSUBMIT}`;
-        const response = await postData(REQUEST, finalSubmitPayload);
-
-        if (response.data.status.code === "200") {
-          localStorage.removeItem("draftResponse");
-          setDraftResponse(null);
-          setIsComplete(true);
-          toast.success("Form submitted successfully");
-          navigate("/dashboard");
-        } else {
-          toast.error(`Failed to submit form: ${response.data.status.message}`);
-        }
-      } catch (error) {
-        console.error("Error submitting form:", error);
-        toast.error(error.message || "Failed to submit form");
-      } finally {
-        setIsSavingDraft(false);
+        const filtered = props.rowData.filter((item) => filterObject(item));
+        setSearchedData(filtered);
+        setCurrentPage(1);
+      } else {
+        setSearchedData(props.rowData);
       }
+    }, 300),
+    [props.rowData]
+  );
+
+  const handlePrevPage = () => {
+    setCurrentPage((prevPage) => Math.max(prevPage - 1, 1));
+  };
+
+  const handleOnSearch = (e) => {
+    const query = e.target.value;
+    setSearchQuery(query);
+    debouncedSearch(query);
+  };
+
+  // const handleOnSearch = (e) => {
+  //   if (e.target.value) {
+  //     const searchValue = e.target.value.toLowerCase();
+  //     const filterObject = (obj) => {
+  //       return Object.values(obj).some((value) => {
+  //         if (typeof value === "object" && value !== null) {
+  //           return filterObject(value);
+  //         }
+  //         return value?.toString().toLowerCase().includes(searchValue);
+  //       });
+  //     };
+  //     const filtered = props.rowData.filter((item) => filterObject(item));
+  //     setSearchedData(filtered);
+  //     setCurrentPage(1);
+  //   } else {
+  //     setSearchedData(props.rowData);
+  //   }
+  // };
+
+  const sortByColumn = (column) => {
+    if (sortedColumn === column) {
+      setSortOrder(sortOrder === "asc" ? "desc" : "asc");
     } else {
-      setCurrentStep((prevStep) => prevStep + 1);
+      setSortedColumn(column);
+      setSortOrder("asc");
     }
   };
 
-  const handlePreview = async () => {
-    if (!currentSubmitHandler) {
-      console.error("No submit handler available.");
-      return;
-    }
-
-    const currentStepData = await currentSubmitHandler();
-    if (!currentStepData) {
-      console.error("Form validation failed.");
-      return;
-    }
-
-    if (!validateStepData(currentStep, currentStepData)) {
-      return;
-    }
-
-    const processedStepData = await processFileUploads(currentStepData, currentStep);
-
-    const updatedFormData = {
-      ...formData,
-      [`step${currentStep}`]: { ...formData[`step${currentStep}`], ...processedStepData },
-    };
-
-    if (!deepEqual(updatedFormData, formData)) {
-      setFormData(updatedFormData);
-      updateRegistrationData(`step${currentStep}`, updatedFormData[`step${currentStep}`], id);
-    }
-
-    setCurrentStep(filteredStepsConfig.length);
-    setHasPreviewed(true);
-  };
-
-  const handleSaveDraft = async () => {
-    setIsSavingDraft(true);
-    try {
-      const currentStepData = currentSubmitHandler ? await currentSubmitHandler() : {};
-      const processedStepData = await processFileUploads(currentStepData, currentStep);
-
-      const draftId = "";
-      const creditorBasicDetailsUuid = formData.creditorBasicDetailsUuid || "";
-      const claimDetailsUuid = formData.claimDetailsUuid || "";
-      const signatoryDetailsUuid = formData.signatoryDetailsUuid || "";
-
-      const draftData = {
-        ...formData,
-        creditorBasicDetailsUuid,
-        claimDetailsUuid,
-        signatoryDetailsUuid,
-        [`step${currentStep}`]: {
-          ...formData[`step${currentStep}`],
-          ...processedStepData,
-        },
-        id: draftId,
-        status: "draft",
-        lastSaved: new Date().toISOString(),
-        currentStep,
-        formType: userFormData?.formType,
-        userType: userFormData?.userType,
-      };
-
-      const draftPayload = {
-        status: {
-          code: "",
-          message: ""
-        },
-        userInfo: userFormData?.fullloginDetails || {},
-        applicationDetails: createFormPayload(draftData, false, userFormData, draftId, false),
-      };
-
-      const REQUEST = `${process.env.REACT_APP_APPLICATION_SERVICE}${URLS_ENDPOINT.APP_SERVICES.APPLICATION_FORMSUBMIT}`;
-      const response = await postData(REQUEST, draftPayload);
-
-      if (response.data.status.code === "200") {
-        localStorage.setItem("draftResponse", JSON.stringify(response));
-        setDraftResponse(response);
-        setHasPreviewed(true);
-        setFormData(prev => ({
-          ...prev,
-          creditorBasicDetailsUuid: response.data.applicationDetails.creditorBasicDetails.uuid,
-          claimDetailsUuid: response.data.applicationDetails.claimDetails.uuid,
-          signatoryDetailsUuid: response.data.applicationDetails.signatoryDetails.uuid,
-          applicationNumber: response.data.applicationDetails.applicationNumber
-        }));
-        toast.success("Draft saved successfully");
-      } else {
-        toast.error(`Failed to save draft: ${response.status.message}`);
-      }
-    } catch (error) {
-      console.error("Error saving draft:", error);
-      toast.error("Failed to save draft");
-    } finally {
-      setIsSavingDraft(false);
-    }
-  };
-
-  const handleWorkflowAction = async (action, comments) => {
-    try {
-      const userFormData = JSON.parse(localStorage.getItem("userFormData"));
-      const applicationData = JSON.parse(localStorage.getItem("applicationdatawithid"));
-
-      if (!userFormData || !userFormData.fullloginDetails) {
-        throw new Error("User information not found");
-      }
-
-      if (!applicationData || !applicationData.applicationNumber) {
-        throw new Error("Application data not found");
-      }
-
-      const payload = {
-        userInfo: userFormData.fullloginDetails,
-        applicationNumber: applicationData.applicationNumber,
-        comments: comments,
-        action: action
-      };
-
-      const response = await axios.post(
-        `${process.env.REACT_APP_APPLICATION_SERVICE}/_workflow/_create`,
-        payload,
-        {
-          headers: {
-            'Content-Type': 'application/json'
-          }
-        }
-      );
-
-      return response.data;
-    } catch (error) {
-      console.error("Error in workflow action:", error);
-      throw error;
-    }
-  };
-
-  const handleActionSubmit = async () => {
-    setIsSubmittingAction(true);
-    try {
-      const actionMap = {
-        "Accept": "APPROVED",
-        "Reject": "REJECTED",
-        "Sendback To Claimants": "SEND_BACK_TO_CITIZEN",
-        "Accept as Contingent": "APPROVED_AS_CONTINGENT"
-      };
-
-      const apiAction = actionMap[actionType];
-      if (!apiAction) {
-        throw new Error("Invalid action type");
-      }
-
-      const response = await handleWorkflowAction(apiAction, comments);
-      
-      if (response.status && response.status.code === "200") {
-        toast.success(`${actionType} submitted successfully`);
-        navigate("/dashboard");
-      } else {
-        toast.error(response.status?.message || "Action failed");
-      }
-    } catch (error) {
-      console.error("Error submitting action:", error);
-      toast.error(error.message || "Failed to submit action");
-    } finally {
-      setIsSubmittingAction(false);
-      handleModalClose();
-    }
-  };
-
-  const handleActionClick = (action) => {
-    setActionType(action);
-    setShowModal(true);
-  };
-
-  const handleModalClose = () => {
-    setShowModal(false);
-    setComments("");
-  };
-
-  const handlePrevious = () => {
-    setCurrentStep((prevStep) => Math.max(1, prevStep - 1));
-    setIsConfirmed(false);
-    localStorage.removeItem("isConfirmed");
-  };
-
-  const handleCancel = () => {
-    navigate("/dashboard");
-  };
-
-  const calculateProgressBarWidth = () => {
-    return ((currentStep - 1) / (filteredStepsConfig.length - 1)) * 100;
-  };
-
-  const ActiveComponent = filteredStepsConfig[currentStep - 1]?.Component;
-  const shouldRenderReviewStep = currentStep === filteredStepsConfig.length && isDataLoaded;
-
-  const flattenFormData = (formData) => {
-    const flattened = {
-      ...formData.step1,
-      ...formData.step2,
-      ...formData.step3,
-    };
-    return flattened;
+  const showSortedColumnIcon = (columnName) => {
+    return sortedColumn === columnName ? (
+      sortOrder === "asc" ? (
+        <i className="fa fa-long-arrow-up table-arrow" aria-hidden="true" />
+      ) : (
+        <i className="fa fa-long-arrow-down table-arrow" aria-hidden="true" />
+      )
+    ) : (
+      <></>
+    );
   };
 
   useEffect(() => {
-    if (currentStep === 3) {
-      setHasPreviewed(false);
+    if (sortOrder && sortedColumn) {
+      const sortedData = [...searchedData].sort((a, b) => {
+        const columnValueA = _.get(a, sortedColumn);
+        const columnValueB = _.get(b, sortedColumn);
+        if (sortOrder === "asc") {
+          return typeof columnValueA === "string"
+            ? columnValueA?.localeCompare(columnValueB)
+            : columnValueA - columnValueB;
+        } else {
+          return typeof columnValueA === "string"
+            ? columnValueB?.localeCompare(columnValueA)
+            : columnValueB - columnValueA;
+        }
+      });
+      setSearchedData(sortedData);
     }
-  }, [currentStep]);
+  }, [sortOrder, sortedColumn]);
+
+  const handleDeleteRow = (rowData) => {
+    props.onDeleteRow?.(rowData);
+  };
+
+  const handleView = (rowData) => {
+    props.onViewRow?.(rowData);
+  };
+
+  const handleDownload = (rowData) => {
+    props.download?.(rowData);
+  };
+
+  const onCheckColumn = (event) => {
+    if (props.checkType === "multiCheck") {
+      if (event.target.checked) {
+        const newSelecteds = currentItems.map((n) => n);
+        setSelected(newSelecteds);
+        props.onCheckHandler?.(newSelecteds);
+        return;
+      }
+      setSelected([]);
+      props.onCheckHandler?.([]);
+    } else {
+      setSelected([]);
+      props.onCheckHandler?.([]);
+    }
+  };
+
+  const onRowCheck = (event, id, row) => {
+    if (props.checkType === "multiCheck") {
+      const selectedIndex = selected.map((e) => e.id).indexOf(id);
+      let newSelected = [];
+      const NOCHECK_ITEM = -1;
+      if (selectedIndex === NOCHECK_ITEM) {
+        newSelected = newSelected.concat(selected, row);
+      } else if (selectedIndex === 0) {
+        newSelected = newSelected.concat(selected.slice(1));
+      } else if (selectedIndex === selected.length - 1) {
+        newSelected = newSelected.concat(selected.slice(0, -1));
+      } else if (selectedIndex > 0) {
+        newSelected = newSelected.concat(
+          selected.slice(0, selectedIndex),
+          selected.slice(selectedIndex + 1)
+        );
+      }
+      setSelected(newSelected);
+      props.onCheckHandler?.(newSelected);
+    } else {
+      const selectedIndex = selected.map((e) => e.id).indexOf(id);
+      let newSelected = [];
+      const NOCHECK_ITEM = -1;
+      if (selectedIndex === NOCHECK_ITEM) {
+        newSelected = newSelected.concat(selected, row);
+      } else if (selectedIndex === 0) {
+        newSelected = newSelected.concat(selected.slice(1));
+      } else if (selectedIndex > 0) {
+        newSelected = newSelected.concat(
+          selected.slice(0, selectedIndex),
+          selected.slice(selectedIndex + 1)
+        );
+      }
+      setSelected(newSelected);
+      props.onCheckHandler?.(newSelected);
+    }
+  };
+
+  const isSelected = (id) => {
+    const pos = selected.map((e) => e.id).indexOf(id);
+    return pos !== -1;
+  };
+
+  const uncheckLast = () => {
+    if (props.checkType === "singleCheck") {
+      let ns = selected.slice(1);
+      setSelected(ns);
+    }
+  };
+
+  const handlePullBack = (rowData) => {
+    props.pullBack?.(rowData);
+  };
+
+  useEffect(() => {
+    let x = document.getElementById("table-column-check");
+    const checkedItems = selected.every((id) =>
+      currentItems.some((obj) => obj.id === id)
+    );
+    if (props.checkType) {
+      if (
+        selected.length > 0 &&
+        selected.length < props.rowData.length &&
+        selected.length === currentItems.length &&
+        checkedItems
+      ) {
+        x.indeterminate = true;
+      } else {
+        x.indeterminate = false;
+      }
+      if (selected.length > 1 && props.checkType === "singleCheck") {
+        uncheckLast();
+      }
+    }
+  }, [selected, currentItems]);
+
+  const onRowClick = (event, rowData) => {
+    props.additionalMethod?.(rowData);
+  };
+
+  const onChangeRowsPerPage = (item) => {
+    setItemPerPage(item);
+  };
+  const userData = JSON.parse(localStorage.getItem("userFormData"));
+  const PaginationOptions = () => {
+    const [isShow, setIsShow] = useState(false);
+    const exportRef = useRef(null);
+
+    useEffect(() => {
+      const handleOutsideClick = (e) => {
+        if (exportRef.current && !exportRef.current.contains(e.target)) {
+          setIsShow(false);
+        }
+      };
+      document.addEventListener("click", handleOutsideClick);
+      return () => {
+        document.removeEventListener("click", handleOutsideClick);
+      };
+    }, []);
+
+
+
+    return (
+      <div
+      id="export_button"
+      ref={exportRef}
+      className="d-inline-flex flex-row align-items-center stickyCard"
+    >
+      <div className="ps-3" style={{ marginRight: "10px" }}>
+        {" "}
+        {/* Added margin to create a gap */}
+        Rows per page
+      </div>
+      <Dropdown>
+        <Dropdown.Toggle
+          id="dropdownMenuButton1"
+          style={{
+            color: "white", // Text color
+            backgroundColor: "#269ccc", // Background color
+            borderColor: "#000000", // Border color (optional, for consistency)
+          }}
+        >
+          <span className="font-14">{itemsPerPage}</span>
+        </Dropdown.Toggle>
+
+        <Dropdown.Menu>
+          {[10, 25, 50, 100].map((item, i) => (
+            <Dropdown.Item
+              key={i}
+              onClick={() => onChangeRowsPerPage(item)}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = "#269ccc"; // Hover background color
+                e.currentTarget.style.color = "#000"; // Hover text color
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = ""; // Reset background color
+                e.currentTarget.style.color = ""; // Reset text color
+              }}
+              style={{
+                cursor: "pointer",
+                transition: "background-color 0.3s ease, color 0.3s ease", // Smooth transition
+              }}
+            >
+              {item}
+            </Dropdown.Item>
+          ))}
+        </Dropdown.Menu>
+      </Dropdown>
+    </div>
+    );
+  };
 
   return (
-    <FormDataProvider formData={flattenFormData(formData)}>
-      <div className="stepper">
-        {filteredStepsConfig.map((step, index) => (
+    <div className="mb-5 px-0 mx-0 generic-action-table pt-3">
+    {/* Search Bar and Filters */}
+    <div
+      className={`row ${style.application_search} ${
+        props.hideSearchBar ? "justify-content-end mb-2" : "justify-content-center"
+      }`}
+    >
+      {props.filters && (
+        <div className="col-sm-6 my-2 fw-600" style={{ width: "fit-content" }}>
+          {props.filters()}
+        </div>
+      )}
+      {!props.hideSearchBar && (
+        <div className="col-sm-4 my-2">
+          <input
+            type="search"
+            onChange={handleOnSearch}
+            placeholder="Search"
+            //  placeholder="🔍 Search by Claim Number, Claimant, or Status..."
+            className={`form-control ${props.hideSearchBar && "d-none"}`}
+            style={{ width: "100%", maxWidth: "400px" }}
+          />
+        </div>
+      )}
+      {props.showCustomBtn && (
+        <div
+          id="table_custom_button_div"
+          className="col-sm-2 my-2"
+          style={props.btnStyle ? props.btnStyle : { width: "12%" }}
+        >
+          <button
+            onClick={props.handleBtnClick}
+            type="button"
+            disabled={props.isCustomBtnDisabled}
+            className="btn btn-primary"
+            style={{ width: "100%" }}
+          >
+            <span className="font-14">{props.btnName}</span>
+          </button>
+        </div>
+      )}
+    </div>
+  
+    {/* Table */}
+    <div className="table-container">
+      <table className={`table ${style.table}`} style={{ width: props.tableWidth }}>
+        <thead>
+          <tr className="table_header">
+            {props.columns?.map((data, colIndx) => {
+              const checkedItems = selected.every((item) =>
+                currentItems.some((obj) => obj.id === item.id)
+              );
+              return data.fieldName === "checkbox" && props.checkType === "multiCheck" ? (
+                <th
+                  key={colIndx}
+                  className={`px-3 py-2 ${data.clsName}`}
+                  style={{ minWidth: data.minWidth || "6rem" }}
+                >
+                  <input
+                    type="checkbox"
+                    id="table-column-check"
+                    ref={(input) => {
+                      if (input) {
+                        input.indeterminate =
+                          selected.length > 0 && selected.length < currentItems.length;
+                      }
+                    }}
+                    checked={
+                      props.rowData?.length > 0 &&
+                      selected.length === currentItems.length &&
+                      checkedItems
+                    }
+                    name="column-check"
+                    onClick={(e) => onCheckColumn(e, data)}
+                  />
+                </th>
+              ) : !hideColumns.includes(data.fieldName) ? (
+                <th
+                  key={colIndx}
+                  className={`px-3 py-2 ${data.clsName}`}
+                  style={{ minWidth: data.minWidth || "6rem" }}
+                  onClick={() => sortByColumn(data.fieldName)}
+                >
+                  {data.titleCode ? data.titleCode : data.colName}{" "}
+                  {showSortedColumnIcon(data.fieldName)}
+                </th>
+              ) : null;
+            })}
+          </tr>
+        </thead>
+        <tbody>
+          {searchedData.length !== 0 ? (
+            currentItems.map((row, index) => {
+              const rowId = row.id;
+              const isItemSelected = isSelected(rowId);
+              return (
+                <tr key={index} className="table_datarow">
+                  {props.columns.map((o, colIndex) =>
+                    o.isClickable ? (
+                      <td
+                        key={colIndex}
+                        className={`px-3 py-2 ${o.clsName} ${
+                          colIndex === props.columns.length - 1
+                            ? "last-column"
+                            : colIndex === 0
+                            ? "first-column"
+                            : ""
+                        }`}
+                        style={{
+                          color: "#3370D4",
+                          cursor: "pointer",
+                          fontWeight: row.isRead === false ? "bolder" : "normal",
+                        }}
+                        onClick={(e) => onRowClick(e, row)}
+                      >
+                        <span>{_.get(row, o.fieldName)}</span>
+                      </td>
+                    ) : o.fieldName === "checkbox" ? (
+                      <td key={colIndex} className={`px-3 py-2 ${o.clsName}`}>
+                        <input
+                          type="checkbox"
+                          checked={isItemSelected}
+                          name="row-check"
+                          onChange={(event) => onRowCheck(event, rowId, row)}
+                        />
+                      </td>
+                    ) : !hideColumns.includes(o.fieldName) && o.fieldName !== "action" ? (
+                      <td
+                        key={colIndex}
+                        className={`px-3 py-2 ${o.clsName} ${
+                          colIndex === props.columns.length - 1
+                            ? "last-column"
+                            : colIndex === 0
+                            ? "first-column"
+                            : ""
+                        }`}
+                        style={{
+                          fontWeight: row.isRead === false ? "bolder" : "normal",
+                        }}
+                      >
+                        {o.colName === "Status" ? (
+                          <span className={`status-column ${_.get(row, o.fieldName)}-status`}>
+                            {_.get(row, o.fieldName)}{" "}
+                            {o.fieldName2 ? _.get(row, o.fieldName2) : ""}
+                          </span>
+                        ) : (
+                          <span>
+                            {_.get(row, o.fieldName)}{" "}
+                            {o.fieldName2 ? _.get(row, o.fieldName2) : ""}
+                          </span>
+                        )}
+                      </td>
+                    ) :!hideColumns.includes(o.fieldName) && o.fieldName === "action" ? (
+                      <td key={colIndex} className={`px-3 py-2 ${o.clsName} action-column`}>
+                        <div className="d-flex" style={{ gap: "12px", justifyContent: "center" }}>
+                          {/* Edit Button */}
+                          {/* {o.actions.includes("edit") && (
+                            <Tooltip title="Edit this item" placement="top" arrow>
+                              <button
+                                className="btn btn-light border-secondary btn-sm "
+                                onClick={() => props.handleEditRow(row)}
+                                type="button"
+                                disabled // Disable the button
+                                style={{ opacity: 0.5, cursor: "not-allowed" }} // Visual indication of disabled state
+                              >
+                                <img src={editIcon} alt="edit" className="table-action-icon" />
+                              </button>
+                            </Tooltip>
+                          )}
+                     */}
+
+{o.actions.includes("edit") && userData?.userType !== "CRP" && (
+  <Tooltip title="Edit this item" placement="top" arrow>
+    <button
+      className="btn btn-light border-secondary btn-sm"
+      onClick={() => props.handleEditRow(row)}
+      type="button"
+      disabled // Disable the button
+      style={{ opacity: 0.5, cursor: "not-allowed" }} 
+    >
+      <img src={editIcon} alt="edit" className="table-action-icon" />
+    </button>
+  </Tooltip>
+)}
+                          {/* View Button */}
+                          {o.actions.includes("view") && (
+                            <Tooltip title="View details" placement="top" arrow>
+                              <button
+                                className="btn btn-info btn-sm"
+                                onClick={() => handleView(row)}
+                                type="button"
+                              >
+                                <img src={viewIcon} alt="view" className="table-action-icon" />
+                              </button>
+                            </Tooltip>
+                          )}
+                    
+                          {/* Delete Button */}
+                          {o.actions.includes("delete") && (
+                            <Tooltip title="Delete this item" placement="top" arrow>
+                              <button
+                                className="btn btn-danger btn-sm"
+                                onClick={() => handleDeleteRow(row)}
+                                type="button"
+                              >
+                                <img src={deleteIcon} alt="delete" className="table-action-icon" />
+                              </button>
+                            </Tooltip>
+                          )}
+                        </div>
+                      </td>
+                    ) : null
+                  )}
+                </tr>
+              );
+            })
+          ) : (
+            <tr>
+              <td colSpan={props.columns.length} className="text-center fw-bold py-4">
+                <h5>Sorry, we couldn't find any results</h5>
+              </td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+    </div>
+  
+    {/* Table Footer */}
+    <div
+          className={`col-sm-12 py-3 position-relative d-flex justify-content-between align-items-center ${style.table_footer}`}
+        >
+          <div>
+            Entries found: {props?.rowData?.length || searchedData.length}
+          </div>
           <div
-            key={step.name}
-            ref={(el) => (stepRef.current[index] = el)}
-            className={`step ${
-              currentStep > index + 1 || isComplete ? "complete" : ""
-            } ${currentStep ===
+            className="d-flex align-items-center"
+            style={{ marginRight: 30 }}
+          >
+            <PaginationOptions />
+            <div>
+              <button
+                onClick={handlePrevPage}
+                disabled={currentPage === 1}
+                className="btn btn-light"
+              >
+                <i className="fa fa-arrow-left" aria-hidden="true"></i>
+              </button>
+              <span className={`mx-1 ${style.pagenumber}`}>{currentPage}</span>
+              <button
+                onClick={handleNextPage}
+                disabled={currentPage === totalPages}
+                className="btn btn-light"
+              >
+                <i className="fa fa-arrow-right" aria-hidden="true"></i>
+              </button>
+            </div>
+          </div>
+        </div>
+  </div>
+  );
+};
+
+export default ActionTable;
