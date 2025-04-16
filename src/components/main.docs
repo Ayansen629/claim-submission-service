@@ -1,94 +1,222 @@
-const handleSaveDraft = async () => {
-  setIsSavingDraft(true);
-  try {
-    const currentStepData = currentSubmitHandler ? await currentSubmitHandler() : {};
-    const processedStepData = await processFileUploads(currentStepData, currentStep);
+import React, { useEffect, useCallback, useState } from "react";
+import { useForm, FormProvider } from "react-hook-form";
+import DynamicField from "./formCommon/DynamicField";
+import Collapsible from "./formCommon/Collapsible";
+import Tooltip from "@mui/material/Tooltip";
+import { uploadDocument } from "../../../services/documentUploadService";
+import "./StepFirst.css";
 
-    // Get the last draft response from localStorage if available
-    const lastDraftResponse = JSON.parse(localStorage.getItem("draftResponse") || "null");
-    const draftId = lastDraftResponse?.data?.applicationDetails?.applicationNumber || "";
+const StepFirst = ({ provideSubmitHandler, formData }) => {
+  const userFormData = JSON.parse(localStorage.getItem("userFormData")) || {};
+  const hasCreditorName = !!userFormData?.claimantName;
+  const hasDebtorName = !!userFormData?.corporateDebtorName;
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadError, setUploadError] = useState(null);
 
-    // Prepare the draft data with existing UUIDs or generate new ones if not available
-    const creditorBasicDetailsUuid = formData.creditorBasicDetailsUuid || uuidv4();
-    const claimDetailsUuid = formData.claimDetailsUuid || uuidv4();
-    const signatoryDetailsUuid = formData.signatoryDetailsUuid || uuidv4();
-
-    const draftData = {
-      ...formData,
-      creditorBasicDetailsUuid,
-      claimDetailsUuid,
-      signatoryDetailsUuid,
-      [`step${currentStep}`]: {
-        ...formData[`step${currentStep}`],
-        ...processedStepData,
-      },
-      id: draftId,
-      status: "draft",
-      lastSaved: new Date().toISOString(),
-      currentStep,
-      formType: userFormData?.formType,
-      userType: userFormData?.userType,
-    };
-
-    // Create the draft payload - use last draft response data if available
-    const draftPayload = lastDraftResponse 
-      ? {
-          ...lastDraftResponse.data,
-          applicationDetails: {
-            ...lastDraftResponse.data.applicationDetails,
-            // Update with current form data
-            creditorBasicDetails: {
-              ...lastDraftResponse.data.applicationDetails.creditorBasicDetails,
-              ...createFormPayload(draftData, false, userFormData, draftId, false).creditorBasicDetails
-            },
-            claimDetails: {
-              ...lastDraftResponse.data.applicationDetails.claimDetails,
-              ...createFormPayload(draftData, false, userFormData, draftId, false).claimDetails
-            },
-            signatoryDetails: {
-              ...lastDraftResponse.data.applicationDetails.signatoryDetails,
-              ...createFormPayload(draftData, false, userFormData, draftId, false).signatoryDetails
-            }
-          }
-        }
-      : {
-          status: {
-            code: "",
-            message: ""
-          },
-          userInfo: userFormData?.fullloginDetails || {},
-          applicationDetails: createFormPayload(draftData, false, userFormData, draftId, false),
-        };
-
-    console.log("Draft Payload:", draftPayload);
-
-    // Make API call to save draft
-    const REQUEST = `${process.env.REACT_APP_APPLICATION_SERVICE}${URLS_ENDPOINT.APP_SERVICES.APPLICATION_FORMSUBMIT}`;
-    const response = await postData(REQUEST, draftPayload);
-
-    if (response.data.status.code === "200") {
-      // Save the response to localStorage for future updates
-      localStorage.setItem("draftResponse", JSON.stringify(response));
-      setDraftResponse(response); // Store in state
-
-      // Update form data with the response data
-      setFormData(prev => ({
-        ...prev,
-        creditorBasicDetailsUuid: response.data.applicationDetails.creditorBasicDetails.uuid,
-        claimDetailsUuid: response.data.applicationDetails.claimDetails.uuid,
-        signatoryDetailsUuid: response.data.applicationDetails.signatoryDetails.uuid,
-        applicationNumber: response.data.applicationDetails.applicationNumber
-      }));
-
-      setHasPreviewed(true); // Enable preview after saving draft
-      toast.success("Draft saved successfully");
-    } else {
-      toast.error(`Failed to save draft: ${response.data.status.message}`);
+  const methods = useForm({
+    defaultValues: {
+      CreditorName: userFormData?.claimantName || "",
+      debtorName: userFormData?.corporateDebtorName || "",
+      // identificationType: userFormData?.userDetails?.aadharNumber ? "Aadhar" : 
+      //                    userFormData?.userDetails?.panNumber ? "PAN" : "",
+      // identificationNumber: userFormData?.userDetails?.aadharNumber || 
+      //                      userFormData?.userDetails?.panNumber || ""
     }
-  } catch (error) {
-    console.error("Error saving draft:", error);
-    toast.error("Failed to save draft");
-  } finally {
-    setIsSavingDraft(false);
-  }
+  });
+  
+  const { register, handleSubmit, formState: { errors }, trigger, setValue, control, getValues, watch } = methods;
+
+  const handleFileUpload = async (file) => {
+    try {
+      const result = await uploadDocument(file, 'identification');
+      return result;
+    } catch (error) {
+      throw error;
+    }
+  };
+
+  const claimantDetailsSchema = [
+    { 
+      name: "CreditorName", 
+      label: <>Creditor Name <span className="required-asterisk">*</span></>, 
+      type: "text", 
+      rules: { 
+        required: !hasCreditorName && "Creditor Name is required",
+      },
+      placeholder: "Enter Creditor Name",
+      disabled: hasCreditorName,
+      tooltip: "Name of the creditor filing the claim"
+    },
+    { 
+      name: "totalClaimAmount", 
+      label: <>Total Claim Amount <span className="required-asterisk">*</span></>, 
+      type: "number", 
+      rules: { 
+        required: "Total Claim Amount is required", 
+        min: { value: 0, message: "Value must be greater than or equal to 0" } 
+      },
+      placeholder: "Enter Total Claim Amount",
+      tooltip: "The total amount being claimed against the debtor"
+    },
+    { 
+      name: "debtDetails", 
+      label: <>Debt Incurred Details <span className="required-asterisk">*</span></>, 
+      type: "textarea", 
+      rules: { required: "Debt Details are required" },
+      tooltip: "Details of how and when debt incurred",
+      placeholder: "Enter details including dates, nature of debt, and agreements"
+    },
+    { 
+      name: "mutualCreditDetails", 
+      label: <>Mutual Credit/Debts Details <span className="required-asterisk">*</span></>, 
+      type: "textarea", 
+      rules: { required: "Mutual Credit Details are required" },
+      tooltip: "Details of any mutual credit, mutual debts, or other mutual dealings between the corporate debtor and the creditor which may be set-off against the claim",
+      placeholder: "Enter details of any mutual transactions or set-offs"
+    },
+    {
+      name: "identificationType",
+      label: <>Identification Type <span className="required-asterisk">*</span></>,
+      type: "select",
+      options: [
+        { value: "", label: "Select Identification Type", disabled: true },
+        { value: "Aadhar", label: "Aadhar" },
+        { value: "PAN", label: "PAN" },
+        { value: "Passport", label: "Passport" },
+      ],
+      rules: { required: "Identification type is required" },
+      tooltip: "Select the type of identification document provided",
+    },
+    {
+      name: "identificationNumber",
+      label: <>Identification Number <span className="required-asterisk">*</span></>,
+      type: "text",
+      rules: { 
+        required: "Identification number is required",
+        pattern: {
+          value: watch("identificationType") === "PAN" 
+            ? /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/ 
+            : /^.*$/,
+          message: "Please enter a valid PAN number (format: ABCDE1234F)"
+        }
+      },
+      tooltip: "Enter your Aadhar, PAN, or Passport number",
+      placeholder: "Enter Identification Number",
+    },
+    {
+      name: "identificationDocument",
+      label: <>Identification Document <span className="required-asterisk">*</span></>,
+      type: "file",
+      rules: { 
+        required: "Identification document is required",
+        validate: {
+          fileUploaded: (value) => value !== null || "Please upload the document"
+        }
+      },
+      tooltip: "Upload a clear scan of your identification document",
+      accept: "image/*,.pdf",
+      onFileUpload: handleFileUpload,
+      isUploading,
+      uploadError,
+      setIsUploading,
+      setUploadError
+    },
+  ];
+
+  const debtorDetailsSchema = [
+    {
+      name: "debtorName",
+      label: <>Debtor Name <span className="required-asterisk">*</span></>,
+      type: "text",
+      rules: { 
+        required: !hasDebtorName && "Debtor Name is required" 
+      },
+      placeholder: "Enter Debtor Name",
+      tooltip: "Name of the corporate debtor against whom the claim is being filed",
+      disabled: hasDebtorName
+    }
+  ];
+
+  const onSubmit = useCallback(async () => {
+    const isValid = await trigger();
+    if (!isValid) {
+      console.error("Validation failed");
+      return false;
+    }
+    return getValues();
+  }, [trigger, getValues]);
+
+  useEffect(() => {
+    if (formData) {
+      Object.keys(formData).forEach((key) => {
+        setValue(key, formData[key]);
+      });
+    }
+
+    if (!formData?.CreditorName && hasCreditorName) {
+      setValue("CreditorName", userFormData.claimantName);
+    }
+    if (!formData?.debtorName && hasDebtorName) {
+      setValue("debtorName", userFormData.corporateDebtorName);
+    }
+  }, [formData, setValue, hasCreditorName, hasDebtorName, userFormData]);
+
+  useEffect(() => {
+    if (provideSubmitHandler) {
+      provideSubmitHandler(onSubmit);
+    }
+  }, [provideSubmitHandler, onSubmit]);
+
+  const identificationType = watch("identificationType");
+  useEffect(() => {
+    if (identificationType) {
+      trigger("identificationNumber");
+      localStorage.setItem("selectedIdentificationType", identificationType);
+    }
+  }, [identificationType, trigger]);
+
+  return (
+    <FormProvider {...methods}>
+      <form className="form-stepper">
+        <div className="mb-4 bg-light">
+          <div className="mb-4 bg-light">
+            <Collapsible title="Debtor Details" defaultOpen={true}>
+              <div className="flex-container">
+                {debtorDetailsSchema.map((fieldConfig) => (
+                  <DynamicField
+                    key={fieldConfig.name}
+                    fieldConfig={fieldConfig}
+                    control={control}
+                    register={register}
+                    errors={errors}
+                    setValue={setValue}
+                    trigger={trigger}
+                    getValues={getValues}
+                  />
+                ))}
+              </div>
+            </Collapsible>
+          </div>
+          <Collapsible title="Creditor Basic Details" defaultOpen={true}>
+            <div className="flex-container">
+              {claimantDetailsSchema.map((fieldConfig) => (
+                <DynamicField
+                  key={fieldConfig.name}
+                  fieldConfig={fieldConfig}
+                  control={control}
+                  register={register}
+                  errors={errors}
+                  setValue={setValue}
+                  trigger={trigger}
+                  getValues={getValues}
+                />
+              ))}
+            </div>
+          </Collapsible>
+        </div>
+      </form>
+    </FormProvider>
+  );
 };
+
+export default StepFirst;
