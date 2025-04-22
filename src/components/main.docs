@@ -1,636 +1,584 @@
-import React, { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import "bootstrap/dist/css/bootstrap.min.css";
-import { Container, Row, Col, Modal, Button, Table } from "react-bootstrap";
-import "./DashboardMain.css";
-import FileUploadModal from "./FileUploadModal.jsx";
-import ActionTable from "./ActionTable.js";
-import { toast } from "react-toastify";
-import { APP_MESSAGES, openFileInNewTab } from "../../../utils/constants.ts";
-import { URLS_ENDPOINT } from "../../../utils/urlsConstants.ts";
-import { postData } from "../../../services/http.service.ts";
-// import Collapsible from "../../../common/Collapsible.js";
-import Collapsible from "../stepperForm/formCommon/Collapsible.js";
-import PreviewCard from "./PreviewCard.js";
-import { FaCheckCircle, FaClock, FaHourglassStart } from "react-icons/fa";
+import React, { useState, useEffect, useRef } from "react";
+import style from "./ActionTable.module.css";
+import _ from "lodash";
+import editIcon from "../../../assests/icons/edit.svg";
+import viewIcon from "../../../assests/icons/view.svg";
+import deleteIcon from "../../../assests/icons/delete.svg";
+import { BsGeoAltFill } from "react-icons/bs";
+import Tooltip from "@mui/material/Tooltip";
+import { Dropdown } from "react-bootstrap";
 
-import { FaDownload, FaClipboardList, FaFile, FaFilePdf } from "react-icons/fa6";
-
-const DashboardMain = () => {
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
-  const [isViewModalOpen, setIsViewModalOpen] = useState(false);
-  const [modalData, setModalData] = useState({});
-  const [historyModal, setHistoryModal] = useState(false);
-  const [historyData, setHistoryData] = useState({});
-  const [showDocumentModal, setShowDocumentModal] = useState(false);
-  const [documentListData, setDocumentListData] = useState([]);
-  const navigate = useNavigate();
-  const [isTrackModalOpen, setIsTrackModalOpen] = useState(false);
-  const [trackData, setTrackData] = useState({});
-
-  const handleDocumentModal = () => setShowDocumentModal(!showDocumentModal);
-
-  const [rowData, setRowData] = useState([]);
-  const columns = [
-    {
-      colName: "SL NO",
-      fieldName: "slNo",
-      clsName: "column-text-start",
-      isClickable: false,
-      titleCode: "SL NO",
-      minWidth: "5rem",
-    },
-    {
-      colName: "Claim Number",
-      fieldName: "claimNumber",
-      clsName: "column-text-start",
-      isClickable: false,
-      titleCode: "Claim Number",
-      minWidth: "10rem",
-    },
-    {
-      colName: "Claimant",
-      fieldName: "claimant",
-      clsName: "column-text-start",
-      isClickable: false,
-      titleCode: "Claimant",
-      minWidth: "10rem",
-    },
-    {
-      colName: "Status",
-      fieldName: "status",
-      clsName: "column-text-start",
-      isClickable: false,
-      titleCode: "Status",
-      minWidth: "10rem",
-    },
-    {
-      colName: "comment",
-      fieldName: "comment",
-      clsName: "column-text-start",
-      isClickable: false,
-      titleCode: "comment",
-      minWidth: "10rem",
-    },
-    {
-      colName: "Amount",
-      fieldName: "amount",
-      clsName: "column-text-start",
-      isClickable: false,
-      titleCode: "Amount",
-      minWidth: "10rem",
-    },
-    {
-      colName: "Date Submitted",
-      fieldName: "dateSubmitted",
-      clsName: "column-text-start",
-      isClickable: false,
-      titleCode: "Date Submitted",
-      minWidth: "10rem",
-    },
-    {
-      colName: "Action",
-      fieldName: "action",
-      actions: ["view", "edit", "track", "delete"],
-      clsName: "col-sm-2 column-text-start actions-column",
-    },
-  ];
-  const handleTrackRow = (row) => {
-    console.log("Track row:", row.uuid);
-    // Set static data for tracking
-    const staticTrackData = {
-      applicationNumber: row.claimNumber || "N/A",
-      trackingSteps: [
-        { step: "Step 1", description: "Application Submitted", date: "2023-10-01" },
-        { step: "Step 2", description: "Under Review", date: "2023-10-05" },
-        { step: "Step 3", description: "Approved", date: "2023-10-10" },
-      ],
-    };
-    setTrackData(staticTrackData);
-    setIsTrackModalOpen(true);
-  };
-
-  // const handleViewRow = (row) => {
-  //  console.log("View row:", row.uuid);
-  //  if (row?.uuid) {
-  //  navigate(`/apply-claim/view/${row.uuid}`);
-  //  } else {
-  //  console.error("UUID not found in the row object.");
-  //  toast.warning("No UUID Available..", { position: "top-right" });
-  //  }
-  // };
-
-  // const handleAddButtonClick = () => {
-  //  setIsLoading(true);
-  //  setTimeout(() => {
-  //  setIsLoading(false);
-  //  navigate("/registration");
-  //  }, 1000);
-  // };
-
-  const handleEditRow = (row) => {
-    console.log("Edit row:", row.uuid);
-    if (row?.uuid) {
-      navigate(`/apply-claim/edit/${row.uuid}`);
-    } else {
-      console.error("UUID not found in the row object.");
-      toast.warning("No UUID Available..", { position: "top-right" });
-    }
-  };
-
-  const formatFileInfo = (document) => {
-    if (!document) return "N/A";
-    return `${document.docType || 'Document'} (${document.docName || 'No name'})`;
-  };
-
-  const transformApplicationData = (application) => {
-    if (!application) return null;
-
-    const basicDetails = application.creditorBasicDetails || {};
-    const claimDetails = application.claimDetails || {};
-    const signatoryDetails = application.signatoryDetails || {};
-
-    return {
-      applicationNumber: application.applicationNumber,
-      step1: {
-        creditorDetails: {
-          // "Application Number": application.applicationNumber,
-          "Debtor Name": basicDetails.debtorName,
-          "Creditor Name": basicDetails.creditorName,
-          "Total Claim Amount": basicDetails.totalClaimAmount,
-          "Debt Details": basicDetails.debtDetails,
-          "Mutual Credit Details": basicDetails.mutualCreditDetails,
-        },
-        identificationDetails: {
-          "Identification Type": basicDetails.document?.docType,
-          "Identification Number": basicDetails.identificationNumber,
-          "Document Name": formatFileInfo(basicDetails.document),
-        },
-      },
-      step2: {
-        financialDetails: {
-          "Security Interest Amount": claimDetails.securityInterestAmount,
-          "Guarantee Amount": claimDetails.guaranteeAmount,
-          "Guarantor Name": claimDetails.guarantorName,
-          "Guarantor Address": claimDetails.guarantorAddress,
-          "Creditor Address": claimDetails.creditorAddress,
-          "Creditor Email": claimDetails.creditorEmail,
-          "Principal Borrower Name": claimDetails.principalBorrowerName,
-          "Principal Borrower Address": claimDetails.principalBorrowerAddress,
-        },
-        beneficiaryDetails: {
-          "Beneficiary Name": claimDetails.beneficiaryName,
-          "Beneficiary Address": claimDetails.beneficiaryAddress,
-          "Corporate Debtor Security Amount": claimDetails.corporateDebtorSecurityAmount,
-          "Corporate Debtor Guarantee Amount": claimDetails.corporateDebtorGuaranteeAmount,
-        },
-        addressproofDetails: {
-          "Address Proof Type": claimDetails.document?.docType,
-          "Address Proof Number": claimDetails.addressProofNumber,
-          "Address Proof Document": formatFileInfo(claimDetails.document),
-        },
-        bankDetails: {
-
-          "Account Number": claimDetails.bankAccountNumber,
-          "IFSC Code": claimDetails.bankIfscCode,
-          "Branch Name": claimDetails.bankBranchName,
-        },
-      },
-      step3: {
-        signatoryDetails: {
-          "Signatory Name": signatoryDetails.name,
-          "Signatory Position": signatoryDetails.position,
-          "Signatory Address": signatoryDetails.address,
-          "Signatory Document": formatFileInfo(signatoryDetails.document),
-        },
-      },
-      status: application.applicationStatus,
-    };
-  };
-
-  const handleOnViewRow = async (row) => {
-    try {
-      setIsLoading(true);
-
-      // Get user data from localStorage
-      const userFormData = JSON.parse(localStorage.getItem("userFormData"));
-      const userInfo = userFormData?.fullloginDetails;
-
-      if (!userInfo) {
-        throw new Error("User information not found in localStorage");
-      }
-
-      const payload = {
-        userInfo: userInfo,
-        uuids: [row.uuid], // Use the uuid from the row
-        applicationNumbers: [],
-        claimantUUIDs: []
-      };
-
-      const URL =
-        process.env.REACT_APP_APPLICATION_SERVICE +
-        URLS_ENDPOINT.APP_SERVICES.APPLICATION_VIEW_ID;
-
-      const response = await postData(URL, payload);
-
-      if (response?.data?.status?.code === "200" && response?.data?.applicationDetails?.length > 0) {
-        const transformedData = transformApplicationData(response.data.applicationDetails[0]);
-        setModalData(transformedData);
-        setIsViewModalOpen(true);
-      } else {
-        toast.error("No application details found", { position: "top-right" });
-      }
-    } catch (error) {
-      console.error("Error fetching application details:", error);
-      toast.error(APP_MESSAGES.API_ERR, { position: "top-right" });
-    } finally {
-      setIsLoading(false);
-    }
-  };
-  // const fetchDocumentList = async (data) => {
-  //  if (data?.registrationBooksData?.[0]?.uuid) {
-  //  try {
-  //  const URL =
-  //  process.env.REACT_APP_BASE_URL +
-  //  URLS_ENDPOINT.APP_SERVICES.DOWNLOAD_DOC +
-  //  data?.registrationBooksData?.[0]?.uuid;
-  //  const response = await postData(URL, {});
-  //  if (response?.data?.documentList?.length > 0) {
-  //  setDocumentListData(response?.data?.documentList);
-  //  handleDocumentModal();
-  //  } else {
-  //  toast.info(APP_MESSAGES.NO_DATA_MSG, { position: "top-right" });
-  //  }
-  //  } catch (error) {
-  //  toast.error(APP_MESSAGES.API_ERR, { position: "top-right" });
-  //  }
-  //  } else {
-  //  toast.info(APP_MESSAGES.NO_DATA_MSG, { position: "top-right" });
-  //  }
-  // };
-
-  // const getDocumentFile = async (docInfo) => {
-  //  if (docInfo?.registrationUuidFk) {
-  //  try {
-  //  const URL =
-  //  process.env.REACT_APP_BASE_URL +
-  //  URLS_ENDPOINT.APP_SERVICES.DOWNLOAD_DOC +
-  //  docInfo?.registrationUuidFk +
-  //  "&documentUuid=" +
-  //  docInfo?.uuid;
-  //  const response = await postData(URL, {});
-  //  const base64String = response?.data?.documentList[0]?.documentBase64 || "";
-  //  if (base64String) {
-  //  openFileInNewTab(base64String);
-  //  } else {
-  //  toast.info(APP_MESSAGES.NO_DATA_MSG, { position: "top-right" });
-  //  }
-  //  } catch (error) {
-  //  toast.error(APP_MESSAGES.API_ERR, { position: "top-right" });
-  //  }
-  //  } else {
-  //  toast.info(APP_MESSAGES.NO_DATA_MSG, { position: "top-right" });
-  //  }
-  // };
-
-
-  const fetchDashboardData = async () => {
-    try {
-      setIsLoading(true);
-
-      // Get user data from localStorage
-      const userFormData = JSON.parse(localStorage.getItem("userFormData"));
-      const userInfo = userFormData?.fullloginDetails
-      const userType = userFormData?.userType; // Get user type
-
-      if (!userInfo) {
-        throw new Error("User information not found in localStorage");
-      }
-
-      const payload = {
-        userInfo: userInfo,
-        filterCriteria: {}
-      };
-
-      const URL =
-        process.env.REACT_APP_APPLICATION_SERVICE +
-        URLS_ENDPOINT.APP_SERVICES.DASHBOARD_LIST;
-
-      const response = await postData(URL, payload);
-
-      if (response?.data.status === "200" && response?.data.dashboardApplications?.length > 0) {
-        // Format the data to match your table structure
-        const formattedData = response.data.dashboardApplications.map((item, index) => {
-          const claimNumber = userType === "CRP"
-            ? (
-              <a
-                href={`/apply-claim/${item.uuid}`}
-                style={{ color: "#269ccc", textDecoration: "underline" }}
-                title={item.applicationNumber} // Add full claim number as title for hover
-              >
-                {item.applicationNumber.split(' ')[0]} {/* Display only the first word */}
-              </a>
-            )
-            : item.applicationNumber;
-
-          return {
-            ...item,
-            id: item.uuid,
-            slNo: index + 1,
-            claimNumber: claimNumber, // Use the formatted claimNumber
-            claimant: item.creditorName,
-            status: item.applicationStatus,
-            amount: `${item.totalClaimAmount}` || "0.00",
-            dateSubmitted: item.submittedDate || new Date().toLocaleDateString(),
-            action: ["view"],
-            originalData: item,
-          };
-        });
-
-
-        setRowData(formattedData);
-      } else {
-        setRowData([]);
-        toast.info("No applications found", { position: "top-right" });
-      }
-    } catch (error) {
-      console.error("Error fetching dashboard data:", error);
-      toast.error(APP_MESSAGES.API_ERR, { position: "top-right" });
-      setRowData([]);
-    } finally {
-      setIsLoading(false);
-    }
-  };
+const ActionTable = (props) => {
+  const [searchedData, setSearchedData] = useState(props.rowData || []);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [selected, setSelected] = useState([]);
+  const [sortedColumn, setSortedColumn] = useState(null);
+  const [sortOrder, setSortOrder] = useState("");
+  const hideColumns = props.hideColumns || [];
+  const [searchQuery, setSearchQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [dateSort, setDateSort] = useState("none");
+  const [itemsPerPage, setItemPerPage] = useState(10);
+  const [totalPages, setTotalPages] = useState(0); // Add this line
 
   useEffect(() => {
-    fetchDashboardData();
-  }, []);
+    if (props.rowData) {
+      setSearchedData(props.rowData);
+      setCurrentPage(1);
+      const selectedRows = props.rowData
+        .filter((item) => item.isChecked)
+        .map((item) => item.id);
+      setSelected(selectedRows);
+    }
+  }, [props.rowData]);
+
+  // Apply filters and sorting
+  useEffect(() => {
+    let filteredData = [...(props.rowData || [])];
+
+    // Apply status filter
+    if (statusFilter !== "all") {
+      filteredData = filteredData.filter(item => item.status === statusFilter);
+    }
+
+    // Apply search query
+    if (searchQuery) {
+      const searchValue = searchQuery.toLowerCase();
+      filteredData = filteredData.filter(item =>
+        Object.values(item).some(value =>
+          value?.toString().toLowerCase().includes(searchValue)
+        )
+      );
+    }
+
+    // Replace the date sorting logic in your useEffect with this:
+    if (dateSort !== "none") {
+      filteredData.sort((a, b) => {
+        // Function to parse date from multiple possible fields
+        const parseDate = (obj) => {
+          const dateFormats = [
+            'dd-MM-yy', 'dd/MM/yy', 'dd.MM.yy',
+            'yyyy-MM-dd', 'yyyy/MM/dd', 'yyyy.MM.dd'
+          ];
+
+          const dateFields = ['dateSubmitted', 'createdAt', 'date', 'submissionDate'];
+
+          for (const field of dateFields) {
+            if (obj[field]) {
+              // Try parsing with different formats
+              for (const format of dateFormats) {
+                const parsedDate = parseDateFromFormat(obj[field], format);
+                if (parsedDate && !isNaN(parsedDate.getTime())) {
+                  return parsedDate;
+                }
+              }
+
+              // Fallback to native Date parsing
+              const date = new Date(obj[field]);
+              if (!isNaN(date.getTime())) {
+                return date;
+              }
+            }
+          }
+
+          // If no valid date found, return a very old date (will sort to bottom)
+          return new Date(0);
+        };
+
+        const dateA = parseDate(a);
+        const dateB = parseDate(b);
+
+        // For newest first (descending)
+        if (dateSort === "desc") {
+          return dateB - dateA; // Newest dates first
+        }
+        // For oldest first (ascending)
+        else {
+          return dateA - dateB; // Oldest dates first
+        }
+      });
+    }
+
+
+    // Helper function to parse date from specific format
+function parseDateFromFormat(dateString, format) {
+  if (!dateString) return null;
+  
+  // Handle dd-MM-yy format
+  if (format === 'dd-MM-yy') {
+    const parts = dateString.split('-');
+    if (parts.length === 3) {
+      const day = parseInt(parts[0], 10);
+      const month = parseInt(parts[1], 10) - 1;
+      const year = 2000 + parseInt(parts[2], 10);
+      return new Date(year, month, day);
+    }
+  }
+  
+  // Handle other formats similarly...
+  
+  // Fallback to native parsing
+  return new Date(dateString);
+}
+
+    setSearchedData(filteredData);
+    setCurrentPage(1);
+    setTotalPages(Math.ceil((filteredData?.length || 0) / itemsPerPage)); // Calculate total pages here
+
+  }, [props.rowData, statusFilter, searchQuery, dateSort, itemsPerPage]); // itemsPerPage added
+
+  const indexOfLastItem = currentPage * itemsPerPage;
+  const indexOfFirstItem = indexOfLastItem - itemsPerPage;
+  const currentItems = searchedData.slice(indexOfFirstItem, indexOfLastItem);
+  // const totalPages = Math.ceil((searchedData?.length || 0) / itemsPerPage);  Remove this line
+
+  const handleNextPage = () => {
+    setCurrentPage((prevPage) => Math.min(prevPage + 1, totalPages));
+  };
+
+  const handlePrevPage = () => {
+    setCurrentPage((prevPage) => Math.max(prevPage - 1, 1));
+  };
+
+  const handleOnSearch = (e) => {
+    setSearchQuery(e.target.value);
+  };
+
+  const sortByColumn = (column) => {
+    if (sortedColumn === column) {
+      setSortOrder(sortOrder === "asc" ? "desc" : "asc");
+    } else {
+      setSortedColumn(column);
+      setSortOrder("asc");
+    }
+  };
+
+  const showSortedColumnIcon = (columnName) => {
+    return sortedColumn === columnName ? (
+      sortOrder === "asc" ? (
+        <i className="fa fa-long-arrow-up table-arrow" aria-hidden="true" />
+      ) : (
+        <i className="fa fa-long-arrow-down table-arrow" aria-hidden="true" />
+      )
+    ) : (
+      <></>
+    );
+  };
+
+  const handleDeleteRow = (rowData) => {
+    props.onDeleteRow?.(rowData);
+  };
+
+  const handleTrack = (rowData) => {
+    props.onTrackRow?.(rowData);
+  };
+
+  const handleView = (rowData) => {
+    props.onViewRow?.(rowData);
+  };
+
+  const handleEdit = (rowData) => {
+    props.handleEditRow?.(rowData);
+  };
+
+  const handleDownload = (rowData) => {
+    props.download?.(rowData);
+  };
+
+  const handleSelectAll = (e) => {
+    if (e.target.checked) {
+      const newSelecteds = currentItems.map(n => n.id);
+      setSelected(newSelecteds);
+      props.onCheckHandler?.(newSelecteds);
+    } else {
+      setSelected([]);
+      props.onCheckHandler?.([]);
+    }
+  };
+
+  const handleRowSelect = (e, row) => {
+    const selectedId = row.id;
+    if (e.target.checked) {
+      const newSelected = [...selected, selectedId];
+      setSelected(newSelected);
+      props.onCheckHandler?.(newSelected);
+    } else {
+      const newSelected = selected.filter(id => id !== selectedId);
+      setSelected(newSelected);
+      props.onCheckHandler?.(newSelected);
+    }
+  };
+
+  const isSelected = (id) => {
+    return selected.includes(id);
+  };
+
+  const getStatusOptions = () => {
+    const statuses = [...new Set(props.rowData?.map(item => item.status))];
+    return ["all", ...statuses].filter(Boolean);
+  };
+
+  const StatusFilterDropdown = () => (
+    <Dropdown className="ms-2">
+      <Dropdown.Toggle
+        variant="outline-secondary"
+        id="status-filter-dropdown"
+        className="d-flex align-items-center"
+      >
+        <i className="fa fa-filter me-2" />
+        Status: {statusFilter === "all" ? "All" : statusFilter}
+      </Dropdown.Toggle>
+      <Dropdown.Menu className="dropdown-menu-end">
+        {getStatusOptions().map((status, index) => (
+          <Dropdown.Item
+            key={index}
+            onClick={() => setStatusFilter(status)}
+            active={status === statusFilter}
+            className="d-flex align-items-center"
+          >
+            {status === "all" ? "All Statuses" : status}
+            {status === statusFilter && <i className="fa fa-check ms-2" />}
+          </Dropdown.Item>
+        ))}
+      </Dropdown.Menu>
+    </Dropdown>
+  );
+
+  const DateSortDropdown = () => (
+    <Dropdown className="ms-2">
+      <Dropdown.Toggle
+        variant="outline-secondary"
+        id="date-sort-dropdown"
+        className="d-flex align-items-center"
+      >
+        <i className="fa fa-calendar me-2" />
+        Date: {dateSort === "none" ? "Default" : dateSort === "asc" ? "Oldest First" : "Newest First"}
+      </Dropdown.Toggle>
+      <Dropdown.Menu className="dropdown-menu-end">
+        <Dropdown.Item
+          onClick={() => setDateSort("none")}
+          active={dateSort === "none"}
+          className="d-flex align-items-center"
+        >
+          Default Order
+          {dateSort === "none" && <i className="fa fa-check ms-2" />}
+        </Dropdown.Item>
+        <Dropdown.Item
+          onClick={() => setDateSort("asc")}
+          active={dateSort === "asc"}
+          className="d-flex align-items-center"
+        >
+          Oldest First
+          {dateSort === "asc" && <i className="fa fa-check ms-2" />}
+        </Dropdown.Item>
+        <Dropdown.Item
+          onClick={() => setDateSort("desc")}
+          active={dateSort === "desc"}
+          className="d-flex align-items-center"
+        >
+          Newest First
+          {dateSort === "desc" && <i className="fa fa-check ms-2" />}
+        </Dropdown.Item>
+      </Dropdown.Menu>
+    </Dropdown>
+  );
+
+  const PaginationOptions = () => {
+    const [isShow, setIsShow] = useState(false);
+    const exportRef = useRef(null);
+
+    useEffect(() => {
+      const handleOutsideClick = (e) => {
+        if (exportRef.current && !exportRef.current.contains(e.target)) {
+          setIsShow(false);
+        }
+      };
+      document.addEventListener("click", handleOutsideClick);
+      return () => {
+        document.removeEventListener("click", handleOutsideClick);
+      };
+    }, []);
+
+    return (
+      <div
+        id="export_button"
+        ref={exportRef}
+        className="d-inline-flex flex-row align-items-center"
+      >
+        <div className="pe-2">Rows per page</div>
+        <Dropdown>
+          <Dropdown.Toggle
+            variant="outline-secondary"
+            id="dropdownMenuButton1"
+            className="d-flex align-items-center"
+          >
+            <span>{itemsPerPage}</span>
+          </Dropdown.Toggle>
+
+          <Dropdown.Menu>
+            {[10, 25, 50, 100].map((item, i) => (
+              <Dropdown.Item
+                key={i}
+                onClick={() => {
+                  setItemPerPage(item);
+                  setCurrentPage(1);
+                }}
+                active={itemsPerPage === item}
+                className="d-flex align-items-center"
+              >
+                {item}
+                {itemsPerPage === item && <i className="fa fa-check ms-2" />}
+              </Dropdown.Item>
+            ))}
+          </Dropdown.Menu>
+        </Dropdown>
+      </div>
+    );
+  };
+
+  const userData = JSON.parse(localStorage.getItem("userFormData")) || {};
 
   return (
-    <div className="container-fluid mt-5" style={{ paddingLeft: 0, paddingRight: 0 }}>
-      {!isLoading ? (
-        <>
-          <h3 className="mb-2 text-center">Claim Submission Service</h3>
+    <div className="mb-5 px-0 mx-0 generic-action-table pt-3">
+      {/* Search and Filter Controls */}
+      <div className={`row ${style.table_controls} ${props.hideSearchBar ? "justify-content-end mb-3" : "justify-content-between"}`}>
+        {!props.hideSearchBar && (
+          <div className="col-md-6 mb-3">
+            <div className="input-group">
+              <input
+                type="search"
+                value={searchQuery}
+                onChange={handleOnSearch}
+                placeholder="Search records..."
+                className="form-control"
+              />
+            </div>
+          </div>
+        )}
 
+        <div className="col-md-6 d-flex flex-wrap justify-content-end align-items-center mb-3">
+          <div className="d-flex">
+            <StatusFilterDropdown />
+            <DateSortDropdown />
+          </div>
 
-          <ActionTable
-            columns={columns}
-            rowData={rowData}
-            hideExportBtn={false}
-            onViewRow={handleOnViewRow}
-            handleEditRow={handleEditRow}
-            onTrackRow={handleTrackRow}
+          {props.showCustomBtn && (
+            <button
+              onClick={props.handleBtnClick}
+              type="button"
+              disabled={props.isCustomBtnDisabled}
+              className="btn btn-primary ms-3 d-flex align-items-center"
+            >
+              <i className="fa fa-plus me-2" />
+              <span>{props.btnName}</span>
+            </button>
+          )}
+        </div>
+      </div>
 
-          />
+      {/* Table */}
+      <div className={`${style.table_container} mb-3`}>
+        <table className={`table ${style.table}`}>
+          <thead>
+            <tr className={style.table_header}>
+              <th className="px-3 py-2" style={{ width: "50px" }}>
+                <input
+                  type="checkbox"
+                  checked={selected.length > 0 && selected.length === currentItems.length}
+                  onChange={handleSelectAll}
+                  ref={input => {
+                    if (input) {
+                      input.indeterminate = selected.length > 0 && selected.length < currentItems.length;
+                    }
+                  }}
+                />
+              </th>
 
-          {/* Tracking Modal */}
-          <Modal
-            show={isTrackModalOpen}
-            onHide={() => setIsTrackModalOpen(false)}
-            dialogClassName="modal-1110w"
-            aria-labelledby="tracking-modal-title"
-          >
-            <Modal.Header closeButton>
-              <Modal.Title id="tracking-modal-title">Tracking Details</Modal.Title>
-            </Modal.Header>
-            <Modal.Body>
-              {trackData ? (
-                <>
-                  <div className="mb-4 text-center">
-                    <h5 className="text-muted mb-2">Application Number</h5>
-                    <div
-                      style={{
-                        display: "inline-block",
-                        backgroundColor: "#e6f4ff",
-                        color: "#007bff",
-                        padding: "10px 20px",
-                        borderRadius: "30px",
-                        fontWeight: "600",
-                        fontSize: "1.2rem",
-                        border: "1px solid #b3daff",
-                      }}
-                    >
-                      {trackData.applicationNumber}
+              {props.columns?.map((data, colIndx) => {
+                return !hideColumns.includes(data.fieldName) ? (
+                  <th
+                    key={colIndx}
+                    className={`px-3 py-2 ${data.clsName} ${style.sortable_header}`}
+                    style={{ minWidth: data.minWidth || "150px" }}
+                    onClick={() => sortByColumn(data.fieldName)}
+                  >
+                    <div className="d-flex align-items-center">
+                      <span>{data.titleCode || data.colName}</span>
+                      {showSortedColumnIcon(data.fieldName)}
                     </div>
-                  </div>
+                  </th>
+                ) : null;
+              })}
+            </tr>
+          </thead>
+          <tbody>
+            {currentItems.length > 0 ? (
+              currentItems.map((row, index) => {
+                const isItemSelected = isSelected(row.id);
+                return (
+                  <tr
+                    key={index}
+                    className={`${style.table_datarow} ${isItemSelected ? style.selected_row : ''}`}
+                  >
+                    <td className="px-3 py-2">
+                      <input
+                        type="checkbox"
+                        checked={isItemSelected}
+                        onChange={(e) => handleRowSelect(e, row)}
+                      />
+                    </td>
 
-                  <div className="timeline-container">
-                    {trackData.trackingSteps &&
-                      trackData.trackingSteps.map((step, index) => (
-                        <div key={index} className="timeline-step">
-                          <div className="timeline-icon">
-                            {index === 0 ? (
-                              <FaHourglassStart color="#0d6efd" />
-                            ) : index === trackData.trackingSteps.length - 1 ? (
-                              <FaCheckCircle color="green" />
-                            ) : (
-                              <FaClock color="#ffc107" />
+                    {props.columns.map((o, colIndex) => {
+                      const cellValue = _.get(row, o.fieldName);
+                      const displayValue = cellValue?.toString().split(' ')[0];
+                      let tooltipTitle = cellValue;
+
+                      // Special handling for Status, Claim Number, and Comment
+                      if (o.colName === "Status") {
+                        tooltipTitle = cellValue || "No Status";
+                      } else if (o.colName === "Claim Number") {
+                        tooltipTitle = cellValue;
+                      } else if (o.colName === "Comment") {
+                        tooltipTitle = cellValue;
+                      }
+
+                      return o.isClickable ? (
+                        <td
+                          key={colIndex}
+                          className={`px-3 py-2 ${o.clsName} ${style.clickable_cell}`}
+                          onClick={(e) => props.additionalMethod?.(row)}
+                        >
+                          <Tooltip title={tooltipTitle} placement="top-start">
+                            <span className={row.isRead === false ? style.unread : ''}>
+                              {displayValue}
+                            </span>
+                          </Tooltip>
+                        </td>
+                      ) : !hideColumns.includes(o.fieldName) && o.fieldName !== "action" ? (
+                        <td
+                          key={colIndex}
+                          className={`px-3 py-2 ${o.clsName}`}
+                        >
+                          <Tooltip title={tooltipTitle} placement="top-start">
+                            <span className={row.isRead === false ? style.unread : ''}>
+                              {displayValue}
+                              {o.fieldName2 ? _.get(row, o.fieldName2) : ""}
+                            </span>
+                          </Tooltip>
+                        </td>
+                      ) : !hideColumns.includes(o.fieldName) && o.fieldName === "action" ? (
+                        <td key={colIndex} className={`px-3 py-2 ${o.clsName} ${style.action_cell}`}>
+                          <div className="d-flex justify-content-center" style={{ gap: "8px" }}>
+                            {o.actions.includes("edit") && userData?.userType !== "CRP" && (
+                              <Tooltip title="Edit" placement="top" arrow>
+                                <button
+                                  className={`btn btn-sm ${style.action_button} ${style.edit_button}`}
+                                  onClick={() => handleEdit(row)}
+                                  type="button"
+                                  disabled={row.applicationStatus !== "Sent back" && row.applicationStatus !== "Draft"}
+                                >
+                                  <img src={editIcon} alt="edit" />
+                                </button>
+                              </Tooltip>
+                            )}
+
+                            {o.actions.includes("view") && (
+                              <Tooltip title="View" placement="top" arrow>
+                                <button
+                                  className={`btn btn-sm ${style.action_button} ${style.view_button}`}
+                                  onClick={() => handleView(row)}
+                                  type="button"
+                                >
+                                  <img src={viewIcon} alt="view" />
+                                </button>
+                              </Tooltip>
+                            )}
+
+                            {o.actions.includes("track") && userData?.userType !== "CRP" && (
+                              <Tooltip title="Track" placement="top" arrow>
+                                <button
+                                  className={`btn btn-sm ${style.action_button} ${style.track_button}`}
+                                  onClick={() => handleTrack(row)}
+                                  type="button"
+                                >
+                                  <BsGeoAltFill />
+                                </button>
+                              </Tooltip>
+                            )}
+                            {/* Delete Button */}
+                            {o.actions.includes("delete") && (
+                              <Tooltip title="Delete this item" placement="top" arrow>
+                                <button
+                                  className="btn  btn-sm"
+                                  onClick={() => handleDeleteRow(row)}
+                                  type="button"
+                                >
+                                  <img src={deleteIcon} alt="delete" />
+                                </button>
+                              </Tooltip>
                             )}
                           </div>
-                          <div className="timeline-content">
-                            {/* <h6 className="mb-1">{step.step}</h6> */}
-                            <p className="mb-1 text-muted">{step.description}</p>
-                            <small className="text-secondary">
-                              <i className="fa fa-calendar"></i> {step.date}
-                            </small>
-                          </div>
-                        </div>
-                      ))}
+                        </td>
+                      ) : null
+                    })}
+                  </tr>
+                );
+              })
+            ) : (
+              <tr>
+                <td colSpan={props.columns.length + 1} className="text-center py-5">
+                  <div className={style.no_records}>
+                    <i className="fa fa-database me-2" />
+                    No records found matching your criteria
                   </div>
-                </>
-              ) : (
-                <p>No tracking data available.</p>
-              )}
-            </Modal.Body>
-            <Modal.Footer>
-              <Button variant="secondary" onClick={() => setIsTrackModalOpen(false)}>
-                Close
-              </Button>
-            </Modal.Footer>
-          </Modal>
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
 
-          <Modal
-            show={isViewModalOpen}
-            onHide={() => setIsViewModalOpen(false)}
-            dialogClassName="modal-1110w"
-            aria-labelledby="example-custom-modal-styling-title"
-          >
-            <Modal.Header closeButton>
-              <Modal.Title id="example-custom-modal-styling-title">
-                Application Details
-              </Modal.Title>
-            </Modal.Header>
-            <Modal.Body>
-              {modalData ? (
-                <>
-                  <div className="d-flex justify-content-between align-items-center mb-3">
-                    <h4 className="mb-0">Application Number:</h4>
-                    <div
-                      style={{
-                        display: "inline-block",
-                        backgroundColor: "#f0f8ff", // Light blue background
-                        color: "#4682b4", // Steel blue text
-                        padding: "8px 15px",
-                        borderRadius: "5px",
-                        fontWeight: "bold",
-                        fontSize: "1.1rem",
-                        border: "1px solid #add8e6", // Light cyan border
-                      }}
-                    >
-                      {modalData.applicationNumber || "N/A"}
-                    </div>
-                  </div>
-                  {/* <h4 className="mb-3">Application Number: {modalData.applicationNumber || "N/A"}</h4> */}
-                  <Collapsible title="Creditor & Identification Details">
-                    <div className="card mb-4 tiles_Size">
-                      <div className="card-body">
-                        <h5 style={{ fontWeight: 600 }}>Creditor Details</h5>
-                        <br />
-                        <Container fluid>
-                          <Row className="g-3">
-                            {modalData.step1?.creditorDetails && Object.entries(modalData.step1.creditorDetails).map(([key, value]) => (
-                              <Col key={key} xs={12} sm={6} md={3} className="mb-3">
-                                <PreviewCard title={key} value={value || "N/A"} />
-                              </Col>
-                            ))}
-                          </Row>
-                        </Container>
-                      </div>
-                    </div>
-                    <div className="card mb-4 tiles_Size">
-                      <div className="card-body">
-                        <h5 style={{ fontWeight: 600 }}>Identification Details</h5>
-                        <br />
-                        <Container fluid>
-                          <Row className="g-3">
-                            {modalData.step1?.identificationDetails && Object.entries(modalData.step1.identificationDetails).map(([key, value]) => (
-                              <Col key={key} xs={12} sm={6} md={3} className="mb-3">
-                                <PreviewCard title={key} value={value || "N/A"} />
-                              </Col>
-                            ))}
-                          </Row>
-                        </Container>
-                      </div>
-                    </div>
-                  </Collapsible>
+      {/* Table Footer */}
+      <div className={`${style.table_footer} py-3`}>
+        <div className="d-flex justify-content-between align-items-center">
+          <div className={style.selection_info}>
+            Showing {indexOfFirstItem + 1}-{Math.min(indexOfLastItem, searchedData.length)} of {searchedData.length} entries
+            {selected.length > 0 && (
+              <span className="ms-2">
+                (<span className="fw-bold">{selected.length}</span> selected)
+              </span>
+            )}
+          </div>
 
-                  <Collapsible title="Financial & Beneficiary Details">
-                    <div className="card mb-4 tiles_Size">
-                      <div className="card-body">
-                        <h5 style={{ fontWeight: 600 }}>Financial Details</h5>
-                        <br />
-                        <Container fluid>
-                          <Row className="g-3">
-                            {modalData.step2?.financialDetails && Object.entries(modalData.step2.financialDetails).map(([key, value]) => (
-                              <Col key={key} xs={12} sm={6} md={3} className="mb-3">
-                                <PreviewCard title={key} value={value || "N/A"} />
-                              </Col>
-                            ))}
-                          </Row>
-                        </Container>
-                      </div>
-                    </div>
-                    <div className="card mb-4 tiles_Size">
-                      <div className="card-body">
-                        <h5 style={{ fontWeight: 600 }}>Beneficiary Details</h5>
-                        <br />
-                        <Container fluid>
-                          <Row className="g-3">
-                            {modalData.step2?.beneficiaryDetails && Object.entries(modalData.step2.beneficiaryDetails).map(([key, value]) => (
-                              <Col key={key} xs={12} sm={6} md={3} className="mb-3">
-                                <PreviewCard title={key} value={value || "N/A"} />
-                              </Col>
-                            ))}
-                          </Row>
-                        </Container>
-                      </div>
-                    </div>
-                    <div className="card mb-4 tiles_Size">
-                      <div className="card-body">
-                        <h5 style={{ fontWeight: 600 }}>Address Proof Details</h5>
-                        <br />
-                        <Container fluid>
-                          <Row className="g-3">
-                            {modalData.step2?.addressproofDetails && Object.entries(modalData.step2.addressproofDetails).map(([key, value]) => (
-                              <Col key={key} xs={12} sm={6} md={3} className="mb-3">
-                                <PreviewCard title={key} value={value || "N/A"} />
-                              </Col>
-                            ))}
-                          </Row>
-                        </Container>
-                      </div>
-                    </div>
-                    <div className="card mb-4 tiles_Size">
-                      <div className="card-body">
-                        <h5 style={{ fontWeight: 600 }}>Bank Details</h5>
-                        <br />
-                        <Container fluid>
-                          <Row className="g-3">
-                            {modalData.step2?.bankDetails && Object.entries(modalData.step2.bankDetails).map(([key, value]) => (
-                              <Col key={key} xs={12} sm={6} md={3} className="mb-3">
-                                <PreviewCard title={key} value={value || "N/A"} />
-                              </Col>
-                            ))}
-                          </Row>
-                        </Container>
-                      </div>
-                    </div>
-                  </Collapsible>
+          <div className="d-flex align-items-center">
+            <PaginationOptions />
 
-                  <Collapsible title="Signatory Details">
-                    <div className="card mb-4 tiles_Size">
-                      <div className="card-body">
-                        <h5 style={{ fontWeight: 600 }}>Signatory Information</h5>
-                        <br />
-                        <Container fluid>
-                          <Row className="g-3">
-                            {modalData.step3?.signatoryDetails && Object.entries(modalData.step3.signatoryDetails).map(([key, value]) => (
-                              <Col key={key} xs={12} sm={6} md={3} className="mb-3">
-                                <PreviewCard title={key} value={value || "N/A"} />
-                              </Col>
-                            ))}
-                          </Row>
-                        </Container>
-                      </div>
-                    </div>
-                  </Collapsible>
+            <div className="btn-group ms-3">
+              <button
+                onClick={handlePrevPage}
+                disabled={currentPage === 1}
+                className={`btn btn-outline-secondary ${style.pagination_button}`}
+              >
+                <i className="fa fa-chevron-left" />
+              </button>
 
-                  {/* <div className="card mb-4 tiles_Size">
-                      <div className="card-body">
-                        <h5 style={{ fontWeight: 600 }}>Application Status</h5>
-                        <br />
-                        <Container fluid>
-                          <Row className="g-3">
-                            <Col xs={12} sm={6} md={3} className="mb-3">
-                              <PreviewCard
-                                title="Current Status"
-                                value={modalData.status || "N/A"}
-                                style={{
-                                  color: modalData.status === "Approved" ? "green" :
-                                    modalData.status === "Rejected" ? "red" :
-                                      "orange",
-                                  fontWeight: "bold"
-                                }}
-                              />
-                            </Col>
-                          </Row>
-                        </Container>
-                      </div>
-                    </div> */}
-                </>
-              ) : (
-                <p>No data available.</p>
-              )}
-            </Modal.Body>
-            <Modal.Footer>
-              <Button variant="secondary" onClick={() => setIsViewModalOpen(false)}>
-                Close
-              </Button>
-            </Modal.Footer>
-          </Modal>
+              <div className={`px-3 d-flex align-items-center ${style.page_number}`}>
+                Page {currentPage} of {totalPages || 1}
+              </div>
 
-          <FileUploadModal modal={isModalOpen} setModal={setIsModalOpen} />
-        </>
-      ) : (
-        <div classN
+              <button
+                onClick={handleNextPage}
+                disabled={currentPage === totalPages || totalPages === 0}
+                className={`btn btn-outline-secondary ${style.pagination_button}`}
+              >
+                <i className="fa fa-chevron-right" />
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default ActionTable;
