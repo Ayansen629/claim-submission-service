@@ -1,248 +1,173 @@
-import React, { useCallback, useEffect,useState } from "react";
-import { useForm, FormProvider, Controller } from "react-hook-form";
-import DatePicker from "react-datepicker";
-import "react-datepicker/dist/react-datepicker.css";
+import React, { useState, useCallback, useEffect } from "react";
+import { useForm, FormProvider } from "react-hook-form";
+import DynamicField from "./formCommon/DynamicField";
 import Collapsible from "./formCommon/Collapsible";
 import { uploadDocument } from "../../../services/documentUploadService";
-
-// Dynamic field renderer
-const DynamicField = ({ fieldConfig, control, register, errors, setValue, trigger, getValues }) => {
-  const { name, label, type, options, rules, placeholder } = fieldConfig;
-  const userFormData = JSON.parse(localStorage.getItem("userFormData"));
-  const hasUserType = userFormData?.userType;
-
-  // Check if the field has an error
-  const hasError = errors[name];
-
-  // Handle file upload
-  // const handleFileChange = (e) => {
-  //   const files = e.target.files;
-  //   if (files.length > 0) {
-  //     setValue(name, files[0]); // Single file selection
-  //     trigger(name);
-  //   } else {
-  //     setValue(name, ""); // Reset value if no file selected
-  //     trigger(name);
-  //   }
-  // };
-
-
-  const handleFileChange = async (e) => {
-    const file = e.target.files[0];
-    if (file && fieldConfig.onFileUpload) {
-      try {
-        fieldConfig.setIsUploading(true);
-        fieldConfig.setUploadError(null);
-        
-        const result = await fieldConfig.onFileUpload(file);
-        
-        if (result.success) {
-          setValue(name, {
-            fileId: result.fileId,
-            docName: result.docName,
-            docType: result.docType,
-            docSource: result.docSource,
-            fileUrl: result.fileUrl
-          }, { shouldValidate: true });
-        }
-      } catch (error) {
-        fieldConfig.setUploadError(error.message);
-        setValue(name, null, { shouldValidate: true });
-      } finally {
-        fieldConfig.setIsUploading(false);
-      }
-    }
-  };
-
-
-  // Get the file(s) value
-  const fileValue = getValues(name);
-
-  return (
-    <div className="flex-item">
-      <label>{label}</label>
-      { type === "file" ? (
-        <div className="custom-file-input">
-          <input
-            type="file"
-            id={name}
-            onChange={handleFileChange}
-            className={`form-input ${hasError ? "input-error" : ""}`}
-            style={{ display: "none" }}
-            disabled={fieldConfig.isUploading}
-            accept={fieldConfig.accept}
-          />
-          <label
-            htmlFor={name}
-            className={`file-label ${hasError ? "input-error" : ""} ${fieldConfig.isUploading ? "uploading" : ""}`}
-          >
-            {fieldConfig.isUploading ? "Uploading..." : "Choose File"}
-          </label>
-          
-          {getValues(name) && !fieldConfig.isUploading && (
-  <div style={{ marginTop: "8px" }}>
-    {(() => {
-      const fileValue = getValues(name);
-      
-      // Handle case where fileValue is an object (CLM case)
-      if (typeof fileValue === 'object' && fileValue !== null) {
-        return <div>File: {fileValue.docName || fileValue.name || 'Uploaded file'}</div>;
-      }
-      
-      // Handle case where fileValue is a string (file path/name)
-      if (typeof fileValue === 'string') {
-        return <div>File: {fileValue}</div>;
-      }
-      
-      // Fallback for other cases
-      return <div>File: Uploaded file</div>;
-    })()}
-  </div>
-)}
-          
-          {fieldConfig.uploadError && <p className="error-message">{fieldConfig.uploadError}</p>}
-          {hasError && !fieldConfig.uploadError && <p className="error-message">{errors[name]?.message}</p>}
-        </div>
-      ) : type === "textarea" ? (
-        <textarea
-          {...register(name, rules)}
-          className={`form-input ${hasError ? "input-error" : ""}`}
-          placeholder={placeholder}
-          onChange={(e) => {
-            setValue(name, e.target.value);
-            trigger(name);
-          }}
-        />
-      ) : (
-        <input
-          {...register(name, rules)}
-          type={type}
-          className={`form-input ${hasError ? "input-error" : ""}`}
-          onChange={(e) => {
-            setValue(name, e.target.value);
-            trigger(name);
-          }}
-          placeholder={placeholder || `Enter ${label.toLowerCase()}`}
-        />
-      )}
-    </div>
-  );
-};
+import { Button } from 'react-bootstrap';
+import { Download, CheckCircle } from "lucide-react";
+import 'bootstrap/dist/css/bootstrap.min.css';
 
 const StepThird = ({ provideSubmitHandler, formData }) => {
-  const methods = useForm();
-  const { register, handleSubmit, formState: { errors }, trigger, setValue, control, getValues } = methods;
-  const [isUploading, setIsUploading] = useState(false);
+    const [isUploading, setIsUploading] = useState(false);
     const [uploadError, setUploadError] = useState(null);
-  
-  
-  
-  const handleFileUpload = async (file) => {
-      try {
-        const result = await uploadDocument(file, 'signatoryDocument');
-        return result;
-      } catch (error) {
-        throw error;
-      }
+    const [uploadSuccess, setUploadSuccess] = useState(false);
+    const [uploadedFileUrl, setUploadedFileUrl] = useState(null);
+
+    const methods = useForm();
+    const { register, handleSubmit, formState: { errors }, trigger, setValue, control, getValues, watch } = methods;
+
+    const handleFileUpload = async (file) => {
+        try {
+            setIsUploading(true);
+            setUploadError(null);
+            setUploadSuccess(false);
+
+            const result = await uploadDocument(file, 'signatoryDocument');
+            if (result.success) {
+                setValue("signatoryDocument", {
+                    fileId: result.fileId,
+                    docName: result.docName,
+                    docType: result.docType,
+                    fileUrl: result.fileUrl
+                }, { shouldValidate: true });
+                setUploadedFileUrl(`${process.env.REACT_APP_FILE_SERVICE}v1/files/id?fileStoreId=${result.fileId}`);
+                setUploadSuccess(true);
+            }
+            return result;
+        } catch (error) {
+            setUploadError(error.message);
+            setValue("signatoryDocument", null, { shouldValidate: true });
+            setUploadSuccess(false);
+            throw error;
+        } finally {
+            setIsUploading(false);
+        }
     };
 
-  const financialCreditorDetailsSchema = [
-    { 
-      name: "signatoryName", 
-      label: <>Name of Signatory (BLOCK LETTERS) <span className="required-asterisk">*</span></>, 
-      type: "text", 
-      rules: { required: "Signatory name is required" },
-      placeholder: "Enter signatory name" 
-    },
-    { 
-      name: "signatoryDocument", 
-      label: <>Signatory Document <span className="required-asterisk">*</span></>, 
-      // label: "Signatory Document",
-      type: "file", 
-      rules: { required: "Signatory document is required" ,
-        validate: {
-          fileUploaded: (value) => value !== null || "Please upload the document"
+    const financialCreditorDetailsSchema = [
+        { 
+            name: "signatoryName", 
+            label: <>Name of Signatory (BLOCK LETTERS) <span className="required-asterisk">*</span></>, 
+            type: "text", 
+            rules: { 
+                required: "Signatory name is required",
+                pattern: {
+                    value: /^[A-Z\s]+$/,
+                    message: "Please enter in BLOCK LETTERS only"
+                }
+            },
+            placeholder: "Enter signatory name in BLOCK LETTERS" 
+        },
+        { 
+            name: "signatoryDocument", 
+            label: <>Signatory Document <span className="required-asterisk">*</span></>, 
+            type: "file", 
+            rules: { 
+                required: "Signatory document is required",
+                validate: {
+                    fileUploaded: (value) => value !== null || "Please upload the document"
+                }
+            },
+            accept: "image/*,.pdf",
+            onFileUpload: handleFileUpload,
+            isUploading,
+            uploadError,
+            setIsUploading,
+            setUploadError
+        },
+        { 
+            name: "signatoryPosition", 
+            label: <>Position of Signatory or Relation to Creditors<span className="required-asterisk">*</span></>, 
+            type: "text", 
+            rules: { required: "Signatory position is required" },
+            placeholder: "Enter signatory position/relation" 
+        },
+        { 
+            name: "signatoryAddress", 
+            label: <>Address of Signatory <span className="required-asterisk">*</span></>, 
+            type: "textarea",
+            rules: { 
+                required: "Signatory address is required",
+                minLength: {
+                    value: 10,
+                    message: "Address should be at least 10 characters long"
+                }
+            },
+            placeholder: "Enter complete signatory address" 
+        },
+    ];
+
+    const onSubmit = useCallback(async () => {
+        const isValid = await trigger();
+        if (!isValid) {
+            console.error("Validation failed");
+            return false;
         }
-      },
-      placeholder: "Upload signatory document" ,
-      accept: "image/*,.pdf",
-      onFileUpload: handleFileUpload,
-      isUploading,
-      uploadError,
-      setIsUploading,
-      setUploadError
-    },
-    { 
-      name: "signatoryPosition", 
-      label: <>Position of Signatory or Relation to Creditors<span className="required-asterisk">*</span></>, 
-      type: "text", 
-      rules: { required: "Signatory position is required" },
-      placeholder: "Enter signatory position" 
-    },
-    { 
-      name: "signatoryAddress", 
-      label: <>Address of Signatory <span className="required-asterisk">*</span></>, 
-      type: "text", 
-      rules: { required: "Signatory address is required" ,
-        
-      },
-      placeholder: "Enter signatory address" 
-    },
-  ];
+        return getValues();
+    }, [trigger, getValues]);
 
-  const onSubmit = useCallback(async () => {
-    const isValid = await trigger();
-    const fileField = getValues("signatoryDocument");
-    if (!fileField || (typeof fileField === "string" && fileField.trim() === "")) {
-      setValue("signatoryDocument", "");
-      trigger("signatoryDocument");
-      return false;
-    }
-    if (!isValid) {
-      console.error("Validation failed");
-      return false;
-    }
-    return getValues();
-  }, [trigger, getValues, setValue]);
+    useEffect(() => {
+        if (formData) {
+            Object.keys(formData).forEach((key) => {
+                setValue(key, formData[key]);
+            });
+        }
+    }, [formData, setValue]);
 
-  useEffect(() => {
-    if (formData) {
-      Object.keys(formData).forEach((key) => {
-        setValue(key, formData[key]);
-      });
-    }
-  }, [formData, setValue]);
+    useEffect(() => {
+        if (provideSubmitHandler) {
+            provideSubmitHandler(onSubmit);
+        }
+    }, [provideSubmitHandler, onSubmit]);
 
-  useEffect(() => {
-    if (provideSubmitHandler) {
-      provideSubmitHandler(onSubmit);
-    }
-  }, [provideSubmitHandler, onSubmit]);
-
-  return (
-    <FormProvider {...methods}>
-      <form className="form-stepper">
-        <div className="mb-4 bg-light">
-          <Collapsible title="Financial Creditor Details">
-            <div className="flex-container">
-              {financialCreditorDetailsSchema.map((fieldConfig) => (
-                <DynamicField
-                  key={fieldConfig.name}
-                  fieldConfig={fieldConfig}
-                  control={control}
-                  register={register}
-                  errors={errors}
-                  setValue={setValue}
-                  trigger={trigger}
-                  getValues={getValues}
-                />
-              ))}
-            </div>
-          </Collapsible>
-        </div>
-      </form>
-    </FormProvider>
-  );
+    return (
+        <FormProvider {...methods}>
+            <form className="form-stepper">
+                <div className="mb-4 bg-light">
+                    <Collapsible title="Financial Creditor Details" defaultOpen={true}>
+                        <div className="flex-container">
+                            {financialCreditorDetailsSchema.map((fieldConfig) => (
+                                <DynamicField
+                                    key={fieldConfig.name}
+                                    fieldConfig={fieldConfig}
+                                    control={control}
+                                    register={register}
+                                    errors={errors}
+                                    setValue={setValue}
+                                    trigger={trigger}
+                                    getValues={getValues}
+                                />
+                            ))}
+                            {uploadedFileUrl && (
+                                <div className="file-upload-status mt-4 p-3 border rounded bg-light">
+                                    <div className="d-flex align-items-center gap-3">
+                                        {uploadSuccess && (
+                                            <div className="text-success d-flex align-items-center gap-2">
+                                                <CheckCircle size={20} />
+                                                <span>Document uploaded successfully!</span>
+                                            </div>
+                                        )}
+                                        <Button
+                                            variant="outline-primary"
+                                            as="a"
+                                            href={uploadedFileUrl}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            download
+                                            className="d-flex align-items-center gap-2"
+                                        >
+                                            <Download size={18} />
+                                            Download Document
+                                        </Button>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </Collapsible>
+                </div>
+            </form>
+        </FormProvider>
+    );
 };
 
 export default StepThird;
