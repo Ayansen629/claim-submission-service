@@ -1,422 +1,530 @@
-import React, { useState, useEffect } from 'react';
-import { Table, Dropdown, Form, Button, Tooltip, OverlayTrigger } from 'react-bootstrap';
-import {
-    PencilSquare,
-    Eye,
-    Trash3,
-    GeoAltFill,
-    Plus,
-    ArrowDown,
-    ArrowUp,
-    Database,
-    Check,
-    Calendar
-} from 'react-bootstrap-icons';
-import { useNavigate } from 'react-router-dom';
-import './ActionTable.module.css';
+import React from "react";
+import { Controller } from "react-hook-form";
+import Tooltip from "@mui/material/Tooltip";
+import { FaInfoCircle } from "react-icons/fa";
+import DatePicker from "react-datepicker";
+import "react-datepicker/dist/react-datepicker.css";
 
-const ActionTable = (props) => {
-    const [searchedData, setSearchedData] = useState(props.rowData || []);
-    const [currentPage, setCurrentPage] = useState(1);
-    const [selected, setSelected] = useState([]);
-    const [sortedColumn, setSortedColumn] = useState(null);
-    const [sortOrder, setSortOrder] = useState('');
-    const hideColumns = props.hideColumns || [];
-    const [searchQuery, setSearchQuery] = useState('');
-    const [statusFilter, setStatusFilter] = useState('all');
-    const [dateSort, setDateSort] = useState('none');
-    const [itemsPerPage, setItemPerPage] = useState(10);
-    const [totalPages, setTotalPages] = useState(0);
-    const navigate = useNavigate();
+const DynamicField = ({ fieldConfig, control, register, errors, setValue, trigger, getValues }) => {
+  const { name, label, type, options, rules, tooltip, placeholder, disabled } = fieldConfig; // Destructure disabled
+  const hasError = errors[name];
+  const userFormData = JSON.parse(localStorage.getItem("userFormData"));
+  const applicationStatus = JSON.parse(localStorage.getItem("applicationdatastatus"));
+  const hasUserType = userFormData?.userType;
+  console.log(hasUserType, "hasUserType");
 
-    useEffect(() => {
-        if (props.rowData) {
-            setSearchedData(props.rowData);
-            setCurrentPage(1);
-            const selectedRows = props.rowData
-                .filter((item) => item.isChecked)
-                .map((item) => item.id);
-            setSelected(selectedRows);
+  const handleKeyPress = (e) => {
+    if (type === "number" && !/^\d$/.test(e.key) && e.key !== "Backspace") {
+      e.preventDefault();
+    }
+  };
+
+  const handleFileChange = async (e) => {
+    const file = e.target.files[0];
+    if (file && fieldConfig.onFileUpload) {
+      try {
+        fieldConfig.setIsUploading(true);
+        fieldConfig.setUploadError(null);
+
+        const result = await fieldConfig.onFileUpload(file);
+
+        if (result.success) {
+          setValue(name, {
+            fileId: result.fileId,
+            docName: result.docName,
+            docType: result.docType,
+            docSource: result.docSource,
+            fileUrl: result.fileUrl
+          }, { shouldValidate: true });
         }
-    }, [props.rowData]);
+      } catch (error) {
+        fieldConfig.setUploadError(error.message);
+        setValue(name, null, { shouldValidate: true });
+      } finally {
+        fieldConfig.setIsUploading(false);
+      }
+    }
+  };
 
-    useEffect(() => {
-        let filteredData = [...(props.rowData || [])];
+  console.log(getValues(name), "getValues(name)");
 
-        if (statusFilter !== 'all') {
-            filteredData = filteredData.filter(item => item.status === statusFilter);
-        }
+  return (
+    <div className="flex-item">
+      <label>
+        {label}
+        {tooltip && (
+          <Tooltip title={tooltip} arrow>
+            <span style={{ marginLeft: "5px", cursor: "pointer" }}>
+              <FaInfoCircle />
+            </span>
+          </Tooltip>
+        )}
+      </label>
 
-        if (searchQuery) {
-            const searchValue = searchQuery.toLowerCase();
-            filteredData = filteredData.filter(item => {
-                return Object.values(item).some(value => {
-                    if (value === null || value === undefined) return false;
-                    return value.toString().toLowerCase().includes(searchValue);
-                });
-            });
-        }
+      {type === "select" ? (
+        <Controller
+          name={name}
+          control={control}
+          rules={rules}
+          render={({ field }) => (
+            <select
+              {...field}
+              className={`form-input ${hasError ? "input-error" : ""}`}
+              onChange={(e) => {
+                field.onChange(e);
+                if (fieldConfig.onChange) fieldConfig.onChange(e.target.value);
+              }}
+              disabled={disabled} // Apply the disabled prop here
+            >
+              <option value="" disabled>
+                Select {label}
+              </option>
+              {options.map((option) => (
+                <option key={option.value} value={option.value} disabled={option.disabled}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          )}
+        />
+      ) : type === "date" ? (
+        <Controller
+          name={name}
+          control={control}
+          rules={rules}
+          render={({ field }) => (
+            <DatePicker
+              {...field}
+              selected={field.value}
+              onChange={(date) => {
+                setValue(name, date);
+                trigger(name);
+              }}
+              className={`form-input ${hasError ? "input-error" : ""}`}
+              dateFormat="yyyy-MM-dd"
+              placeholderText={placeholder || "Select a date"}
+              disabled={disabled} // Apply the disabled prop here
+            />
+          )}
+        />
+      ) : type === "file" ? (
+        <div className="custom-file-input">
+          <input
+            type="file"
+            id={name}
+            onChange={handleFileChange}
+            className={`form-input ${hasError ? "input-error" : ""}`}
+            style={{ display: "none" }}
+            disabled={fieldConfig.isUploading || disabled} // Apply the disabled prop here
+            accept={fieldConfig.accept}
+          />
+          <label
+            htmlFor={name}
+            className={`file-label ${hasError ? "input-error" : ""} ${fieldConfig.isUploading ? "uploading" : ""}`}
+          >
+            {fieldConfig.isUploading ? "Uploading..." : "Choose File"}
+          </label>
 
-        if (dateSort !== 'none') {
-            filteredData.sort((a, b) => {
-                const parseDate = (obj) => {
-                    const dateFormats = [
-                        'dd-MM-yy', 'dd/MM/yy', 'dd.MM.yy',
-                        'yyyy-MM-dd', 'yyyy/MM/dd', 'yyyy.MM.dd'
-                    ];
-                    const dateFields = ['dateSubmitted', 'createdAt', 'date', 'submissionDate'];
+          {getValues(name) && !fieldConfig.isUploading && (
+  <div style={{ marginTop: "8px" }}>
+    {(() => {
+      const fileValue = getValues(name);
+      
+      // Handle case where fileValue is an object (CLM case)
+      if (typeof fileValue === 'object' && fileValue !== null) {
+        return <div>File: {fileValue.docName || fileValue.name || 'Uploaded file'}</div>;
+      }
+      
+      // Handle case where fileValue is a string (file path/name)
+      if (typeof fileValue === 'string') {
+        return <div>File: {fileValue}</div>;
+      }
+      
+      // Fallback for other cases
+      return <div>File: Uploaded file</div>;
+    })()}
+  </div>
+)}
 
-                    for (const field of dateFields) {
-                        if (obj[field]) {
-                            for (const format of dateFormats) {
-                                const parsedDate = parseDateFromFormat(obj[field], format);
-                                if (parsedDate) return parsedDate;
-                            }
-                            const date = new Date(obj[field]);
-                            if (!isNaN(date.getTime())) return date;
-                        }
-                    }
-                    return new Date(0);
-                };
-                function parseDateFromFormat(dateString, format) {
-                    if (!dateString) return null;
 
-                    // Handle dd-MM-yy format
-                    if (format === 'dd-MM-yy') {
-                        const parts = dateString.split('-');
-                        if (parts.length === 3) {
-                            const day = parseInt(parts[0], 10);
-                            const month = parseInt(parts[1], 10) - 1;
-                            const year = 2000 + parseInt(parts[2], 10);
-                            return new Date(year, month, day);
-                        }
-                        return null; // Added to handle invalid format
-                    }
 
-                    // Handle other formats similarly...
 
-                    // Fallback to native parsing
-                    const parsedDate = new Date(dateString);
-                    return isNaN(parsedDate.getTime()) ? null : parsedDate; // Check for invalid date
-                }
+{/* {getValues(name) && !fieldConfig.isUploading && (
+            <div style={{ marginTop: "8px" }}>
+              {
+                hasUserType === "CLM" ? (
+                  <div>File: {getValues(name).docName || getValues(name).name}</div>
+                ) : (
+                  <div>File: {getValues(name) || getValues(name)}</div>
+                )
 
-                const dateA = parseDate(a);
-                const dateB = parseDate(b);
-                return dateSort === "desc" ? dateB - dateA : dateA - dateB;
-            });
-        }
+                
 
-        setSearchedData(filteredData);
-        setCurrentPage(1);
-        setTotalPages(Math.ceil((filteredData?.length || 0) / itemsPerPage));
-    }, [props.rowData, statusFilter, searchQuery, dateSort, itemsPerPage]);
+              }
+              
+             
+            </div>
+          )} */}
+              
+             
+          
 
-    const indexOfLastItem = currentPage * itemsPerPage;
-    const indexOfFirstItem = indexOfLastItem - itemsPerPage;
-    const currentItems = searchedData.slice(indexOfFirstItem, indexOfLastItem);
-
-    const handleNextPage = () => setCurrentPage(prev => Math.min(prev + 1, totalPages));
-    const handlePrevPage = () => setCurrentPage(prev => Math.max(prev - 1, 1));
-    const handleOnSearch = (e) => setSearchQuery(e.target.value);
-
-    const sortByColumn = (column) => {
-        setSortedColumn(column);
-        setSortOrder(sortOrder === "asc" && sortedColumn === column ? "desc" : "asc");
-    };
-
-    const showSortedColumnIcon = (columnName) => {
-        if (sortedColumn !== columnName) return null;
-        return sortOrder === "asc" ? <ArrowUp className="ms-1" /> : <ArrowDown className="ms-1" />;
-    };
-
-    const handleDeleteRow = (rowData) => props.onDeleteRow?.(rowData);
-    const handleTrack = (rowData) => props.onTrackRow?.(rowData);
-    const handleView = (rowData) => props.onViewRow?.(rowData);
-    const handleEdit = (rowData) => props.handleEditRow?.(rowData);
-    const handleDownload = (rowData) => props.download?.(rowData);
-
-    const handleSelectAll = (e) => {
-        const newSelecteds = e.target.checked ? currentItems.map(n => n.id) : [];
-        setSelected(newSelecteds);
-        props.onCheckHandler?.(newSelecteds);
-    };
-
-    const handleRowSelect = (e, row) => {
-        const newSelected = e.target.checked
-            ? [...selected, row.id]
-            : selected.filter(id => id !== row.id);
-        setSelected(newSelected);
-        props.onCheckHandler?.(newSelected);
-    };
-
-    const isSelected = (id) => selected.includes(id);
-    const getStatusOptions = () => ["all", ...new Set(props.rowData?.map(item => item.status))].filter(Boolean);
-
-    const StatusFilterDropdown = () => (
-        <Dropdown className="ms-2">
-            <Dropdown.Toggle variant="outline-primary" className="d-flex align-items-center">
-                <i className="fa fa-filter me-2" />
-                Status: {statusFilter === "all" ? "All" : statusFilter}
-            </Dropdown.Toggle>
-            <Dropdown.Menu>
-                {getStatusOptions().map((status, index) => (
-                    <Dropdown.Item key={index} onClick={() => setStatusFilter(status)} active={status === statusFilter}>
-                        {status === "all" ? "All Statuses" : status}
-                        {status === statusFilter && <Check className="ms-2" />}
-                    </Dropdown.Item>
-                ))}
-            </Dropdown.Menu>
-        </Dropdown>
-    );
-
-    const DateSortDropdown = () => (
-        <Dropdown className="ms-2">
-            <Dropdown.Toggle variant="outline-primary" className="d-flex align-items-center">
-                <Calendar className="me-2" />
-                Date: {dateSort === "none" ? "Default" : dateSort === "asc" ? "Oldest First" : "Newest First"}
-            </Dropdown.Toggle>
-            <Dropdown.Menu>
-                <Dropdown.Item onClick={() => setDateSort("none")} active={dateSort === "none"}>
-                    Default Order {dateSort === "none" && <Check className="ms-2" />}
-                </Dropdown.Item>
-                <Dropdown.Item onClick={() => setDateSort("asc")} active={dateSort === "asc"}>
-                    Oldest First {dateSort === "asc" && <Check className="ms-2" />}
-                </Dropdown.Item>
-                <Dropdown.Item onClick={() => setDateSort("desc")} active={dateSort === "desc"}>
-                    Newest First {dateSort === "desc" && <Check className="ms-2" />}
-                </Dropdown.Item>
-            </Dropdown.Menu>
-        </Dropdown>
-    );
-
-    const PaginationOptions = () => (
-        <div className="d-inline-flex align-items-center">
-            <div className="pe-2">Rows per page</div>
-            <Dropdown>
-                <Dropdown.Toggle variant="outline-primary" className="d-flex align-items-center">
-                    {itemsPerPage}
-                </Dropdown.Toggle>
-                <Dropdown.Menu>
-                    {[10, 25, 50, 100].map((item) => (
-                        <Dropdown.Item
-                            key={item}
-                            onClick={() => { setItemPerPage(item); setCurrentPage(1); }}
-                            active={itemsPerPage === item}
-                        >
-                            {item} {itemsPerPage === item && <Check className="ms-2" />}
-                        </Dropdown.Item>
-                    ))}
-                </Dropdown.Menu>
-            </Dropdown>
+          {fieldConfig.uploadError && <p className="error-message">{fieldConfig.uploadError}</p>}
+          {hasError && !fieldConfig.uploadError && <p className="error-message">{errors[name]?.message}</p>}
         </div>
-    );
-
-    const userData = JSON.parse(localStorage.getItem("userFormData")) || {};
-
-    return (
-        <div className="mb-5 px-0 mx-0 generic-action-table pt-3">
-            {/* Search and Filter Controls */}
-            <div className={`row ${props.hideSearchBar ? "justify-content-end mb-3" : "justify-content-between"}`}>
-                {!props.hideSearchBar && (
-                    <div className="col-md-6 mb-3">
-                        <Form.Control
-                            type="search"
-                            value={searchQuery}
-                            onChange={handleOnSearch}
-                            placeholder="Search records..."
-                            className="form-control"
-                        />
-                    </div>
-                )}
-
-                <div className="col-md-6 d-flex flex-wrap justify-content-end align-items-center mb-3">
-                    <div className="d-flex">
-                        <StatusFilterDropdown />
-                        <DateSortDropdown />
-                    </div>
-
-                    {props.showCustomBtn && (
-                        <Button
-                            onClick={props.handleBtnClick}
-                            disabled={props.isCustomBtnDisabled}
-                            className={`btn btn-primary ms-3 d-flex align-items-center ${props.isCustomBtnDisabled ? 'custom-disabled-btn' : ''}`}
-                        >
-                            <Plus className="me-2" />
-                            <span>{props.btnName}</span>
-                        </Button>
-                    )}
-                </div>
-            </div>
-
-            {/* Table */}
-            <div className="table-responsive mb-3">
-                <Table className="table align-middle">
-                    <thead className="table-primary">
-                        <tr>
-                            <th style={{ width: '50px' }}>
-                                <Form.Check
-                                    type="checkbox"
-                                    checked={selected.length > 0 && selected.length === currentItems.length}
-                                    onChange={handleSelectAll}
-                                    ref={input => input && (input.indeterminate = selected.length > 0 && selected.length < currentItems.length)}
-                                />
-                            </th>
-
-                            {props.columns?.map((data) => (
-                                !hideColumns.includes(data.fieldName) && (
-                                    <th
-                                        key={data.fieldName}
-                                        className="text-center"
-                                        style={{ minWidth: data.minWidth || '150px' }}
-                                        onClick={() => sortByColumn(data.fieldName)}
-                                    >
-                                        <div className="d-flex justify-content-center align-items-center">
-                                            <span>{data.titleCode || data.colName}</span>
-                                            {showSortedColumnIcon(data.fieldName)}
-                                        </div>
-                                    </th>
-                                )
-                            ))}
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {currentItems.length > 0 ? (
-                            currentItems.map((row) => (
-                                <tr key={row.id} className={isSelected(row.id) ? 'selected-row' : ''}>
-                                    <td>
-                                        <Form.Check
-                                            type="checkbox"
-                                            checked={isSelected(row.id)}
-                                            onChange={(e) => handleRowSelect(e, row)}
-                                        />
-                                    </td>
-
-                                    {props.columns.map((col) => {
-                                        if (hideColumns.includes(col.fieldName)) return null;
-
-                                        const cellValue = col.fieldName.split('.').reduce((obj, key) => obj?.[key], row);
-                                        const displayValue = cellValue?.toString().split(' ')[0] || '';
-                                        const tooltipTitle = cellValue || '';
-
-                                        if (col.fieldName === 'action') {
-                                            return (
-                                                <td key="actions" className="text-center">
-                                                    <div className="d-flex justify-content-center gap-2">
-                                                        {col.actions?.includes("edit") && userData?.userType !== "CRP" && (
-                                                            <OverlayTrigger overlay={<Tooltip>Edit</Tooltip>}>
-                                                                <Button
-                                                                    variant="outline-primary" // Changed to primary
-                                                                    size="sm"
-                                                                    className={row.applicationStatus !== "Sent back" && row.applicationStatus !== "Draft" ? 'custom-disabled-btn' : ''}
-                                                                    disabled={row.applicationStatus !== "Sent back" && row.applicationStatus !== "Draft"}
-                                                                    onClick={() => handleEdit(row)}
-                                                                >
-                                                                    <PencilSquare className="action-icon" /> {/* Added a class */}
-                                                                </Button>
-                                                            </OverlayTrigger>
-                                                        )}
-
-                                                        {col.actions?.includes("view") && (
-                                                            <OverlayTrigger overlay={<Tooltip>View</Tooltip>}>
-                                                                <Button variant="outline-primary" size="sm" onClick={() => handleView(row)}>
-                                                                    <Eye className="action-icon" />
-                                                                </Button>
-                                                            </OverlayTrigger>
-                                                        )}
-
-                                                        {col.actions?.includes("track") && (
-                                                            <OverlayTrigger overlay={<Tooltip>Track</Tooltip>}>
-                                                                <Button variant="outline-primary" size="sm" onClick={() => handleTrack(row)}>
-                                                                    <GeoAltFill className="action-icon" />
-                                                                </Button>
-                                                            </OverlayTrigger>
-                                                        )}
-
-                                                        {col.actions?.includes("delete") && userData?.userType !== "CRP" && (
-                                                            <OverlayTrigger overlay={<Tooltip>Delete</Tooltip>}>
-                                                                <Button variant="outline-danger" size="sm" onClick={() => handleDeleteRow(row)}>
-                                                                    <Trash3 className="action-icon" />
-                                                                </Button>
-                                                            </OverlayTrigger>
-                                                        )}
-                                                    </div>
-                                                </td>
-                                            );
-                                        }
-
-                                        return (
-                                            <td key={col.fieldName} className="text-center">
-                                                <OverlayTrigger overlay={<Tooltip>{tooltipTitle}</Tooltip>}>
-                                                    <div className="text-truncate" style={{ maxWidth: '200px' }}>
-                                                        {col.colName === "Claim Number" && userData?.userType === "CRP" ? (
-                                                            <a
-                                                                href={`/apply-claim/${row.uuid}`}
-                                                                onClick={(e) => { e.preventDefault(); navigate(`/apply-claim/${row.uuid}`); }}
-                                                                className="text-primary"
-                                                            >
-                                                                {displayValue}
-                                                            </a>
-                                                        ) : displayValue}
-                                                    </div>
-                                                </OverlayTrigger>
-                                            </td>
-                                        );
-                                    })}
-                                </tr>
-                            ))
-                        ) : (
-                            <tr>
-                                <td colSpan={props.columns.length + 1} className="text-center py-5">
-                                    <div className="d-flex justify-content-center align-items-center">
-                                        <Database className="me-2" />
-                                        No records found matching your criteria
-                                    </div>
-                                </td>
-                            </tr>
-                        )}
-                    </tbody>
-                </Table>
-            </div>
-
-            {/* Table Footer */}
-            <div className="d-flex justify-content-between align-items-center py-3">
-                <div>
-                    Showing {indexOfFirstItem + 1}-{Math.min(indexOfLastItem, searchedData.length)} of {searchedData.length} entries
-                    {selected.length > 0 && (
-                        <span className="ms-2">
-                            (<span className="fw-bold text-primary">{selected.length}</span> selected)
-                        </span>
-                    )}
-                </div>
-
-                <div className="d-flex align-items-center">
-                    <PaginationOptions />
-
-                    <div className="btn-group ms-3">
-                        <Button
-                            variant="outline-secondary"
-                            onClick={handlePrevPage}
-                            disabled={currentPage === 1}
-                        >
-                            <i className="fa fa-chevron-left" />
-                        </Button>
-
-                        <div className="px-3 d-flex align-items-center">
-                            Page {currentPage} of {totalPages || 1}
-                        </div>
-
-                        <Button
-                            variant="outline-secondary"
-                            onClick={handleNextPage}
-                            disabled={currentPage === totalPages || totalPages === 0}
-                        >
-                            <i className="fa fa-chevron-right" />
-                        </Button>
-                    </div>
-                </div>
-            </div>
-        </div>
-    );
+      ) : type === "textarea" ? (
+        <textarea
+          {...register(name, rules)}
+          className={`form-input ${hasError ? "input-error" : ""}`}
+          placeholder={placeholder}
+          onChange={(e) => {
+            setValue(name, e.target.value);
+            trigger(name);
+          }}
+          disabled={disabled} // Apply the disabled prop here
+        />
+      ) : (
+        <input
+          {...register(name, rules)}
+          type={type}
+          className={`form-input ${hasError ? "input-error" : ""}`}
+          placeholder={placeholder}
+          onChange={(e) => {
+            setValue(name, e.target.value);
+            trigger(name);
+          }}
+          onKeyPress={handleKeyPress}
+          disabled={disabled} // Apply the disabled prop here
+        />
+      )}
+      {hasError && <p className="error-message">{errors[name]?.message}</p>}
+    </div>
+  );
 };
 
-export default ActionTable;
+export default DynamicField;
+
+import axios from "axios";
+import { URLS_ENDPOINT } from "../utils/urlsConstants.ts";
+
+export const uploadDocument = async (file, docType) => {
+  console.log("Uploading file:", file, docType);
+
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("fileStoreId", "");
+
+  try {
+    const UPLOAD_URL = `${process.env.REACT_APP_FILE_SERVICE}${URLS_ENDPOINT.APP_SERVICES.UPLOAD_FILE}`;
+
+    const response = await axios.post(UPLOAD_URL, formData, {
+      headers: {
+        "Content-Type": "multipart/form-data",
+        Accept: "application/json",
+      },
+    });
+
+    const files = response?.data?.files;
+
+    if (files && files.length) {
+      const uploadedFileData = {
+        success: true,
+        fileId: files[0].fileStoreId,
+        docName: file.name,
+        docType: docType,
+        docSource: "web_upload",
+        fileUrl: "",
+        timestamp: new Date().toISOString()
+      };
+
+      // Save to localStorage based on docType
+      saveToLocalStorage(docType, uploadedFileData);
+
+      return uploadedFileData;
+    } else {
+      throw new Error("File upload failed: No file in response.");
+    }
+  } catch (error) {
+    console.error("Upload error:", error);
+    throw new Error(
+      error?.response?.data?.message || "Failed to upload document"
+    );
+  }
+};
+
+// Helper function to save uploaded files to localStorage by docType
+const saveToLocalStorage = (docType, fileData) => {
+  try {
+    // Get existing uploads from localStorage
+    const existingUploads = JSON.parse(localStorage.getItem('fileUploads') || '{}');
+    
+    // Initialize array for this docType if it doesn't exist
+    if (!existingUploads[docType]) {
+      existingUploads[docType] = [];
+    }
+    
+    // Add the new file data
+    existingUploads[docType].push(fileData);
+    
+    // Save back to localStorage
+    localStorage.setItem('fileUploads', JSON.stringify(existingUploads));
+    
+    console.log(`File saved to localStorage under docType: ${docType}`);
+  } catch (error) {
+    console.error("Error saving to localStorage:", error);
+  }
+};
+
+// Helper function to get uploaded files by docType
+export const getUploadedFilesByType = (docType) => {
+  try {
+    const allUploads = JSON.parse(localStorage.getItem('fileUploads') || '{}');
+    return allUploads[docType] || [];
+  } catch (error) {
+    console.error("Error reading from localStorage:", error);
+    return [];
+  }
+};
+
+// Helper function to clear files for a specific docType
+export const clearFilesByType = (docType) => {
+  try {
+    const allUploads = JSON.parse(localStorage.getItem('fileUploads') || '{}');
+    delete allUploads[docType];
+    localStorage.setItem('fileUploads', JSON.stringify(allUploads));
+  } catch (error) {
+    console.error("Error clearing files from localStorage:", error);
+  }
+};
+import React, { useEffect, useCallback, useState } from "react";
+import { useForm, FormProvider } from "react-hook-form";
+import DynamicField from "./formCommon/DynamicField";
+import Collapsible from "./formCommon/Collapsible";
+import Tooltip from "@mui/material/Tooltip";
+import { uploadDocument } from "../../../services/documentUploadService";
+import "./StepFirst.css";
+
+const StepFirst = ({ provideSubmitHandler, formData }) => {
+  const userFormData = JSON.parse(localStorage.getItem("userFormData")) || {};
+  const hasCreditorName = !!userFormData?.claimantName;
+  const hasDebtorName = !!userFormData?.corporateDebtorName;
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadError, setUploadError] = useState(null);
+
+  const methods = useForm({
+    defaultValues: {
+      CreditorName: userFormData?.claimantName || "",
+      debtorName: userFormData?.corporateDebtorName || "",
+      // identificationType: userFormData?.userDetails?.aadharNumber ? "Aadhar" :
+      //                        userFormData?.userDetails?.panNumber ? "PAN" : "",
+      // identificationNumber: userFormData?.userDetails?.aadharNumber ||
+      //                          userFormData?.userDetails?.panNumber || ""
+    }
+  });
+
+  const { register, handleSubmit, formState: { errors }, trigger, setValue, control, getValues, watch } = methods;
+
+  const handleFileUpload = async (file) => {
+    try {
+      const result = await uploadDocument(file, 'identification');
+      return result;
+    } catch (error) {
+      throw error;
+    }
+  };
+
+  const claimantDetailsSchema = [
+    {
+      name: "CreditorName",
+      label: <>Creditor Name <span className="required-asterisk">*</span></>,
+      type: "text",
+      rules: {
+        required: !hasCreditorName && "Creditor Name is required",
+      },
+      placeholder: "Enter Creditor Name",
+      disabled: hasCreditorName,
+      tooltip: "Name of the creditor filing the claim"
+    },
+    {
+      name: "totalClaimAmount",
+      label: <>Total Claim Amount <span className="required-asterisk">*</span></>,
+      type: "number",
+      rules: {
+        required: "Total Claim Amount is required",
+        min: { value: 0, message: "Value must be greater than or equal to 0" }
+      },
+      placeholder: "Enter Total Claim Amount",
+      tooltip: "The total amount being claimed against the debtor"
+    },
+    {
+      name: "debtDetails",
+      label: <>Debt Incurred Details <span className="required-asterisk">*</span></>,
+      type: "textarea",
+      rules: { required: "Debt Details are required" },
+      tooltip: "Details of how and when debt incurred",
+      placeholder: "Enter details including dates, nature of debt, and agreements"
+    },
+    {
+      name: "mutualCreditDetails",
+      label: <>Mutual Credit/Debts Details <span className="required-asterisk">*</span></>,
+      type: "textarea",
+      rules: { required: "Mutual Credit Details are required" },
+      tooltip: "Details of any mutual credit, mutual debts, or other mutual dealings between the corporate debtor and the creditor which may be set-off against the claim",
+      placeholder: "Enter details of any mutual transactions or set-offs"
+    },
+    {
+      name: "identificationType",
+      label: <>Identification Type <span className="required-asterisk">*</span></>,
+      type: "select",
+      options: [
+        { value: "", label: "Select Identification Type" },
+        { value: "Aadhar", label: "Aadhar" },
+        { value: "PAN", label: "PAN" },
+        { value: "Passport", label: "Passport" },
+      ],
+      // rules: { required: "Identification type is required" },
+      tooltip: "Select the type of identification document provided",
+    },
+    {
+      name: "identificationNumber",
+      label: <>Identification Number <span className="required-asterisk">*</span></>,
+      type: "text",
+      rules: {
+        required: "Identification number is required",
+        validate: {
+          aadhar: (value) =>
+            watch("identificationType") === "Aadhar"
+              ? /^[2-9]{1}[0-9]{3}[0-9]{4}[0-9]{4}$/.test(value) || "Please enter a valid 12-digit Aadhar number"
+              : true,
+          pan: (value) =>
+            watch("identificationType") === "PAN"
+              ? /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/.test(value) || "Please enter a valid PAN number (format: ABCDE1234F)"
+              : true,
+          passport: (value) =>
+            watch("identificationType") === "Passport"
+              ? /^[A-PR-W][0-9]{7}$/.test(value) || "Please enter a valid Passport number (common format)"
+              : true,
+        },
+      },
+      tooltip: "Enter your Aadhar, PAN, or Passport number",
+      placeholder: "Enter Identification Number",
+    },
+    {
+      name: "identificationDocument",
+      label: <>Identification Document <span className="required-asterisk">*</span></>,
+      // label: "Identification Document",
+      type: "file",
+      rules: {
+        required: "Identification document is required",
+        validate: {
+          fileUploaded: (value) => value !== null || getValues("identificationDocument") !== null || "Please upload the document"
+        }
+      },
+      tooltip: "Upload a clear scan of your identification document",
+      accept: "image/*,.pdf",
+      onFileUpload: handleFileUpload,
+      isUploading,
+      uploadError,
+      setIsUploading,
+      setUploadError
+    },
+  ];
+
+  const debtorDetailsSchema = [
+    {
+      name: "debtorName",
+      label: <>Debtor Name <span className="required-asterisk">*</span></>,
+      type: "text",
+      rules: {
+        required: !hasDebtorName && "Debtor Name is required"
+      },
+      placeholder: "Enter Debtor Name",
+      tooltip: "Name of the corporate debtor against whom the claim is being filed",
+      disabled: hasDebtorName
+    }
+  ];
+
+  const onSubmit = useCallback(async () => {
+    const isValid = await trigger();
+    if (!isValid) {
+      console.error("Validation failed");
+      return false;
+    }
+    return getValues();
+  }, [trigger, getValues]);
+
+  useEffect(() => {
+    if (formData) {
+      Object.keys(formData).forEach((key) => {
+        setValue(key, formData[key]);
+      });
+    }
+
+    if (!formData?.CreditorName && hasCreditorName) {
+      setValue("CreditorName", userFormData.claimantName);
+    }
+    if (!formData?.debtorName && hasDebtorName) {
+      setValue("debtorName", userFormData.corporateDebtorName);
+    }
+  }, [formData, setValue, hasCreditorName, userFormData.claimantName, hasDebtorName, userFormData.corporateDebtorName]);
+
+  useEffect(() => {
+    if (provideSubmitHandler) {
+      provideSubmitHandler(onSubmit);
+    }
+  }, [provideSubmitHandler, onSubmit]);
+
+  const identificationType = watch("identificationType");
+  useEffect(() => {
+    if (identificationType) {
+      trigger("identificationNumber");
+      localStorage.setItem("selectedIdentificationType", identificationType);
+    }
+  }, [identificationType, trigger]);
+
+  return (
+    <FormProvider {...methods}>
+      <form className="form-stepper">
+        <div className="mb-4 bg-light">
+          <div className="mb-4 bg-light">
+            <Collapsible title="Debtor Details" defaultOpen={true}>
+              <div className="flex-container">
+                {debtorDetailsSchema.map((fieldConfig) => (
+                  <DynamicField
+                    key={fieldConfig.name}
+                    fieldConfig={fieldConfig}
+                    control={control}
+                    register={register}
+                    errors={errors}
+                    setValue={setValue}
+                    trigger={trigger}
+                    getValues={getValues}
+                  />
+                ))}
+              </div>
+            </Collapsible>
+          </div>
+          <Collapsible title="Creditor Basic Details" defaultOpen={true}>
+            <div className="flex-container">
+              {claimantDetailsSchema.map((fieldConfig) => (
+                <DynamicField
+                  key={fieldConfig.name}
+                  fieldConfig={fieldConfig}
+                  control={control}
+                  register={register}
+                  errors={errors}
+                  setValue={setValue}
+                  trigger={trigger}
+                  getValues={getValues}
+                />
+              ))}
+            </div>
+          </Collapsible>
+        </div>
+      </form>
+    </FormProvider>
+  );
+};
+
+export default StepFirst;
+http://15.206.115.75:8002/filestore/v1/files/id?fileStoreId=db90e48b-d363-432f-9a07-bcef36a19802
