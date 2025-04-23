@@ -2,18 +2,29 @@ import React, { useState, useCallback, useEffect } from "react";
 import { useForm, FormProvider } from "react-hook-form";
 import DynamicField from "./formCommon/DynamicField";
 import Collapsible from "./formCommon/Collapsible";
+import Tooltip from "@mui/material/Tooltip";
 import { uploadDocument } from "../../../services/documentUploadService";
+import "./StepFirst.css";
 import { Button } from 'react-bootstrap';
-import { Download, CheckCircle } from "lucide-react";
+import { File, Download, Upload, CheckCircle } from "lucide-react";
 import 'bootstrap/dist/css/bootstrap.min.css';
 
-const StepThird = ({ provideSubmitHandler, formData }) => {
+const StepFirst = ({ provideSubmitHandler, formData }) => {
+    const userFormData = JSON.parse(localStorage.getItem("userFormData")) || {};
+    const hasCreditorName = !!userFormData?.claimantName;
+    const hasDebtorName = !!userFormData?.corporateDebtorName;
     const [isUploading, setIsUploading] = useState(false);
     const [uploadError, setUploadError] = useState(null);
     const [uploadSuccess, setUploadSuccess] = useState(false);
     const [uploadedFileUrl, setUploadedFileUrl] = useState(null);
 
-    const methods = useForm();
+    const methods = useForm({
+        defaultValues: {
+            CreditorName: userFormData?.claimantName || "",
+            debtorName: userFormData?.corporateDebtorName || "",
+        }
+    });
+
     const { register, handleSubmit, formState: { errors }, trigger, setValue, control, getValues, watch } = methods;
 
     const handleFileUpload = async (file) => {
@@ -22,9 +33,9 @@ const StepThird = ({ provideSubmitHandler, formData }) => {
             setUploadError(null);
             setUploadSuccess(false);
 
-            const result = await uploadDocument(file, 'signatoryDocument');
+            const result = await uploadDocument(file, 'identification');
             if (result.success) {
-                setValue("signatoryDocument", {
+                setValue("identificationDocument", {
                     fileId: result.fileId,
                     docName: result.docName,
                     docType: result.docType,
@@ -36,7 +47,7 @@ const StepThird = ({ provideSubmitHandler, formData }) => {
             return result;
         } catch (error) {
             setUploadError(error.message);
-            setValue("signatoryDocument", null, { shouldValidate: true });
+            setValue("identificationDocument", null, { shouldValidate: true });
             setUploadSuccess(false);
             throw error;
         } finally {
@@ -44,57 +55,113 @@ const StepThird = ({ provideSubmitHandler, formData }) => {
         }
     };
 
-    // Split the schema into parts to insert the download section after the file upload
-    const financialCreditorDetailsSchemaPart1 = [
-        { 
-            name: "signatoryName", 
-            label: <>Name of Signatory (BLOCK LETTERS) <span className="required-asterisk">*</span></>, 
-            type: "text", 
-            rules: { 
-                required: "Signatory name is required",
-                pattern: {
-                    value: /^[A-Z\s]+$/,
-                    message: "Please enter in BLOCK LETTERS only"
-                }
+    const claimantDetailsSchema = [
+        {
+            name: "CreditorName",
+            label: <>Creditor Name <span className="required-asterisk">*</span></>,
+            type: "text",
+            rules: {
+                required: !hasCreditorName && "Creditor Name is required",
             },
-            placeholder: "Enter signatory name in BLOCK LETTERS" 
+            placeholder: "Enter Creditor Name",
+            disabled: hasCreditorName,
+            tooltip: "Name of the creditor filing the claim"
         },
-        { 
-            name: "signatoryDocument", 
-            label: <>Signatory Document <span className="required-asterisk">*</span></>, 
-            type: "file", 
-            rules: { 
-                required: "Signatory document is required",
+        {
+            name: "totalClaimAmount",
+            label: <>Total Claim Amount <span className="required-asterisk">*</span></>,
+            type: "number",
+            rules: {
+                required: "Total Claim Amount is required",
+                min: { value: 0, message: "Value must be greater than or equal to 0" }
+            },
+            placeholder: "Enter Total Claim Amount",
+            tooltip: "The total amount being claimed against the debtor"
+        },
+        {
+            name: "debtDetails",
+            label: <>Debt Incurred Details <span className="required-asterisk">*</span></>,
+            type: "textarea",
+            rules: { required: "Debt Details are required" },
+            tooltip: "Details of how and when debt incurred",
+            placeholder: "Enter details including dates, nature of debt, and agreements"
+        },
+        {
+            name: "mutualCreditDetails",
+            label: <>Mutual Credit/Debts Details <span className="required-asterisk">*</span></>,
+            type: "textarea",
+            rules: { required: "Mutual Credit Details are required" },
+            tooltip: "Details of any mutual credit, mutual debts, or other mutual dealings between the corporate debtor and the creditor which may be set-off against the claim",
+            placeholder: "Enter details of any mutual transactions or set-offs"
+        },
+        {
+            name: "identificationType",
+            label: <>Identification Type <span className="required-asterisk">*</span></>,
+            type: "select",
+            options: [
+                { value: "", label: "Select Identification Type" },
+                { value: "Aadhar", label: "Aadhar" },
+                { value: "PAN", label: "PAN" },
+                { value: "Passport", label: "Passport" },
+            ],
+            tooltip: "Select the type of identification document provided",
+        },
+        {
+            name: "identificationNumber",
+            label: <>Identification Number <span className="required-asterisk">*</span></>,
+            type: "text",
+            rules: {
+                required: "Identification number is required",
                 validate: {
-                    fileUploaded: (value) => value !== null || "Please upload the document"
+                    aadhar: (value) =>
+                        watch("identificationType") === "Aadhar"
+                            ? /^[2-9]{1}[0-9]{3}[0-9]{4}[0-9]{4}$/.test(value) || "Please enter a valid 12-digit Aadhar number"
+                            : true,
+                    pan: (value) =>
+                        watch("identificationType") === "PAN"
+                            ? /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/.test(value) || "Please enter a valid PAN number (format: ABCDE1234F)"
+                            : true,
+                    passport: (value) =>
+                        watch("identificationType") === "Passport"
+                            ? /^[A-PR-W][0-9]{7}$/.test(value) || "Please enter a valid Passport number (common format)"
+                            : true,
+                },
+            },
+            tooltip: "Enter your Aadhar, PAN, or Passport number",
+            placeholder: "Enter Identification Number",
+        },
+        {
+            name: "identificationDocument",
+            label: <>Identification Document <span className="required-asterisk">*</span></>,
+            type: "file",
+            rules: {
+                required: "Identification document is required",
+                validate: {
+                    fileUploaded: (value) => value !== null || getValues("identificationDocument") !== null || "Please upload the document"
                 }
             },
+            tooltip: "Upload a clear scan of your identification document",
             accept: "image/*,.pdf",
             onFileUpload: handleFileUpload,
             isUploading,
             uploadError,
             setIsUploading,
             setUploadError
-        }
+        },
     ];
 
-    const financialCreditorDetailsSchemaPart2 = [
-        { 
-            name: "signatoryPosition", 
-            label: <>Position of Signatory or Relation to Creditors<span className="required-asterisk">*</span></>, 
-            type: "text", 
-            rules: { required: "Signatory position is required" },
-            placeholder: "Enter signatory position/relation" 
-        },
-        { 
-            name: "signatoryAddress", 
-            label: <>Address of Signatory <span className="required-asterisk">*</span></>, 
-            type: "textarea",
-            rules: { 
-                required: "Signatory address is required",
+    const debtorDetailsSchema = [
+        {
+            name: "debtorName",
+            label: <>Debtor Name <span className="required-asterisk">*</span></>,
+            type: "text",
+            rules: {
+                required: !hasDebtorName && "Debtor Name is required"
             },
-            placeholder: "Enter complete signatory address" 
-        },
+            placeholder: "Enter Debtor Name",
+            tooltip: "Name of the corporate debtor against whom the claim is being filed",
+            disabled: hasDebtorName
+        }
     ];
 
     const onSubmit = useCallback(async () => {
@@ -112,7 +179,14 @@ const StepThird = ({ provideSubmitHandler, formData }) => {
                 setValue(key, formData[key]);
             });
         }
-    }, [formData, setValue]);
+
+        if (!formData?.CreditorName && hasCreditorName) {
+            setValue("CreditorName", userFormData.claimantName);
+        }
+        if (!formData?.debtorName && hasDebtorName) {
+            setValue("debtorName", userFormData.corporateDebtorName);
+        }
+    }, [formData, setValue, hasCreditorName, userFormData.claimantName, hasDebtorName, userFormData.corporateDebtorName]);
 
     useEffect(() => {
         if (provideSubmitHandler) {
@@ -120,71 +194,290 @@ const StepThird = ({ provideSubmitHandler, formData }) => {
         }
     }, [provideSubmitHandler, onSubmit]);
 
-    return (
-        <FormProvider {...methods}>
-            <form className="form-stepper">
-                <div className="mb-4 bg-light">
-                    <Collapsible title="Financial Creditor Details" defaultOpen={true}>
-                        <div className="flex-container">
-                            {/* First part of the form (name and document upload) */}
-                            {financialCreditorDetailsSchemaPart1.map((fieldConfig) => (
-                                <DynamicField
-                                    key={fieldConfig.name}
-                                    fieldConfig={fieldConfig}
-                                    control={control}
-                                    register={register}
-                                    errors={errors}
-                                    setValue={setValue}
-                                    trigger={trigger}
-                                    getValues={getValues}
-                                />
-                            ))}
-                            
-                            {/* File download section appears right after the upload field */}
-                            {uploadedFileUrl && (
-                                <div className="file-upload-status mt-2 mb-3 p-3 border rounded bg-light">
-                                    <div className="d-flex align-items-center gap-3">
-                                        {uploadSuccess && (
-                                            <div className="text-success d-flex align-items-center gap-2">
-                                                <CheckCircle size={20} />
-                                                <span>Document uploaded successfully!</span>
-                                            </div>
-                                        )}
-                                        <Button
-                                            variant="outline-primary"
-                                            as="a"
-                                            href={uploadedFileUrl}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            download
-                                            className="d-flex align-items-center gap-2"
-                                        >
-                                            <Download size={18} />
-                                            Download Document
-                                        </Button>
-                                    </div>
-                                </div>
-                            )}
+    const identificationType = watch("identificationType");
+    useEffect(() => {
+        if (identificationType) {
+            trigger("identificationNumber");
+            localStorage.setItem("selectedIdentificationType", identificationType);
+        }
+    }, [identificationType, trigger]);
 
-                            {/* Second part of the form (position and address) */}
-                            {financialCreditorDetailsSchemaPart2.map((fieldConfig) => (
-                                <DynamicField
-                                    key={fieldConfig.name}
-                                    fieldConfig={fieldConfig}
-                                    control={control}
-                                    register={register}
-                                    errors={errors}
-                                    setValue={setValue}
-                                    trigger={trigger}
-                                    getValues={getValues}
-                                />
-                            ))}
-                        </div>
-                    </Collapsible>
-                </div>
-            </form>
-        </FormProvider>
-    );
+    return (
+      <FormProvider {...methods}>
+          <form className="form-stepper">
+              <div className="mb-4 bg-light">
+                  <div className="mb-4 bg-light">
+                      <Collapsible title="Debtor Details" defaultOpen={true}>
+                          <div className="flex-container">
+                              {debtorDetailsSchema.map((fieldConfig) => (
+                                  <DynamicField
+                                      key={fieldConfig.name}
+                                      fieldConfig={fieldConfig}
+                                      control={control}
+                                      register={register}
+                                      errors={errors}
+                                      setValue={setValue}
+                                      trigger={trigger}
+                                      getValues={getValues}
+                                  />
+                              ))}
+                          </div>
+                      </Collapsible>
+                  </div>
+                  <Collapsible title="Creditor Basic Details" defaultOpen={true}>
+                      <div className="flex-container">
+                          {claimantDetailsSchema.map((fieldConfig) => (
+                              <DynamicField
+                                  key={fieldConfig.name}
+                                  fieldConfig={fieldConfig}
+                                  control={control}
+                                  register={register}
+                                  errors={errors}
+                                  setValue={setValue}
+                                  trigger={trigger}
+                                  getValues={getValues}
+                              />
+                          ))}
+                          {uploadedFileUrl && (
+                              <div className="file-upload-status mt-4 p-3 border rounded bg-light">
+                                  <div className="d-flex align-items-center gap-3">
+                                      {uploadSuccess && (
+                                          <div className="text-success d-flex align-items-center gap-2">
+                                              <CheckCircle size={20} />
+                                              <span>File uploaded successfully!</span>
+                                          </div>
+                                      )}
+                                      <Button
+                                          variant="outline-primary"
+                                          as="a"
+                                          href={uploadedFileUrl}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          download
+                                          className="d-flex align-items-center gap-2"
+                                      >
+                                          <Download size={18} />
+                                          Download Document
+                                      </Button>
+                                  </div>
+                              </div>
+                          )}
+                      </div>
+                  </Collapsible>
+              </div>
+          </form>
+      </FormProvider>
+  );
 };
 
-export default StepThird;
+export default StepFirst;
+
+/* Flex container setup to wrap items */
+.flex-container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+  padding: 20px;
+  max-width: 1200px;
+  margin: 0 auto;
+  align-items: flex-start;
+  justify-content: flex-start;
+}
+
+/* Standard Flex item */
+.flex-item {
+  flex: 1 1 calc(50% - 20px);
+  box-sizing: border-box;
+  padding: 20px;
+  text-align: left;
+  min-width: 250px;
+  max-width: calc(50% - 20px);
+  display: flex;
+  flex-direction: column;
+}
+
+/* Consistent width for input fields */
+.form-input {
+  width: 100%;
+  padding: 12px;
+  margin-top: 8px;
+  font-size: 14px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  box-sizing: border-box;
+  height: 40px;
+  background-color: #fff;
+}
+
+/* Error styling for inputs */
+.form-input.input-error {
+  border-color: red ;
+}
+
+/* Error message text */
+.error-message {
+  color: red;
+  font-size: 12px;
+  margin-top: 5px;
+}
+
+/* Custom Checkbox Styling */
+.custom-checkbox {
+  display: flex;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.custom-checkbox input[type="checkbox"] {
+  margin-right: 10px;
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+}
+
+.custom-checkbox label {
+  font-size: 14px;
+  font-weight: normal;
+  cursor: pointer;
+}
+
+/* Custom File Input Styling */
+.custom-file-input {
+  position: relative;
+  overflow: hidden;
+  display: inline-block;
+  width: 100%;
+  margin-top: 8px;
+}
+
+.custom-file-input input[type="file"] {
+  position: absolute;
+  left: 0;
+  top: 0;
+  opacity: 0;
+  cursor: pointer;
+  width: 100%;
+  height: 100%;
+}
+
+.custom-file-input .file-label {
+  display: block;
+  padding: 10px;
+  background-color: #f9f9f9;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  text-align: center;
+  font-size: 14px;
+  color: #333;
+  cursor: pointer;
+}
+
+.custom-file-input .file-label:hover {
+  background-color: #e9e9e9;
+}
+
+/* Identification Proof Container */
+.identification-proof-container {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.file-upload-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+
+.tooltip {
+  position: relative;
+  display: inline-block;
+  margin-left: 5px;
+  cursor: pointer;
+}
+
+.tooltip .tooltiptext {
+  visibility: hidden;
+  width: 200px;
+  background-color: #555;
+  color: #fff;
+  text-align: center;
+  border-radius: 6px;
+  padding: 5px;
+  position: absolute;
+  z-index: 1;
+  bottom: 125%;
+  left: 50%;
+  margin-left: -100px;
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+
+.tooltip:hover .tooltiptext {
+  visibility: visible;
+  opacity: 1;
+}
+
+
+
+.required-asterisk {
+  color: red;
+  font-size: 14px;
+  margin-left: 4px;
+}
+
+.error-message {
+  color: red;
+  font-size: 12px;
+  margin-top: 5px;
+}
+
+/* Add these styles to your existing StepFirst.css */
+
+.file-upload-status {
+  transition: all 0.3s ease;
+  border: 1px solid #dee2e6 !important;
+}
+
+.file-upload-status:hover {
+  background-color: #f8f9fa !important;
+}
+
+.btn-outline-primary {
+  border-color: #0d6efd;
+  color: #0d6efd;
+}
+
+.btn-outline-primary:hover {
+  background-color: #0d6efd;
+  color: white;
+}
+
+.required-asterisk {
+  color: #dc3545;
+  font-weight: bold;
+}
+
+/* Add some spacing between form elements */
+.flex-container > * {
+  margin-bottom: 1.5rem;
+}
+
+/* Style for upload progress/status */
+.upload-status {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+  font-size: 0.875rem;
+}
+
+.upload-status.success {
+  color: #198754;
+}
+
+.upload-status.error {
+  color: #dc3545;
+}
+
