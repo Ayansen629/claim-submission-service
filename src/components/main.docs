@@ -1,528 +1,382 @@
-import React, { useState, useCallback, useEffect } from "react";
-import { useForm, FormProvider } from "react-hook-form";
-import DynamicField from "./formCommon/DynamicField";
+import React, { useEffect, useMemo, useState } from "react";
+import { Container, Row, Col, Spinner, Badge } from "react-bootstrap";
 import Collapsible from "./formCommon/Collapsible";
-import Tooltip from "@mui/material/Tooltip";
-import { uploadDocument } from "../../../services/documentUploadService";
-import "./StepFirst.css";
-import { Button } from 'react-bootstrap';
-import { File, Download, Upload, CheckCircle } from "lucide-react";
-import 'bootstrap/dist/css/bootstrap.min.css';
+import { useFormData } from "../../context/FormDataContext";
+import PreviewCard from "../../private/Dashboard/PreviewCard";
 
-const StepFirst = ({ provideSubmitHandler, formData }) => {
-    const userFormData = JSON.parse(localStorage.getItem("userFormData")) || {};
-    const hasCreditorName = !!userFormData?.claimantName;
-    const hasDebtorName = !!userFormData?.corporateDebtorName;
-    const [isUploading, setIsUploading] = useState(false);
-    const [uploadError, setUploadError] = useState(null);
-    const [uploadSuccess, setUploadSuccess] = useState(false);
-    const [uploadedFileUrl, setUploadedFileUrl] = useState(null);
+const ReviewStep = () => {
+  const { formData } = useFormData();
+  const [draftResponse, setDraftResponse] = useState(null);
+  const [loading, setLoading] = useState(true);
 
-    const methods = useForm({
-        defaultValues: {
-            CreditorName: userFormData?.claimantName || "",
-            debtorName: userFormData?.corporateDebtorName || "",
-        }
-    });
+  // Load draft data from localStorage on mount
+  useEffect(() => {
+    const savedDraft = localStorage.getItem("draftResponse");
+    if (savedDraft) {
+      try {
+        const parsedDraft = JSON.parse(savedDraft);
+        setDraftResponse(parsedDraft);
+      } catch (error) {
+        console.error("Error parsing draft data:", error);
+      }
+    }
+    setLoading(false);
+  }, []);
 
-    const { register, handleSubmit, formState: { errors }, trigger, setValue, control, getValues, watch } = methods;
+  // Get application number from draft response
+  const applicationNumber = useMemo(() => {
+    if (!draftResponse) return null;
+    return draftResponse.data.applicationDetails?.applicationNumber || "N/A";
+  }, [draftResponse]);
 
-    const handleFileUpload = async (file) => {
-        try {
-            setIsUploading(true);
-            setUploadError(null);
-            setUploadSuccess(false);
+  // Transform the draft response to match your form structure
+  const transformedDraftData = useMemo(() => {
+    if (!draftResponse) return null;
 
-            const result = await uploadDocument(file, 'identification');
-            if (result.success) {
-                setValue("identificationDocument", {
-                    fileId: result.fileId,
-                    docName: result.docName,
-                    docType: result.docType,
-                    fileUrl: result.fileUrl
-                }, { shouldValidate: true });
-                setUploadedFileUrl(`${process.env.REACT_APP_FILE_SERVICE}v1/files/id?fileStoreId=${result.fileId}`);
-                setUploadSuccess(true);
-            }
-            return result;
-        } catch (error) {
-            setUploadError(error.message);
-            setValue("identificationDocument", null, { shouldValidate: true });
-            setUploadSuccess(false);
-            throw error;
-        } finally {
-            setIsUploading(false);
-        }
+    const basicDetails = draftResponse.data.applicationDetails?.creditorBasicDetails || {};
+    const claimDetails = draftResponse.data.applicationDetails?.claimDetails || {};
+    const signatoryDetails = draftResponse.data.applicationDetails?.signatoryDetails || {};
+
+    return {
+      debtorName: basicDetails.debtorName,
+      CreditorName: basicDetails.creditorName,
+      totalClaimAmount: basicDetails.totalClaimAmount,
+      debtDetails: basicDetails.debtDetails,
+      mutualCreditDetails: basicDetails.mutualCreditDetails,
+      identificationType: basicDetails.document?.docType,
+      identificationNumber: basicDetails.identificationNumber,
+      identificationDocument: basicDetails.document,
+
+      securityInterestAmount: claimDetails.securityInterestAmount,
+      guaranteeAmount: claimDetails.guaranteeAmount,
+      guarantorName: claimDetails.guarantorName,
+      guarantorAddress: claimDetails.guarantorAddress,
+      creditorAddress: claimDetails.creditorAddress,
+      creditorEmail: claimDetails.creditorEmail,
+      beneficiaryName: claimDetails.beneficiaryName,
+      beneficiaryAddress: claimDetails.beneficiaryAddress,
+      corporateDebtorSecurityAmount: claimDetails.corporateDebtorSecurityAmount,
+      corporateDebtorGuaranteeAmount: claimDetails.corporateDebtorGuaranteeAmount,
+      principalBorrowerName: claimDetails.principalBorrowerName,
+      principalBorrowerAddress: claimDetails.principalBorrowerAddress,
+      accountNumber: claimDetails.bankAccountNumber,
+      ifscCode: claimDetails.bankIfscCode,
+      branchName: claimDetails.bankBranchName,
+      addressProofType: claimDetails.document?.docType,
+      addressProofNumber: claimDetails.addressProofNumber,
+      addressProofDocument: claimDetails.document,
+
+      signatoryName: signatoryDetails.name,
+      signatoryPosition: signatoryDetails.position,
+      signatoryAddress: signatoryDetails.address,
+      signatoryDocument: signatoryDetails.document,
+    };
+  }, [draftResponse]);
+
+  // Use draft data if available, otherwise use regular form data
+  const displayData = transformedDraftData || formData;
+
+  // Format the data for display
+  const formattedData = useMemo(() => {
+    if (!displayData || Object.keys(displayData).length === 0) return null;
+
+    const formatFileInfo = (fileData) => {
+      if (!fileData) return "No file uploaded";
+      if (typeof fileData === "string") return fileData;
+      return fileData.docName || "File uploaded";
     };
 
-    const claimantDetailsSchema = [
-        {
-            name: "CreditorName",
-            label: <>Creditor Name <span className="required-asterisk">*</span></>,
-            type: "text",
-            rules: {
-                required: !hasCreditorName && "Creditor Name is required",
-            },
-            placeholder: "Enter Creditor Name",
-            disabled: hasCreditorName,
-            tooltip: "Name of the creditor filing the claim"
+    return {
+      step1: {
+        creditorDetails: {
+          "Debtor Name": displayData.debtorName,
+          "Creditor Name": displayData.CreditorName,
+          "Total Claim Amount": displayData.totalClaimAmount,
+          "Debt Details": displayData.debtDetails,
+          "Mutual Credit Details": displayData.mutualCreditDetails,
         },
-        {
-            name: "totalClaimAmount",
-            label: <>Total Claim Amount <span className="required-asterisk">*</span></>,
-            type: "number",
-            rules: {
-                required: "Total Claim Amount is required",
-                min: { value: 0, message: "Value must be greater than or equal to 0" }
-            },
-            placeholder: "Enter Total Claim Amount",
-            tooltip: "The total amount being claimed against the debtor"
+        identificationDetails: {
+          "Identification Type": displayData.identificationType,
+          "Identification Number": displayData.identificationNumber,
+          "Identification Document": formatFileInfo(displayData.identificationDocument),
+        }
+      },
+      step2: {
+        financialDetails: {
+          "Security Interest Amount": displayData.securityInterestAmount,
+          "Guarantee Amount": displayData.guaranteeAmount,
+          "Guarantor Name": displayData.guarantorName,
+          "Guarantor Address": displayData.guarantorAddress,
+          "Creditor Address": displayData.creditorAddress,
+          "Creditor Email": displayData.creditorEmail,
         },
-        {
-            name: "debtDetails",
-            label: <>Debt Incurred Details <span className="required-asterisk">*</span></>,
-            type: "textarea",
-            rules: { required: "Debt Details are required" },
-            tooltip: "Details of how and when debt incurred",
-            placeholder: "Enter details including dates, nature of debt, and agreements"
+        beneficiaryDetails: {
+          "Beneficiary Name": displayData.beneficiaryName,
+          "Beneficiary Address": displayData.beneficiaryAddress,
+          "Corporate Debtor Security Amount": displayData.corporateDebtorSecurityAmount,
+          "Corporate Debtor Guarantee Amount": displayData.corporateDebtorGuaranteeAmount,
         },
-        {
-            name: "mutualCreditDetails",
-            label: <>Mutual Credit/Debts Details <span className="required-asterisk">*</span></>,
-            type: "textarea",
-            rules: { required: "Mutual Credit Details are required" },
-            tooltip: "Details of any mutual credit, mutual debts, or other mutual dealings between the corporate debtor and the creditor which may be set-off against the claim",
-            placeholder: "Enter details of any mutual transactions or set-offs"
+        addressproofDetails: {
+          "Address Proof Type": displayData.addressProofType,
+          "Address Proof Number": displayData.addressProofNumber,
+          "Address Proof Document": formatFileInfo(displayData.addressProofDocument),
         },
-        {
-            name: "identificationType",
-            label: <>Identification Type <span className="required-asterisk">*</span></>,
-            type: "select",
-            options: [
-                { value: "", label: "Select Identification Type" },
-                { value: "Aadhar", label: "Aadhar" },
-                { value: "PAN", label: "PAN" },
-                { value: "Passport", label: "Passport" },
-            ],
-            tooltip: "Select the type of identification document provided",
-        },
-        {
-            name: "identificationNumber",
-            label: <>Identification Number <span className="required-asterisk">*</span></>,
-            type: "text",
-            rules: {
-                required: "Identification number is required",
-                validate: {
-                    aadhar: (value) =>
-                        watch("identificationType") === "Aadhar"
-                            ? /^[2-9]{1}[0-9]{3}[0-9]{4}[0-9]{4}$/.test(value) || "Please enter a valid 12-digit Aadhar number"
-                            : true,
-                    pan: (value) =>
-                        watch("identificationType") === "PAN"
-                            ? /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/.test(value) || "Please enter a valid PAN number (format: ABCDE1234F)"
-                            : true,
-                    passport: (value) =>
-                        watch("identificationType") === "Passport"
-                            ? /^[A-PR-W][0-9]{7}$/.test(value) || "Please enter a valid Passport number (common format)"
-                            : true,
-                },
-            },
-            tooltip: "Enter your Aadhar, PAN, or Passport number",
-            placeholder: "Enter Identification Number",
-        },
-        {
-            name: "identificationDocument",
-            label: <>Identification Document <span className="required-asterisk">*</span></>,
-            type: "file",
-            rules: {
-                required: "Identification document is required",
-                validate: {
-                    fileUploaded: (value) => value !== null || getValues("identificationDocument") !== null || "Please upload the document"
-                }
-            },
-            tooltip: "Upload a clear scan of your identification document",
-            accept: "image/*,.pdf",
-            onFileUpload: handleFileUpload,
-            isUploading,
-            uploadError,
-            setIsUploading,
-            setUploadError
-        },
-    ];
-
-    const debtorDetailsSchema = [
-        {
-            name: "debtorName",
-            label: <>Debtor Name <span className="required-asterisk">*</span></>,
-            type: "text",
-            rules: {
-                required: !hasDebtorName && "Debtor Name is required"
-            },
-            placeholder: "Enter Debtor Name",
-            tooltip: "Name of the corporate debtor against whom the claim is being filed",
-            disabled: hasDebtorName
+        bankDetails: {
+          "Principal Borrower Name": displayData.principalBorrowerName,
+          "Principal Borrower Address": displayData.principalBorrowerAddress,
+          "Account Number": displayData.accountNumber,
+          "IFSC Code": displayData.ifscCode,
+          "Branch Name": displayData.branchName,
         }
-    ];
-
-    const onSubmit = useCallback(async () => {
-        const isValid = await trigger();
-        if (!isValid) {
-            console.error("Validation failed");
-            return false;
+      },
+      step3: {
+        signatoryDetails: {
+          "Signatory Name": displayData.signatoryName,
+          "Signatory Position": displayData.signatoryPosition,
+          "Signatory Address": displayData.signatoryAddress,
+          "Signatory Document": formatFileInfo(displayData.signatoryDocument),
         }
-        return getValues();
-    }, [trigger, getValues]);
+      }
+    };
+  }, [displayData]);
 
-    useEffect(() => {
-        if (formData) {
-            Object.keys(formData).forEach((key) => {
-                setValue(key, formData[key]);
-            });
-        }
-
-        if (!formData?.CreditorName && hasCreditorName) {
-            setValue("CreditorName", userFormData.claimantName);
-        }
-        if (!formData?.debtorName && hasDebtorName) {
-            setValue("debtorName", userFormData.corporateDebtorName);
-        }
-    }, [formData, setValue, hasCreditorName, userFormData.claimantName, hasDebtorName, userFormData.corporateDebtorName]);
-
-    useEffect(() => {
-        if (provideSubmitHandler) {
-            provideSubmitHandler(onSubmit);
-        }
-    }, [provideSubmitHandler, onSubmit]);
-
-    const identificationType = watch("identificationType");
-    useEffect(() => {
-        if (identificationType) {
-            trigger("identificationNumber");
-            localStorage.setItem("selectedIdentificationType", identificationType);
-        }
-    }, [identificationType, trigger]);
-
+  if (loading) {
     return (
-        <FormProvider {...methods}>
-            <form className="form-stepper">
-                <div className="mb-4 bg-light">
-                    <div className="mb-4 bg-light">
-                        <Collapsible title="Debtor Details" defaultOpen={true}>
-                            <div className="flex-container">
-                                {debtorDetailsSchema.map((fieldConfig) => (
-                                    <DynamicField
-                                        key={fieldConfig.name}
-                                        fieldConfig={fieldConfig}
-                                        control={control}
-                                        register={register}
-                                        errors={errors}
-                                        setValue={setValue}
-                                        trigger={trigger}
-                                        getValues={getValues}
-                                    />
-                                ))}
-                            </div>
-                        </Collapsible>
-                    </div>
-                    <Collapsible title="Creditor Basic Details" defaultOpen={true}>
-                        <div className="flex-container">
-                            {claimantDetailsSchema.map((fieldConfig) => (
-                                <DynamicField
-                                    key={fieldConfig.name}
-                                    fieldConfig={fieldConfig}
-                                    control={control}
-                                    register={register}
-                                    errors={errors}
-                                    setValue={setValue}
-                                    trigger={trigger}
-                                    getValues={getValues}
-                                />
-                            ))}
-                            {getValues("identificationDocument") && (
-                                <div className="file-upload-status mt-3 p-3 border rounded bg-light">
-                                    <div className="file-upload-status-content">
-                                        {isUploading ? (
-                                            <div className="uploading-state">
-                                                <Upload size={16} className="animate-pulse" />
-                                                <span>Uploading document...</span>
-                                            </div>
-                                        ) : uploadError ? (
-                                            <div className="upload-error-state">
-                                                <span>Upload failed: {uploadError}</span>
-                                            </div>
-                                        ) : (
-                                            <>
-                                                <div className="upload-success-message">
-                                                    <CheckCircle size={18} />
-                                                    <span>Document uploaded successfully</span>
-                                                </div>
-                                                <div className="download-btn-container">
-                                                    <a
-                                                        href={uploadedFileUrl}
-                                                        target="_blank"
-                                                        rel="noopener noreferrer"
-                                                        className="download-btn"
-                                                    >
-                                                        <Download size={16} />
-                                                        Download
-                                                    </a>
-                                                </div>
-                                            </>
-                                        )}
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-                    </Collapsible>
-                </div>
-            </form>
-        </FormProvider>
+      <div className="d-flex justify-content-center align-items-center" style={{ height: "100vh" }}>
+        <Spinner animation="border" />
+      </div>
     );
+  }
+
+  if (!formattedData) {
+    return (
+      <div className="alert alert-info">
+        No form data available to display
+      </div>
+    );
+  }
+
+  const renderPreviewSection = (fields) => (
+    <Container fluid>
+      <Row className="g-3">
+        {Object.entries(fields).map(([key, value]) => (
+          <Col key={key} xs={12} sm={6} md={3} className="mb-3">
+            <PreviewCard 
+              title={key} 
+              value={value} 
+            />
+          </Col>
+        ))}
+      </Row>
+    </Container>
+  );
+
+  const renderCard = (title, fields) => (
+    <div className="mb-3">
+      <h5 style={{ fontWeight: 600 }}>{title}</h5>
+      {renderPreviewSection(fields)}
+    </div>
+  );
+
+  return (
+    <div className="form-stepper">
+      {draftResponse && (
+        <div className="d-flex justify-content-between align-items-center mb-3 p-3 bg-light rounded">
+          <div>
+            <span className="text-muted small">Application Number:</span>
+            <span className="ms-2 fw-bold">{applicationNumber}</span>
+          </div>
+          <Badge bg="warning" className="text-dark">
+            Draft Preview
+          </Badge>
+        </div>
+      )}
+
+      <Collapsible title="Step 1: Creditor and Identification Details">
+        {renderCard("Creditor Details", formattedData.step1.creditorDetails)}
+        {renderCard("Identification Details", formattedData.step1.identificationDetails)}
+      </Collapsible>
+
+      <Collapsible title="Step 2: Financial and Beneficiary Details">
+        {renderCard("Financial Details", formattedData.step2.financialDetails)}
+        {renderCard("Address Proof Details", formattedData.step2.addressproofDetails)}
+        {renderCard("Beneficiary Details", formattedData.step2.beneficiaryDetails)}
+        {renderCard("Bank Details", formattedData.step2.bankDetails)}
+      </Collapsible>
+
+      <Collapsible title="Step 3: Signatory Details">
+        {renderCard("Signatory Details", formattedData.step3.signatoryDetails)}
+      </Collapsible>
+    </div>
+  );
 };
 
-export default StepFirst;
-
-/* Flex container setup to wrap items */
-.flex-container {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 20px;
-    padding: 20px;
-    max-width: 1200px;
-    margin: 0 auto;
-    align-items: flex-start;
-    justify-content: flex-start;
-}
-
-/* Standard Flex item */
-.flex-item {
-    flex: 1 1 calc(50% - 20px);
-    box-sizing: border-box;
-    padding: 20px;
-    text-align: left;
-    min-width: 250px;
-    max-width: calc(50% - 20px);
-    display: flex;
-    flex-direction: column;
-}
-
-/* Consistent width for input fields */
-.form-input {
-    width: 100%;
-    padding: 12px;
-    margin-top: 8px;
-    font-size: 14px;
-    border: 1px solid #ddd;
-    border-radius: 4px;
-    box-sizing: border-box;
-    height: 40px;
-    background-color: #fff;
-}
-
-/* Error styling for inputs */
-.form-input.input-error {
-    border-color: red;
-}
-
-/* Error message text */
-.error-message {
-    color: red;
-    font-size: 12px;
-    margin-top: 5px;
-}
-
-/* Custom Checkbox Styling */
-.custom-checkbox {
-    display: flex;
-    align-items: center;
-    margin-bottom: 10px;
-}
-
-.custom-checkbox input[type="checkbox"] {
-    margin-right: 10px;
-    width: 18px;
-    height: 18px;
-    cursor: pointer;
-}
-
-.custom-checkbox label {
-    font-size: 14px;
-    font-weight: normal;
-    cursor: pointer;
-}
-
-/* Custom File Input Styling */
-.custom-file-input {
-    position: relative;
-    overflow: hidden;
-    display: inline-block;
-    width: 100%;
-    margin-top: 8px;
-}
-
-.custom-file-input input[type="file"] {
-    position: absolute;
-    left: 0;
-    top: 0;
-    opacity: 0;
-    cursor: pointer;
-    width: 100%;
-    height: 100%;
-}
-
-.custom-file-input .file-label {
-    display: block;
-    padding: 10px;
-    background-color: #f9f9f9;
-    border: 1px solid #ddd;
-    border-radius: 4px;
-    text-align: center;
-    font-size: 14px;
-    color: #333;
-    cursor: pointer;
-}
-
-.custom-file-input .file-label:hover {
-    background-color: #e9e9e9;
-}
-
-/* Identification Proof Container */
-.identification-proof-container {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-}
-
-.file-upload-section {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-}
-
-.tooltip {
-    position: relative;
-    display: inline-block;
-    margin-left: 5px;
-    cursor: pointer;
-}
-
-.tooltip .tooltiptext {
-    visibility: hidden;
-    width: 200px;
-    background-color: #555;
-    color: #fff;
-    text-align: center;
-    border-radius: 6px;
-    padding: 5px;
-    position: absolute;
-    z-index: 1;
-    bottom: 125%;
-    left: 50%;
-    margin-left: -100px;
-    opacity: 0;
-    transition: opacity 0.3s;
-}
-
-.tooltip:hover .tooltiptext {
-    visibility: visible;
-    opacity: 1;
-}
-
-.required-asterisk {
-    color: red;
-    font-size: 14px;
-    margin-left: 4px;
-}
-
-.error-message {
-    color: red;
-    font-size: 12px;
-    margin-top: 5px;
-}
-
-/* File Upload Status Styles */
-.file-upload-status {
-    transition: all 0.3s ease;
-    border: 1px solid #dee2e6 !important;
-    width: 100%;
-    margin-top: 10px;
-}
-
-.file-upload-status-content {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 15px;
-}
-
-.upload-success-message {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    color: #28a745;
-    font-size: 14px;
-    font-weight: 500;
-}
-
-.upload-success-message svg {
-    flex-shrink: 0;
-}
-
-.download-btn-container {
-    display: flex;
-    gap: 10px;
-}
-
-.download-btn {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 6px 12px;
-    font-size: 13px;
-    background-color: transparent;
-    border: 1px solid #0d6efd;
-    color: #0d6efd;
-    border-radius: 4px;
-    text-decoration: none;
-    transition: all 0.2s;
-}
-
-.download-btn:hover {
-    background-color: #0d6efd;
-    color: white;
-    text-decoration: none;
-}
-
-.download-btn svg {
-    width: 16px;
-    height: 16px;
-}
-
-/* Uploading state */
-.uploading-state {
-    color: #6c757d;
-    font-size: 14px;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-/* Error state */
-.upload-error-state {
-    color: #dc3545;
-    font-size: 14px;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-/* Animation for uploading state */
-@keyframes pulse {
-    0% { opacity: 0.6; }
-    50% { opacity: 1; }
-    100% { opacity: 0.6; }
-}
-
-.animate-pulse {
-    animation: pulse 1.5s infinite;
+export default React.memo(ReviewStep);
+{
+    "status": {
+        "code": "200",
+        "message": "Data Created Successfully"
+    },
+    "userInfo": {
+        "status": {
+            "code": "200",
+            "message": "Successful"
+        },
+        "token": null,
+        "otp": "123456",
+        "processTypes": {
+            "auditDetails": null,
+            "uuid": "bb9683f5-0506-45be-99a7-477c5318219r",
+            "processTypeName": "Corporate Insolvency Resolution Process (CIRP)",
+            "processTypeCode": "50001",
+            "isActive": null,
+            "processTypeValue": "CIRP"
+        },
+        "corporateDebtorDetails": {
+            "uuid": "7c249b25-7e75-4e0f-9177-5988ccbda43a",
+            "nameOfCorporateDebtor": "Jalpower Corporation Limited",
+            "cinOrLlpinNumber": "U40109TG2004PLC043985",
+            "ipDetailsId": "2b44f7f3-9983-4f4b-be75-46056292c7a9",
+            "appointedAs": "4",
+            "nameOfIp": "Mr. Amit Jain",
+            "registrationNo": "IBBI/IPA-001/IP-P01447/2018-2019/12196",
+            "ipUuid": "2b44f7f3-9983-4f4b-be75-46056292c7a9",
+            "roleName": "RP",
+            "roleCode": "RP",
+            "roleUuid": "4"
+        },
+        "claimantTypes": {
+            "uuid": "1001",
+            "claimantName": "Financial Creditors",
+            "claimantCode": "1001"
+        },
+        "claimantCategories": {
+            "uuid": "20001",
+            "claimantCategoryName": "Secured Financial Creditors (Banks/ARCs/NBFCs/FIs)",
+            "claimantCategoryCode": "20001",
+            "isActive": true,
+            "cirpFormId": "40002",
+            "claimantTypeCode": "1001",
+            "liquidationId": "a6928a25-1d51-4e6b-aa6c-a9c1a4ab62f8"
+        },
+        "formDetails": {
+            "uuid": "40002",
+            "formName": "Form C",
+            "formCode": "40002",
+            "isActive": true
+        },
+        "userType": "CLAIMANT",
+        "users": [
+            {
+                "claimant": {
+                    "uuid": "f4998f23-6d32-4dee-ba3d-12b3f5df1608",
+                    "claimantName": "AYAN",
+                    "corporateName": null,
+                    "emailId": "ayansen26@gmail.com",
+                    "claimantEntityType": "INDV",
+                    "mobileNumber": "7059683402",
+                    "aadharNumber": "217865342421",
+                    "panNumber": "GPRSR8743R",
+                    "cinOrTaNumber": null,
+                    "roleCode": "CLAIMANT",
+                    "auditDetails": {
+                        "createdBy": "f4998f23-6d32-4dee-ba3d-12b3f5df1608",
+                        "lastModifiedBy": "f4998f23-6d32-4dee-ba3d-12b3f5df1608",
+                        "createdTime": "2025-04-09 17:15:23.259517",
+                        "lastModifiedTime": "2025-04-09 17:15:23.259527"
+                    },
+                    "active": true
+                },
+                "corporateDebtor": null
+            }
+        ]
+    },
+    "applicationDetails": {
+        "uuid": "a29d7363-93f7-495b-9015-91cd271c4519",
+        "applicationNumber": "CLAIM/CIRP/20250423/000118",
+        "creditorBasicDetails": {
+            "uuid": "3e7cf169-5445-455b-9e6d-b2a6cbe04898",
+            "debtorName": "Jalpower Corporation Limited",
+            "creditorName": "AYAN",
+            "identificationNumber": "212211222222",
+            "totalClaimAmount": 221.0,
+            "debtDetails": "12",
+            "mutualCreditDetails": "21",
+            "status": "",
+            "isActive": false,
+            "isFinalSubmit": false,
+            "document": {
+                "docId": "6e590218-f340-4eef-a6b7-854229f56c15",
+                "docType": "Aadhar",
+                "docSource": "Identification",
+                "docName": "Mother_adhaar.pdf"
+            },
+            "auditDetails": {
+                "createdBy": "f4998f23-6d32-4dee-ba3d-12b3f5df1608",
+                "lastModifiedBy": "f4998f23-6d32-4dee-ba3d-12b3f5df1608",
+                "createdTime": "2025-04-23T15:35:21.036247799",
+                "lastModifiedTime": "2025-04-23T15:35:21.039652888"
+            }
+        },
+        "claimDetails": {
+            "uuid": "bb256ab8-653a-4f88-b6d6-e5f30b9dd5a9",
+            "creditorBasicDetailsUuid": "3e7cf169-5445-455b-9e6d-b2a6cbe04898",
+            "securityInterestAmount": 12.0,
+            "addressProofNumber": "213333333333",
+            "guaranteeAmount": 12.0,
+            "guarantorName": "ASS",
+            "guarantorAddress": "ASSA",
+            "creditorAddress": "323SSD",
+            "creditorEmail": "gdggd@gmail.com",
+            "beneficiaryName": "dssd",
+            "beneficiaryAddress": "sdds",
+            "corporateDebtorSecurityAmount": 212.0,
+            "corporateDebtorGuaranteeAmount": 1212.0,
+            "principalBorrowerName": "dsdhs",
+            "principalBorrowerAddress": "sdsd",
+            "bankAccountNumber": 424425252525,
+            "bankIfscCode": "BARB0AHMEDN",
+            "bankBranchName": "ds",
+            "document": {
+                "docId": "01712cd6-39be-4d68-b37d-5f918f9fb5a9",
+                "docType": "Aadhar",
+                "docSource": "Addressproof",
+                "docName": "Mother_adhaar.pdf"
+            },
+            "auditDetails": {
+                "createdBy": "f4998f23-6d32-4dee-ba3d-12b3f5df1608",
+                "lastModifiedBy": "f4998f23-6d32-4dee-ba3d-12b3f5df1608",
+                "createdTime": "2025-04-23T15:35:21.041139548",
+                "lastModifiedTime": "2025-04-23T15:35:21.043936041"
+            }
+        },
+        "signatoryDetails": {
+            "uuid": "f7675684-1490-4c24-8544-34f45a4c3caf",
+            "creditorBasicDetailsUuid": "3e7cf169-5445-455b-9e6d-b2a6cbe04898",
+            "name": "DDS",
+            "position": "sass",
+            "address": "sasasa",
+            "document": {
+                "docId": "1849c13a-d7e6-4f7f-8fa9-74f92864dd32",
+                "docType": "Signature",
+                "docSource": "Signature",
+                "docName": "Mother_adhaar.pdf"
+            },
+            "auditDetails": {
+                "createdBy": "f4998f23-6d32-4dee-ba3d-12b3f5df1608",
+                "lastModifiedBy": "f4998f23-6d32-4dee-ba3d-12b3f5df1608",
+                "createdTime": "2025-04-23T15:35:21.045385290",
+                "lastModifiedTime": "2025-04-23T15:35:21.047860975"
+            }
+        },
+        "status": "Draft",
+        "isActive": false,
+        "isFinalSubmit": false,
+        "auditDetails": {
+            "createdBy": "f4998f23-6d32-4dee-ba3d-12b3f5df1608",
+            "lastModifiedBy": "f4998f23-6d32-4dee-ba3d-12b3f5df1608",
+            "createdTime": "2025-04-23T15:35:21.049998491",
+            "lastModifiedTime": "2025-04-23T15:35:21.051389498"
+        }
+    }
 }
