@@ -1,123 +1,533 @@
-npm install @react-pdf/renderer
+import React, { useState, useEffect } from 'react';
+import { Table, Dropdown, Form, Button, Tooltip, OverlayTrigger } from 'react-bootstrap';
+import {
+    PencilSquare,
+    Eye,
+    Trash3,
+    GeoAltFill,
+    Plus,
+    ArrowDown,
+    ArrowUp,
+    Database,
+    Check,
+    Calendar
+} from 'react-bootstrap-icons';
+import { useNavigate } from 'react-router-dom';
+import './ActionTable.module.css';
 
-// Add these imports at the top of your file
-import { PDFDownloadLink, Document, Page, Text, View, StyleSheet } from '@react-pdf/renderer';
+const ActionTable = (props) => {
+    const [searchedData, setSearchedData] = useState(props.rowData || []);
+    const [currentPage, setCurrentPage] = useState(1);
+    const [selected, setSelected] = useState([]);
+    const [sortedColumn, setSortedColumn] = useState(null);
+    const [sortOrder, setSortOrder] = useState('');
+    const hideColumns = props.hideColumns || [];
+    const [searchQuery, setSearchQuery] = useState('');
+    const [statusFilter, setStatusFilter] = useState('all');
+    const [dateSort, setDateSort] = useState('none');
+    const [itemsPerPage, setItemPerPage] = useState(10);
+    const [totalPages, setTotalPages] = useState(0);
+    const navigate = useNavigate();
 
-// Create a new component for the PDF document
-const MyDocument = ({ modalData }) => (
-  <Document>
-    <Page style={styles.page}>
-      <View style={styles.section}>
-        <Text style={styles.header}>Application Details</Text>
-        <Text style={styles.subHeader}>Application Number: {modalData.applicationNumber || "N/A"}</Text>
-        
-        {/* Creditor & Identification Details */}
-        <Text style={styles.sectionHeader}>Creditor & Identification Details</Text>
-        {Object.entries(modalData.step1?.creditorDetails || {}).map(([key, value]) => (
-          <Text style={styles.text} key={key}>{key}: {value || "N/A"}</Text>
-        ))}
-        {Object.entries(modalData.step1?.identificationDetails || {}).map(([key, value]) => (
-          <Text style={styles.text} key={key}>{key}: {value || "N/A"}</Text>
-        ))}
-        
-        {/* Financial & Beneficiary Details */}
-        <Text style={styles.sectionHeader}>Financial & Beneficiary Details</Text>
-        {Object.entries(modalData.step2?.financialDetails || {}).map(([key, value]) => (
-          <Text style={styles.text} key={key}>{key}: {value || "N/A"}</Text>
-        ))}
-        {Object.entries(modalData.step2?.beneficiaryDetails || {}).map(([key, value]) => (
-          <Text style={styles.text} key={key}>{key}: {value || "N/A"}</Text>
-        ))}
-        {Object.entries(modalData.step2?.addressproofDetails || {}).map(([key, value]) => (
-          <Text style={styles.text} key={key}>{key}: {value || "N/A"}</Text>
-        ))}
-        {Object.entries(modalData.step2?.bankDetails || {}).map(([key, value]) => (
-          <Text style={styles.text} key={key}>{key}: {value || "N/A"}</Text>
-        ))}
-        
-        {/* Signatory Details */}
-        <Text style={styles.sectionHeader}>Signatory Details</Text>
-        {Object.entries(modalData.step3?.signatoryDetails || {}).map(([key, value]) => (
-          <Text style={styles.text} key={key}>{key}: {value || "N/A"}</Text>
-        ))}
-      </View>
-    </Page>
-  </Document>
-);
+    useEffect(() => {
+        if (props.rowData) {
+            setSearchedData(props.rowData);
+            setCurrentPage(1);
+            const selectedRows = props.rowData
+                .filter((item) => item.isChecked)
+                .map((item) => item.id);
+            setSelected(selectedRows);
+        }
+    }, [props.rowData]);
 
-// Define styles for the PDF
-const styles = StyleSheet.create({
-  page: {
-    padding: 30,
-  },
-  header: {
-    fontSize: 24,
-    marginBottom: 10,
-    textAlign: 'center',
-    fontWeight: 'bold',
-  },
-  subHeader: {
-    fontSize: 16,
-    marginBottom: 20,
-    textAlign: 'center',
-  },
-  sectionHeader: {
-    fontSize: 18,
-    marginTop: 15,
-    marginBottom: 10,
-    fontWeight: 'bold',
-    borderBottom: '1 solid #000',
-  },
-  text: {
-    fontSize: 12,
-    marginBottom: 5,
-  },
-  section: {
-    marginBottom: 10,
-  },
-});
+    useEffect(() => {
+        let filteredData = [...(props.rowData || [])];
 
-// In your modal's document section, replace the existing Table with:
-<Table striped bordered hover responsive>
-  <thead>
-    <tr>
-      <th style={{ width: "10%" }}>SL #</th>
-      <th style={{ width: "70%" }}>Document Name</th>
-      <th style={{ width: "20%" }}>Action</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td>1</td>
-      <td>
-        <div className="d-flex align-items-center">
-          <FaFilePdf className="me-2" style={{ color: "red" }} />
-          Full Application Form
+        if (statusFilter !== 'all') {
+            filteredData = filteredData.filter(item => item.status === statusFilter);
+        }
+
+        if (searchQuery) {
+            const searchValue = searchQuery.toLowerCase();
+            filteredData = filteredData.filter(item => {
+                return Object.values(item).some(value => {
+                    if (value === null || value === undefined) return false;
+                    return value.toString().toLowerCase().includes(searchValue);
+                });
+            });
+        }
+
+        if (dateSort !== 'none') {
+            filteredData.sort((a, b) => {
+                const parseDate = (obj) => {
+                    const dateFormats = [
+                        'dd-MM-yy', 'dd/MM/yy', 'dd.MM.yy',
+                        'yyyy-MM-dd', 'yyyy/MM/dd', 'yyyy.MM.dd'
+                    ];
+                    const dateFields = ['dateSubmitted', 'createdAt', 'date', 'submissionDate'];
+
+                    for (const field of dateFields) {
+                        if (obj[field]) {
+                            for (const format of dateFormats) {
+                                const parsedDate = parseDateFromFormat(obj[field], format);
+                                if (parsedDate) return parsedDate;
+                            }
+                            const date = new Date(obj[field]);
+                            if (!isNaN(date.getTime())) return date;
+                        }
+                    }
+                    return new Date(0);
+                };
+                function parseDateFromFormat(dateString, format) {
+                    if (!dateString) return null;
+
+                    // Handle dd-MM-yy format
+                    if (format === 'dd-MM-yy') {
+                        const parts = dateString.split('-');
+                        if (parts.length === 3) {
+                            const day = parseInt(parts[0], 10);
+                            const month = parseInt(parts[1], 10) - 1;
+                            const year = 2000 + parseInt(parts[2], 10);
+                            return new Date(year, month, day);
+                        }
+                        return null; // Added to handle invalid format
+                    }
+
+                    // Handle other formats similarly...
+
+                    // Fallback to native parsing
+                    const parsedDate = new Date(dateString);
+                    return isNaN(parsedDate.getTime()) ? null : parsedDate; // Check for invalid date
+                }
+
+                const dateA = parseDate(a);
+                const dateB = parseDate(b);
+                return dateSort === "desc" ? dateB - dateA : dateA - dateB;
+            });
+        }
+
+        setSearchedData(filteredData);
+        setCurrentPage(1);
+        setTotalPages(Math.ceil((filteredData?.length || 0) / itemsPerPage));
+    }, [props.rowData, statusFilter, searchQuery, dateSort, itemsPerPage]);
+
+    const indexOfLastItem = currentPage * itemsPerPage;
+    const indexOfFirstItem = indexOfLastItem - itemsPerPage;
+    const currentItems = searchedData.slice(indexOfFirstItem, indexOfLastItem);
+
+    const handleNextPage = () => setCurrentPage(prev => Math.min(prev + 1, totalPages));
+    const handlePrevPage = () => setCurrentPage(prev => Math.max(prev - 1, 1));
+    const handleOnSearch = (e) => setSearchQuery(e.target.value);
+
+    const sortByColumn = (column) => {
+        setSortedColumn(column);
+        setSortOrder(sortOrder === "asc" && sortedColumn === column ? "desc" : "asc");
+    };
+
+    const showSortedColumnIcon = (columnName) => {
+        if (sortedColumn !== columnName) return null;
+        return sortOrder === "asc" ? <ArrowUp className="ms-1" /> : <ArrowDown className="ms-1" />;
+    };
+
+    const handleDeleteRow = (rowData) => props.onDeleteRow?.(rowData);
+    const handleTrack = (rowData) => props.onTrackRow?.(rowData);
+    const handleView = (rowData) => props.onViewRow?.(rowData);
+    const handleEdit = (rowData) => props.handleEditRow?.(rowData);
+    const handleDownload = (rowData) => props.download?.(rowData);
+
+    const handleSelectAll = (e) => {
+        const newSelecteds = e.target.checked ? currentItems.map(n => n.id) : [];
+        setSelected(newSelecteds);
+        props.onCheckHandler?.(newSelecteds);
+    };
+
+    const handleRowSelect = (e, row) => {
+        const newSelected = e.target.checked
+            ? [...selected, row.id]
+            : selected.filter(id => id !== row.id);
+        setSelected(newSelected);
+        props.onCheckHandler?.(newSelected);
+    };
+
+    const isSelected = (id) => selected.includes(id);
+    const getStatusOptions = () => ["all", ...new Set(props.rowData?.map(item => item.status))].filter(Boolean);
+
+    const StatusFilterDropdown = () => (
+        <Dropdown className="ms-2">
+            <Dropdown.Toggle variant="outline-primary" className="d-flex align-items-center">
+                <i className="fa fa-filter me-2" />
+                Status: {statusFilter === "all" ? "All" : statusFilter}
+            </Dropdown.Toggle>
+            <Dropdown.Menu>
+                {getStatusOptions().map((status, index) => (
+                    <Dropdown.Item key={index} onClick={() => setStatusFilter(status)} active={status === statusFilter}>
+                        {status === "all" ? "All Statuses" : status}
+                        {status === statusFilter && <Check className="ms-2" />}
+                    </Dropdown.Item>
+                ))}
+            </Dropdown.Menu>
+        </Dropdown>
+    );
+
+    const DateSortDropdown = () => (
+        <Dropdown className="ms-2">
+            <Dropdown.Toggle variant="outline-primary" className="d-flex align-items-center">
+                <Calendar className="me-2" />
+                Date: {dateSort === "none" ? "Default" : dateSort === "asc" ? "Oldest First" : "Newest First"}
+            </Dropdown.Toggle>
+            <Dropdown.Menu>
+                <Dropdown.Item onClick={() => setDateSort("none")} active={dateSort === "none"}>
+                    Default Order {dateSort === "none" && <Check className="ms-2" />}
+                </Dropdown.Item>
+                <Dropdown.Item onClick={() => setDateSort("asc")} active={dateSort === "asc"}>
+                    Oldest First {dateSort === "asc" && <Check className="ms-2" />}
+                </Dropdown.Item>
+                <Dropdown.Item onClick={() => setDateSort("desc")} active={dateSort === "desc"}>
+                    Newest First {dateSort === "desc" && <Check className="ms-2" />}
+                </Dropdown.Item>
+            </Dropdown.Menu>
+        </Dropdown>
+    );
+
+    const PaginationOptions = () => (
+        <div className="d-inline-flex align-items-center">
+            <div className="pe-2">Rows per page</div>
+            <Dropdown>
+                <Dropdown.Toggle variant="outline-primary" className="d-flex align-items-center">
+                    {itemsPerPage}
+                </Dropdown.Toggle>
+                <Dropdown.Menu>
+                    {[10, 25, 50, 100].map((item) => (
+                        <Dropdown.Item
+                            key={item}
+                            onClick={() => { setItemPerPage(item); setCurrentPage(1); }}
+                            active={itemsPerPage === item}
+                        >
+                            {item} {itemsPerPage === item && <Check className="ms-2" />}
+                        </Dropdown.Item>
+                    ))}
+                </Dropdown.Menu>
+            </Dropdown>
         </div>
-      </td>
-      <td>
-        <PDFDownloadLink 
-          document={<MyDocument modalData={modalData} />} 
-          fileName={`application_${modalData.applicationNumber || 'form'}.pdf`}
-        >
-          {({ loading }) => (
-            <Button
-              variant="outline-primary"
-              size="sm"
-              className="d-flex align-items-center justify-content-center"
-              style={{ width: "100%" }}
-              disabled={loading}
-            >
-              {loading ? 'Generating...' : (
-                <>
-                  <FaDownload className="me-2" />
-                  Download
-                </>
-              )}
-            </Button>
-          )}
-        </PDFDownloadLink>
-      </td>
-    </tr>
-  </tbody>
-</Table>
+    );
+
+    const userData = JSON.parse(localStorage.getItem("userFormData")) || {};
+
+    return (
+        <div className="mb-5 px-0 mx-0 generic-action-table pt-3">
+            {/* Search and Filter Controls */}
+            <div className={`row ${props.hideSearchBar ? "justify-content-end mb-3" : "justify-content-between"}`}>
+                {!props.hideSearchBar && (
+                    <div className="col-md-6 mb-3">
+                        <Form.Control
+                            type="search"
+                            value={searchQuery}
+                            onChange={handleOnSearch}
+                            placeholder="Search records..."
+                            className="form-control"
+                        />
+                    </div>
+                )}
+
+                <div className="col-md-6 d-flex flex-wrap justify-content-end align-items-center mb-3">
+                    <div className="d-flex">
+                        <StatusFilterDropdown />
+                        <DateSortDropdown />
+                    </div>
+
+                    {props.showCustomBtn && (
+                        <Button
+                            onClick={props.handleBtnClick}
+                            disabled={props.isCustomBtnDisabled}
+                            className={`btn btn-primary ms-3 d-flex align-items-center ${props.isCustomBtnDisabled ? 'custom-disabled-btn' : ''}`}
+                        >
+                            <Plus className="me-2" />
+                            <span>{props.btnName}</span>
+                        </Button>
+                    )}
+                </div>
+            </div>
+
+            {/* Table */}
+            <div className="table-responsive mb-3">
+                <Table className="table align-middle">
+                    <thead className="table-primary">
+                        <tr>
+                            <th style={{ width: '50px' }}>
+                                <Form.Check
+                                    type="checkbox"
+                                    checked={selected.length > 0 && selected.length === currentItems.length}
+                                    onChange={handleSelectAll}
+                                    ref={input => input && (input.indeterminate = selected.length > 0 && selected.length < currentItems.length)}
+                                />
+                            </th>
+
+                            {props.columns?.map((data) => (
+                                !hideColumns.includes(data.fieldName) && (
+                                    <th
+                                        key={data.fieldName}
+                                        className="text-center"
+                                        style={{ minWidth: data.minWidth || '150px' }}
+                                        onClick={() => sortByColumn(data.fieldName)}
+                                    >
+                                        <div className="d-flex justify-content-center align-items-center">
+                                            <span>{data.titleCode || data.colName}</span>
+                                            {showSortedColumnIcon(data.fieldName)}
+                                        </div>
+                                    </th>
+                                )
+                            ))}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {currentItems.length > 0 ? (
+                            currentItems.map((row) => (
+                                <tr key={row.id} className={isSelected(row.id) ? 'selected-row' : ''}>
+                                    <td>
+                                        <Form.Check
+                                            type="checkbox"
+                                            checked={isSelected(row.id)}
+                                            onChange={(e) => handleRowSelect(e, row)}
+                                        />
+                                    </td>
+
+                                    {props.columns.map((col) => {
+                                        if (hideColumns.includes(col.fieldName)) return null;
+
+                                        const cellValue = col.fieldName.split('.').reduce((obj, key) => obj?.[key], row);
+                                        const displayValue = cellValue?.toString().split(' ')[0] || '';
+                                        const tooltipTitle = cellValue || '';
+
+                                        if (col.fieldName === 'action') {
+                                            return (
+                                                <td key="actions" className="text-center">
+                                                    <div className="d-flex justify-content-center gap-2">
+                                                        {col.actions?.includes("edit") && userData?.userType !== "CRP" && (
+                                                            <OverlayTrigger overlay={<Tooltip>Edit</Tooltip>}>
+                                                                <Button
+                                                                    variant="outline-primary" // Changed to primary
+                                                                    size="sm"
+                                                                    className={row.applicationStatus !== "Sent back" && row.applicationStatus !== "Draft" ? 'custom-disabled-btn' : ''}
+                                                                    disabled={row.applicationStatus !== "Sent back" && row.applicationStatus !== "Draft"}
+                                                                    onClick={() => handleEdit(row)}
+                                                                >
+                                                                    <PencilSquare className="action-icon" /> {/* Added a class */}
+                                                                </Button>
+                                                            </OverlayTrigger>
+                                                        )}
+
+                                                        {col.actions?.includes("view") && (
+                                                            <OverlayTrigger overlay={<Tooltip>View</Tooltip>}>
+                                                                <Button variant="outline-primary" size="sm" onClick={() => handleView(row)}>
+                                                                    <Eye className="action-icon" />
+                                                                </Button>
+                                                            </OverlayTrigger>
+                                                        )}
+
+                                                        {col.actions?.includes("track") && (
+                                                            <OverlayTrigger overlay={<Tooltip>Track</Tooltip>}>
+                                                                <Button variant="outline-primary" size="sm" onClick={() => handleTrack(row)}>
+                                                                    <GeoAltFill className="action-icon" />
+                                                                </Button>
+                                                            </OverlayTrigger>
+                                                        )}
+
+                                                        {col.actions?.includes("delete") && userData?.userType !== "CRP" && (
+                                                            <OverlayTrigger overlay={<Tooltip>Delete</Tooltip>}>
+                                                                <Button variant="outline-danger" size="sm" onClick={() => handleDeleteRow(row)}>
+                                                                    <Trash3 className="action-icon" />
+                                                                </Button>
+                                                            </OverlayTrigger>
+                                                        )}
+                                                    </div>
+                                                </td>
+                                            );
+                                        }
+
+                                        return (
+                                            <td key={col.fieldName} className="text-center">
+                                                <OverlayTrigger overlay={<Tooltip>{tooltipTitle}</Tooltip>}>
+                                                    <div className="text-truncate" style={{ maxWidth: '200px' }}>
+                                                        {col.colName === "Claim Number" && userData?.userType === "CRP" ? (
+                                                            <a
+                                                                href={`/apply-claim/${row.uuid}`}
+                                                                onClick={(e) => { e.preventDefault(); navigate(`/apply-claim/${row.uuid}`); }}
+                                                                className="text-primary"
+                                                            >
+                                                                {displayValue}
+                                                            </a>
+                                                        ) : displayValue}
+                                                    </div>
+                                                </OverlayTrigger>
+                                            </td>
+                                        );
+                                    })}
+                                </tr>
+                            ))
+                        ) : (
+                            <tr>
+                                <td colSpan={props.columns.length + 1} className="text-center py-5">
+                                    <div className="d-flex justify-content-center align-items-center">
+                                        <Database className="me-2" />
+                                        No records found matching your criteria
+                                    </div>
+                                </td>
+                            </tr>
+                        )}
+                    </tbody>
+                </Table>
+            </div>
+
+            {/* Table Footer */}
+            <div className="d-flex justify-content-between align-items-center py-3">
+                <div>
+                    Showing {indexOfFirstItem + 1}-{Math.min(indexOfLastItem, searchedData.length)} of {searchedData.length} entries
+                    {selected.length > 0 && (
+                        <span className="ms-2">
+                            (<span className="fw-bold text-primary">{selected.length}</span> selected)
+                        </span>
+                    )}
+                </div>
+
+                <div className="d-flex align-items-center">
+                    <PaginationOptions />
+
+                    <div className="btn-group ms-3">
+                        <Button
+                            variant="outline-secondary"
+                            onClick={handlePrevPage}
+                            disabled={currentPage === 1}
+                        >
+                            <i className="fa fa-chevron-left" />
+                        </Button>
+
+                        <div className="px-3 d-flex align-items-center">
+                            Page {currentPage} of {totalPages || 1}
+                        </div>
+
+                        <Button
+                            variant="outline-secondary"
+                            onClick={handleNextPage}
+                            disabled={currentPage === totalPages || totalPages === 0}
+                        >
+                            <i className="fa fa-chevron-right" />
+                        </Button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+export default ActionTable;
+
+/* Table Container */
+.generic-action-table {
+  background-color: #fff;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  overflow: hidden;
+}
+
+/* Table Structure */
+.table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  margin-bottom: 0;
+}
+
+/* Table Header */
+.table thead th {
+  position: sticky;
+  top: 0;
+  background-color: #269ccc;
+  color: white;
+  font-weight: 500;
+  vertical-align: middle;
+  text-align: center;
+  border: none;
+  padding: 12px 16px;
+  white-space: nowrap;
+}
+
+/* Table Body */
+.table tbody td {
+  vertical-align: middle;
+  padding: 10px 16px;
+  border-bottom: 1px solid #e9ecef;
+  text-align: center;
+}
+
+/* Checkbox Column */
+.table th:first-child,
+.table td:first-child {
+  width: 50px;
+  min-width: 50px;
+  max-width: 50px;
+  padding-left: 12px;
+  padding-right: 12px;
+}
+
+/* Selected Row */
+.selected-row {
+  background-color: #f8f9fa;
+}
+
+/* Action Buttons */
+.table .btn-link {
+  padding: 0.25rem 0.5rem;
+  color: #495057;
+}
+
+.table .btn-link:hover {
+  color: #269ccc;
+}
+
+.table .btn-link.text-danger:hover {
+  color: #dc3545;
+}
+
+/* Pagination */
+.btn-group .btn-outline-secondary {
+  border-color: #dee2e6;
+}
+
+/* Responsive Adjustments */
+@media (max-width: 768px) {
+  .table thead th,
+  .table tbody td {
+      padding: 8px 12px;
+      font-size: 0.875rem;
+  }
+  
+  .table th:first-child,
+  .table td:first-child {
+      width: 40px;
+      min-width: 40px;
+      max-width: 40px;
+      padding-left: 8px;
+      padding-right: 8px;
+  }
+  
+  .table-footer {
+      flex-direction: column;
+      gap: 1rem;
+  }
+}
+
+/* Tooltip */
+.tooltip-inner {
+  max-width: 300px;
+  text-align: center;
+}
+
+/* Text Truncation */
+.text-truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: inline-block;
+  vertical-align: middle;
+  max-width: 100%;
+}
