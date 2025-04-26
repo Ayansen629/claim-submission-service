@@ -2,8 +2,8 @@ import React, { useState, useEffect } from "react";
 import { useForm, FormProvider, Controller } from "react-hook-form";
 import Collapsible from "../formCommon/Collapsible";
 import Tooltip from "@mui/material/Tooltip";
-import { FaInfoCircle, FaMinusCircle } from "react-icons/fa";
-import { IFSCSearch } from "../formCommon/IFSCSearch";
+import { FaInfoCircle } from "react-icons/fa";
+import axios from "axios";
 
 const DynamicField = ({ fieldConfig, control, register, errors, setValue, getValues, watch }) => {
   const { name, label, type, options, rules, tooltip, placeholder, rows } = fieldConfig;
@@ -11,6 +11,7 @@ const DynamicField = ({ fieldConfig, control, register, errors, setValue, getVal
 
   const handleRadioChange = (value) => {
     setValue(name, value);
+    if (fieldConfig.onChange) fieldConfig.onChange(value);
   };
 
   return (
@@ -25,7 +26,7 @@ const DynamicField = ({ fieldConfig, control, register, errors, setValue, getVal
           </Tooltip>
         )}
       </label>
-
+      
       {type === "select" ? (
         <select
           {...register(name, rules)}
@@ -63,6 +64,13 @@ const DynamicField = ({ fieldConfig, control, register, errors, setValue, getVal
           rows={rows || 3}
           placeholder={placeholder}
         />
+      ) : type === "date" ? (
+        <input
+          {...register(name, rules)}
+          type="date"
+          className={`form-input ${hasError ? "input-error" : ""}`}
+          placeholder={placeholder}
+        />
       ) : (
         <input
           {...register(name, rules)}
@@ -76,15 +84,64 @@ const DynamicField = ({ fieldConfig, control, register, errors, setValue, getVal
   );
 };
 
+const IFSCSearch = ({ fieldConfig, register, errors, setValue }) => {
+  const [bankDetails, setBankDetails] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  const fetchBankDetails = async (ifsc) => {
+    if (ifsc.length < 4) return;
+    
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await axios.get(`https://ifsc.razorpay.com/${ifsc}`);
+      setBankDetails(response.data);
+      setValue("branchName", response.data.BRANCH);
+      setValue("branchAddress", `${response.data.ADDRESS}, ${response.data.CITY}, ${response.data.STATE}`);
+    } catch (err) {
+      setError("Invalid IFSC code or failed to fetch details");
+      setBankDetails(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="flex-item">
+      <label>{fieldConfig.label}</label>
+      <input
+        {...register(fieldConfig.name, fieldConfig.rules)}
+        type="text"
+        className={`form-input ${errors[fieldConfig.name] ? "input-error" : ""}`}
+        placeholder={fieldConfig.placeholder}
+        onChange={(e) => {
+          setValue(fieldConfig.name, e.target.value);
+          fetchBankDetails(e.target.value);
+        }}
+      />
+      {loading && <p className="loading-message">Loading bank details...</p>}
+      {error && <p className="error-message">{error}</p>}
+      {bankDetails && (
+        <div className="bank-details">
+          <p><strong>Bank:</strong> {bankDetails.BANK}</p>
+          <p><strong>Branch:</strong> {bankDetails.BRANCH}</p>
+        </div>
+      )}
+      {errors[fieldConfig.name] && (
+        <p className="error-message">{errors[fieldConfig.name].message}</p>
+      )}
+    </div>
+  );
+};
+
 const FormCDetails = ({ provideSubmitHandler, formData }) => {
   const methods = useForm();
   const { register, handleSubmit, formState: { errors }, control, setValue, getValues, watch, reset } = methods;
   const [selectedClaimType, setSelectedClaimType] = useState("");
   const [showSecurityFields, setShowSecurityFields] = useState(false);
   const [showGuaranteeFields, setShowGuaranteeFields] = useState(false);
-  const [beneficiaryCount, setBeneficiaryCount] = useState(1);
-  const [guarantorCount, setGuarantorCount] = useState(1);
-  const [principalBorrowerCount, setPrincipalBorrowerCount] = useState(1);
+  const [principalBorrowers, setPrincipalBorrowers] = useState([1]);
 
   const onSubmit = (data) => {
     if (provideSubmitHandler) {
@@ -104,33 +161,27 @@ const FormCDetails = ({ provideSubmitHandler, formData }) => {
       if (formData.hasGuarantee === "yes") {
         setShowGuaranteeFields(true);
       }
+      // Initialize principal borrowers if data exists
+      if (formData.principalBorrowerName1) {
+        const borrowerCount = Object.keys(formData).filter(key => 
+          key.startsWith("principalBorrowerName")
+        ).length;
+        setPrincipalBorrowers(Array.from({length: borrowerCount}, (_, i) => i + 1));
+      }
     }
   }, [formData, reset]);
 
   const handleClaimTypeChange = (value) => {
     setSelectedClaimType(value);
-    // Reset form and conditional fields when claim type changes
+    // Reset form when claim type changes
     reset({
       claimType: value,
       hasSecurityInterest: "",
-      securityValue: "",
-      securityDate: "",
-      hasGuarantee: "",
-      guaranteeValue: "",
-      guaranteeDate: "",
-      // Reset dynamic fields as well
-      principalBorrowerName1: "",
-      principalBorrowerAddress1: "",
-      guarantorName1: "",
-      guarantorAddress1: "",
-      beneficiaryName1: "",
-      beneficiaryAddress1: "",
+      hasGuarantee: ""
     });
     setShowSecurityFields(false);
     setShowGuaranteeFields(false);
-    setPrincipalBorrowerCount(1);
-    setGuarantorCount(1);
-    setBeneficiaryCount(1);
+    setPrincipalBorrowers([1]);
   };
 
   const handleSecurityInterestChange = (value) => {
@@ -141,44 +192,21 @@ const FormCDetails = ({ provideSubmitHandler, formData }) => {
     setShowGuaranteeFields(value === "yes");
   };
 
-  const addBeneficiary = () => {
-    setBeneficiaryCount(beneficiaryCount + 1);
-  };
-
-  const removeBeneficiary = (index) => {
-    if (beneficiaryCount > 1) {
-      const newBeneficiaryCount = beneficiaryCount - 1;
-      setBeneficiaryCount(newBeneficiaryCount);
-      // Also clear the values of the removed fields
-      setValue(`beneficiaryName${index + 1}`, "");
-      setValue(`beneficiaryAddress${index + 1}`, "");
-    }
-  };
-
-  const addGuarantor = () => {
-    setGuarantorCount(guarantorCount + 1);
-  };
-
-  const removeGuarantor = (index) => {
-    if (guarantorCount > 1) {
-      const newGuarantorCount = guarantorCount - 1;
-      setGuarantorCount(newGuarantorCount);
-      setValue(`guarantorName${index + 1}`, "");
-      setValue(`guarantorAddress${index + 1}`, "");
-    }
-  };
-
   const addPrincipalBorrower = () => {
-    setPrincipalBorrowerCount(principalBorrowerCount + 1);
+    setPrincipalBorrowers([...principalBorrowers, principalBorrowers.length + 1]);
   };
 
   const removePrincipalBorrower = (index) => {
-    if (principalBorrowerCount > 1) {
-      const newPrincipalBorrowerCount = principalBorrowerCount - 1;
-      setPrincipalBorrowerCount(newPrincipalBorrowerCount);
-      setValue(`principalBorrowerName${index + 1}`, "");
-      setValue(`principalBorrowerAddress${index + 1}`, "");
-    }
+    if (principalBorrowers.length <= 1) return;
+    
+    const newBorrowers = [...principalBorrowers];
+    newBorrowers.splice(index, 1);
+    setPrincipalBorrowers(newBorrowers);
+    
+    // Clear the removed borrower's data
+    const borrowerNum = index + 1;
+    setValue(`principalBorrowerName${borrowerNum}`, undefined);
+    setValue(`principalBorrowerAddress${borrowerNum}`, undefined);
   };
 
   // Claim type options
@@ -267,10 +295,15 @@ const FormCDetails = ({ provideSubmitHandler, formData }) => {
       name: "ifscCode",
       label: "IFSC Code",
       type: "text",
-      rules: { required: "IFSC code is required" },
+      rules: { 
+        required: "IFSC code is required",
+        pattern: {
+          value: /^[A-Za-z]{4}0[A-Za-z0-9]{6}$/,
+          message: "Invalid IFSC code format"
+        }
+      },
       placeholder: "Enter IFSC code",
-      component: IFSCSearch,
-      props: { setValue } // Pass setValue to IFSCSearch for updating branch details
+      component: IFSCSearch
     },
     {
       name: "branchName",
@@ -314,96 +347,62 @@ const FormCDetails = ({ provideSubmitHandler, formData }) => {
         </div>
 
         {/* Claim Details Section */}
-        {selectedClaimType && (
+        {selectedClaimType === "principalBorrower" && (
           <div className="mb-4 bg-light">
-            <Collapsible title="Details of claim">
+            <Collapsible title="Details of claim: Corporate Debtor as Principal Borrower">
               <div className="flex-container">
-                {/* Common fields for principal borrower and guarantor */}
-                {(selectedClaimType === "principalBorrower" || selectedClaimType === "guarantor") && (
-                  <>
-                    {commonClaimFields.map((field) => (
-                      (!field.show || field.show === true) && (
-                        <DynamicField
-                          key={field.name}
-                          fieldConfig={field}
-                          control={control}
-                          register={register}
-                          errors={errors}
-                          setValue={setValue}
-                          getValues={getValues}
-                          watch={watch}
-                        />
-                      )
-                    ))}
+                {commonClaimFields.map((field) => (
+                  (!field.show || field.show === true) && (
+                    <DynamicField
+                      key={field.name}
+                      fieldConfig={field}
+                      control={control}
+                      register={register}
+                      errors={errors}
+                      setValue={setValue}
+                      getValues={getValues}
+                      watch={watch}
+                    />
+                  )
+                ))}
 
-                    {/* Guarantor/Principal Borrower fields */}
-                    {[...Array(selectedClaimType === "principalBorrower" ? principalBorrowerCount : guarantorCount)].map((_, index) => (
-                      <div key={index}>
-                        <div className="flex-container">
-                          <DynamicField
-                            fieldConfig={{
-                              name: `<span class="math-inline">\{selectedClaimType \=\=\= "principalBorrower" ? "principalBorrower" \: "guarantor"\}Name</span>{index + 1}`,
-                              label: `Name of the ${selectedClaimType === "principalBorrower" ? "Principal Borrower" : "Guarantor"} ${index + 1}`,
-                              type: "text",
-                              rules: { required: "This field is required" },
-                              placeholder: `Enter name`
-                            }}
-                            control={control}
-                            register={register}
-                            errors={errors}
-                            setValue={setValue}
-                            getValues={getValues}
-                            watch={watch}
-                          />
+                {/* Principal Borrower fields */}
+                {principalBorrowers.map((borrowerNum, index) => (
+                  <React.Fragment key={borrowerNum}>
+                    <div className="flex-item-with-button">
+                      <DynamicField
+                        fieldConfig={{
+                          name: `principalBorrowerName${borrowerNum}`,
+                          label: `Name of the Principal Borrower ${borrowerNum}`,
+                          type: "text",
+                          rules: { required: "This field is required" },
+                          placeholder: "Enter name"
+                        }}
+                        control={control}
+                        register={register}
+                        errors={errors}
+                        setValue={setValue}
+                        getValues={getValues}
+                        watch={watch}
+                      />
+                      {index > 0 && (
+                        <button 
+                          type="button" 
+                          className="remove-btn"
+                          onClick={() => removePrincipalBorrower(index)}
+                        >
+                          Remove
+                        </button>
+                      )}
+                    </div>
 
-                          <DynamicField
-                            fieldConfig={{
-                              name: `<span class="math-inline">\{selectedClaimType \=\=\= "principalBorrower" ? "principalBorrower" \: "guarantor"\}Address</span>{index + 1}`,
-                              label: `Address of the ${selectedClaimType === "principalBorrower" ? "Principal Borrower" : "Guarantor"} ${index + 1}`,
-                              type: "text",
-                              rules: { required: "This field is required" },
-                              placeholder: `Enter address`
-                            }}
-                            control={control}
-                            register={register}
-                            errors={errors}
-                            setValue={setValue}
-                            getValues={getValues}
-                            watch={watch}
-                          />
-                          {index > 0 && (
-                            <button
-                              type="button"
-                              className="remove-btn"
-                              onClick={selectedClaimType === "principalBorrower" ? () => removePrincipalBorrower(index) : () => removeGuarantor(index)}
-                            >
-                              <FaMinusCircle /> Remove
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-
-                    <button
-                      type="button"
-                      className="add-more-btn"
-                      onClick={selectedClaimType === "principalBorrower" ? addPrincipalBorrower : addGuarantor}
-                    >
-                      + Add {selectedClaimType === "principalBorrower" ? "Principal Borrower" : "Guarantor"}
-                    </button>
-                  </>
-                )}
-
-                {/* Financial Debt fields */}
-                {selectedClaimType === "financialDebt" && (
-                  <>
                     <DynamicField
                       fieldConfig={{
-                        name: "financialClaimAmount",
-                        label: "Amount of claim",
-                        type: "number",
-                        rules: { required: "Claim amount is required" },
-                        placeholder: "Enter claim amount"
+                        name: `principalBorrowerAddress${borrowerNum}`,
+                        label: `Address of the Principal Borrower ${borrowerNum}`,
+                        type: "text",
+                        rules: { required: "This field is required" },
+                        placeholder: "Enter address"
                       }}
                       control={control}
                       register={register}
@@ -412,59 +411,16 @@ const FormCDetails = ({ provideSubmitHandler, formData }) => {
                       getValues={getValues}
                       watch={watch}
                     />
+                  </React.Fragment>
+                ))}
 
-                    {[...Array(beneficiaryCount)].map((_, index) => (
-                      <div key={index}>
-                        <div className="flex-container">
-                          <DynamicField
-                            fieldConfig={{
-                              name: `beneficiaryName${index + 1}`,
-                              label: `Name of the Beneficiary ${index + 1}`,
-                              type: "text",
-                              rules: { required: "This field is required" },
-                              placeholder: "Enter name"
-                            }}
-                            control={control}
-                            register={register}
-                            errors={errors}
-                            setValue={setValue}
-                            getValues={getValues}
-                            watch={watch}
-                          />
-
-                          <DynamicField
-                            fieldConfig={{
-                              name: `beneficiaryAddress${index + 1}`,
-                              label: `Address of the Beneficiary ${index + 1}`,
-                              type: "text",
-                              rules: { required: "This field is required" },
-                              placeholder: "Enter address"
-                            }}
-                            control={control}
-                            register={register}
-                            errors={errors}
-                            setValue={setValue}
-                            getValues={getValues}
-                            watch={watch}
-                          />
-                          {index > 0 && (
-                            <button
-                              type="button"
-                              className="remove-btn"
-                              onClick={() => removeBeneficiary(index)}
-                            >
-                              <FaMinusCircle /> Remove
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-
-                    <button type="button" className="add-more-btn" onClick={addBeneficiary}>
-                      + Add Beneficiary
-                    </button>
-                  </>
-                )}
+                <button 
+                  type="button" 
+                  className="add-more-btn" 
+                  onClick={addPrincipalBorrower}
+                >
+                  + Add Principal Borrower
+                </button>
 
                 {/* Common fields for all claim types */}
                 <DynamicField
@@ -481,7 +437,7 @@ const FormCDetails = ({ provideSubmitHandler, formData }) => {
                   setValue={setValue}
                   getValues={getValues}
                   watch={watch}
-				  />
+                />
 
                 <DynamicField
                   fieldConfig={{
@@ -519,41 +475,38 @@ const FormCDetails = ({ provideSubmitHandler, formData }) => {
           </div>
         )}
 
-        {/* Bank Account Details Section */}
-        {selectedClaimType && (
-          <div className="mb-4 bg-light">
-            <Collapsible title="Details of the bank account to which the amount of the claim or any part thereof can be transferred pursuant to a resolution plan">
-              <div className="flex-container">
-                {bankAccountFields.map((field) => (
-                  field.component ? (
-                    <field.component
-                      key={field.name}
-                      fieldConfig={field}
-                      control={control}
-                      register={register}
-                      errors={errors}
-                      setValue={setValue}
-                      getValues={getValues}
-                      watch={watch}
-                      {...(field.props || {})} // Spread any additional props
-                    />
-                  ) : (
-                    <DynamicField
-                      key={field.name}
-                      fieldConfig={field}
-                      control={control}
-                      register={register}
-                      errors={errors}
-                      setValue={setValue}
-                      getValues={getValues}
-                      watch={watch}
-                    />
-                  )
-                ))}
-              </div>
-            </Collapsible>
-          </div>
-        )}
+        {/* Bank Account Details Section (always shown) */}
+        <div className="mb-4 bg-light">
+          <Collapsible title="Bank Account Details">
+            <div className="flex-container">
+              {bankAccountFields.map((field) => (
+                field.component ? (
+                  <field.component
+                    key={field.name}
+                    fieldConfig={field}
+                    control={control}
+                    register={register}
+                    errors={errors}
+                    setValue={setValue}
+                    getValues={getValues}
+                    watch={watch}
+                  />
+                ) : (
+                  <DynamicField
+                    key={field.name}
+                    fieldConfig={field}
+                    control={control}
+                    register={register}
+                    errors={errors}
+                    setValue={setValue}
+                    getValues={getValues}
+                    watch={watch}
+                  />
+                )
+              ))}
+            </div>
+          </Collapsible>
+        </div>
 
         <button type="submit" className="submit-btn">
           Submit
