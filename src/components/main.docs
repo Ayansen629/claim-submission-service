@@ -1,380 +1,9 @@
-import { useForm, FormProvider } from 'react-hook-form';
-import DocumentsUpload from  "./DocumentsUpload"
-
-const StepFourth = () => {
-  const methods = useForm();
-  
-  return (
-    <FormProvider {...methods}>
-      {/* Other form components */}
- <DocumentsUpload/>
-      {/* Other form components */}
-    </FormProvider>
-  );
-};
-export default StepFourth;
-import React, { useState } from "react";
-import { useFormContext, Controller } from "react-hook-form";
-import { Form, Row, Col, Card, Button, Spinner, Alert, Badge } from "react-bootstrap";
-import { FaDownload, FaTrash, FaFilePdf, FaFileImage, FaSignature } from "react-icons/fa";
-import { uploadDocument } from "../../../services/documentUploadService";
-import "./DocumentsUpload.css";
-import 'bootstrap/dist/css/bootstrap.min.css';
-
-const DocumentsUpload = () => {
-    const formContext = useFormContext();
-    
-    if (!formContext) {
-        throw new Error("DocumentUpload must be used within a FormProvider");
-    }
-    
-    const { control, watch, setValue, formState: { errors } } = formContext;
-    const [isUploading, setIsUploading] = useState(false);
-    const [uploadError, setUploadError] = useState(null);
-    const [showSignatureUpload, setShowSignatureUpload] = useState(false);
-    const [uploadSuccess, setUploadSuccess] = useState(false);
-
-    const documentTypes = [
-        { value: "identity_proof", label: "Identity Proof" },
-        { value: "address_proof", label: "Address Proof" }
-    ];
-
-    const identityProofOptions = [
-        { value: "aadhaar", label: "Aadhaar Card" },
-        { value: "pan", label: "PAN Card" },
-        { value: "voter_id", label: "Voter ID" },
-        { value: "passport", label: "Passport" },
-        { value: "driving_license", label: "Driving License" }
-    ];
-
-    const addressProofOptions = [
-        { value: "aadhaar", label: "Aadhaar Card" },
-        { value: "voter_id", label: "Voter ID" },
-        { value: "passport", label: "Passport" },
-        { value: "driving_license", label: "Driving License" },
-        { value: "utility_bill", label: "Utility Bill" }
-    ];
-
-    const watchedFields = watch(["documentType", "documentSubType", "documentFile", "signatureFile"]);
-
-    const handleFileUpload = async (file, fieldName) => {
-        try {
-            setIsUploading(true);
-            setUploadError(null);
-            setUploadSuccess(false);
-            const result = await uploadDocument(file, watchedFields[0]);
-            setValue(fieldName, {
-                fileId: result.fileId,
-                fileName: file.name,
-                fileType: file.type
-            });
-            setUploadSuccess(true);
-            return result;
-        } catch (error) {
-            setUploadError(error.message);
-            throw error;
-        } finally {
-            setIsUploading(false);
-        }
-    };
-
-    const handleFileChange = async (e, fieldName) => {
-        const file = e.target.files[0];
-        if (!file) return;
-
-        // Client-side validation
-        const fileSizeInMB = file.size / (1024 * 1024);
-        const maxSize = fieldName === "signatureFile" ? 2 : 5;
-        const allowedTypes = fieldName === "signatureFile" 
-            ? ["image/jpeg", "image/png", "application/pdf"] 
-            : ["image/jpeg", "image/png", "application/pdf"];
-
-        if (fileSizeInMB > maxSize) {
-            setUploadError(`File size must be ≤ ${maxSize}MB`);
-            return;
-        }
-
-        if (!allowedTypes.includes(file.type)) {
-            setUploadError(`Invalid file type. Allowed: ${allowedTypes.join(', ')}`);
-            return;
-        }
-
-        try {
-            await handleFileUpload(file, fieldName);
-        } catch (error) {
-            console.error("Upload failed:", error);
-        }
-    };
-
-    const removeFile = (fieldName) => {
-        setValue(fieldName, null);
-        setUploadSuccess(false);
-    };
-
-    const renderFilePreview = (fileValue, type = 'document') => {
-        if (!fileValue) return null;
-
-        const fileUrl = typeof fileValue === 'object' ? 
-            `${process.env.REACT_APP_FILE_SERVICE}v1/files/id?fileStoreId=${fileValue.fileId}` : 
-            fileValue;
-
-        const fileName = typeof fileValue === 'object' ? 
-            fileValue.fileName || 'Uploaded file' : 
-            fileValue;
-
-        return (
-            <div className="file-preview-container bg-light p-3 rounded mb-3">
-                {uploadSuccess && (
-                    <div className="text-success d-flex align-items-center gap-2 mb-2">
-                        <span>File uploaded successfully!</span>
-                    </div>
-                )}
-                <div className="d-flex justify-content-between align-items-center">
-                    <div className="d-flex align-items-center">
-                        {type === 'signature' ? (
-                            <FaSignature className="text-success me-2 fs-4" />
-                        ) : (
-                            getFileIcon(fileValue.fileType)
-                        )}
-                        <div>
-                            <div className="fw-bold">{fileName}</div>
-                            <small className="text-muted">
-                                <Badge bg={type === 'signature' ? "success" : "info"}>
-                                    {type === 'signature' ? "Signature" : 
-                                     watchedFields[0] === "identity_proof" ? "Identity Proof" : "Address Proof"}
-                                </Badge>
-                            </small>
-                        </div>
-                    </div>
-                    <Button
-                        variant="outline-primary"
-                        size="sm"
-                        href={fileUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        download
-                        title="Download file"
-                    >
-                        <FaDownload /> Download
-                    </Button>
-                </div>
-            </div>
-        );
-    };
-
-    const getFileIcon = (fileType) => {
-        if (fileType === 'application/pdf') return <FaFilePdf className="text-danger me-2 fs-4" />;
-        if (fileType.includes('image/')) return <FaFileImage className="text-primary me-2 fs-4" />;
-        return <FaFileImage className="text-secondary me-2 fs-4" />;
-    };
-
-    return (
-        <Card className="mb-4 document-upload-card shadow-sm">
-            <Card.Header className="bg-primary text-white">
-                <h5 className="mb-0">Document Upload</h5>
-            </Card.Header>
-            <Card.Body>
-                <Row className="mb-4">
-                    <Col md={6}>
-                        <Form.Group controlId="documentType">
-                            <Form.Label>Document Type <span className="text-danger">*</span></Form.Label>
-                            <Controller
-                                name="documentType"
-                                control={control}
-                                rules={{ required: "Document type is required" }}
-                                render={({ field }) => (
-                                    <Form.Select 
-                                        {...field} 
-                                        isInvalid={!!errors.documentType}
-                                        onChange={(e) => {
-                                            field.onChange(e);
-                                            setValue("documentSubType", "");
-                                            setValue("documentFile", null);
-                                        }}
-                                    >
-                                        <option value="">Select document type</option>
-                                        {documentTypes.map((type) => (
-                                            <option key={type.value} value={type.value}>
-                                                {type.label}
-                                            </option>
-                                        ))}
-                                    </Form.Select>
-                                )}
-                            />
-                            {errors.documentType && (
-                                <Form.Control.Feedback type="invalid" className="d-block">
-                                    {errors.documentType.message}
-                                </Form.Control.Feedback>
-                            )}
-                        </Form.Group>
-                    </Col>
-
-                    {watchedFields[0] && (
-                        <Col md={6}>
-                            <Form.Group controlId="documentSubType">
-                                <Form.Label>
-                                    {watchedFields[0] === "identity_proof" ? "Identity Proof Type" : "Address Proof Type"} 
-                                    <span className="text-danger">*</span>
-                                </Form.Label>
-                                <Controller
-                                    name="documentSubType"
-                                    control={control}
-                                    rules={{ required: "Document subtype is required" }}
-                                    render={({ field }) => (
-                                        <Form.Select 
-                                            {...field} 
-                                            isInvalid={!!errors.documentSubType}
-                                        >
-                                            <option value="">Select {watchedFields[0] === "identity_proof" ? "identity proof" : "address proof"}</option>
-                                            {(watchedFields[0] === "identity_proof" ? identityProofOptions : addressProofOptions).map((type) => (
-                                                <option key={type.value} value={type.value}>
-                                                    {type.label}
-                                                </option>
-                                            ))}
-                                        </Form.Select>
-                                    )}
-                                />
-                                {errors.documentSubType && (
-                                    <Form.Control.Feedback type="invalid" className="d-block">
-                                        {errors.documentSubType.message}
-                                    </Form.Control.Feedback>
-                                )}
-                            </Form.Group>
-                        </Col>
-                    )}
-                </Row>
-
-                {watchedFields[0] && watchedFields[1] && (
-                    <Row className="mb-4">
-                        <Col md={12}>
-                            <Form.Group controlId="documentFile">
-                                <Form.Label>
-                                    Upload {watchedFields[0] === "identity_proof" ? "Identity Proof" : "Address Proof"} 
-                                    <span className="text-danger">*</span>
-                                </Form.Label>
-                                {watchedFields[2] ? (
-                                    renderFilePreview(watchedFields[2])
-                                ) : (
-                                    <div className="file-upload-container border rounded p-3">
-                                        <input
-                                            type="file"
-                                            id="documentFile"
-                                            accept=".pdf,.jpg,.jpeg,.png"
-                                            onChange={(e) => handleFileChange(e, "documentFile")}
-                                            className="d-none"
-                                            disabled={isUploading}
-                                        />
-                                        <label htmlFor="documentFile" className="btn btn-outline-primary w-100">
-                                            {isUploading ? (
-                                                <>
-                                                    <Spinner animation="border" size="sm" className="me-2" />
-                                                    Uploading...
-                                                </>
-                                            ) : (
-                                                <>
-                                                    <i className="bi bi-cloud-arrow-up me-2"></i>
-                                                    Choose File
-                                                </>
-                                            )}
-                                        </label>
-                                        <div className="small text-muted mt-2">
-                                            Accepted formats: PDF, JPG, PNG (Max 5MB)
-                                        </div>
-                                    </div>
-                                )}
-                                {errors.documentFile && (
-                                    <Form.Control.Feedback type="invalid" className="d-block">
-                                        {errors.documentFile.message}
-                                    </Form.Control.Feedback>
-                                )}
-                                {uploadError && !watchedFields[2] && (
-                                    <Alert variant="danger" className="mt-2 small p-2">
-                                        {uploadError}
-                                    </Alert>
-                                )}
-                            </Form.Group>
-                        </Col>
-                    </Row>
-                )}
-
-                <Row>
-                    <Col>
-                        <Card className="border-primary signature-upload-card shadow-sm">
-                            <Card.Header className="bg-light">
-                                <Form.Check
-                                    type="checkbox"
-                                    id="signatureCheckbox"
-                                    label={<span className="text-dark fw-bold">I have a signature to upload</span>}
-                                    checked={showSignatureUpload}
-                                    onChange={(e) => setShowSignatureUpload(e.target.checked)}
-                                />
-                            </Card.Header>
-                            
-                            {showSignatureUpload && (
-                                <Card.Body>
-                                    <Form.Group controlId="signatureFile">
-                                        <Form.Label>Upload Signature</Form.Label>
-                                        {watchedFields[3] ? (
-                                            renderFilePreview(watchedFields[3], 'signature')
-                                        ) : (
-                                            <div className="file-upload-container border rounded p-3">
-                                                <input
-                                                    type="file"
-                                                    id="signatureFile"
-                                                    accept=".pdf,.jpg,.jpeg,.png"
-                                                    onChange={(e) => handleFileChange(e, "signatureFile")}
-                                                    className="d-none"
-                                                    disabled={isUploading}
-                                                />
-                                                <label htmlFor="signatureFile" className="btn btn-outline-secondary w-100">
-                                                    {isUploading ? (
-                                                        <>
-                                                            <Spinner animation="border" size="sm" className="me-2" />
-                                                            Uploading...
-                                                        </>
-                                                    ) : (
-                                                        <>
-                                                            <FaSignature className="me-2" />
-                                                            Upload Signature
-                                                        </>
-                                                    )}
-                                                </label>
-                                                <div className="small text-muted mt-2">
-                                                    Accepted formats: PDF, JPG, PNG (Max 2MB)
-                                                </div>
-                                            </div>
-                                        )}
-                                        {errors.signatureFile && (
-                                            <Form.Control.Feedback type="invalid" className="d-block">
-                                                {errors.signatureFile.message}
-                                            </Form.Control.Feedback>
-                                        )}
-                                        {uploadError && !watchedFields[3] && (
-                                            <Alert variant="danger" className="mt-2 small p-2">
-                                                {uploadError}
-                                            </Alert>
-                                        )}
-                                    </Form.Group>
-                                </Card.Body>
-                            )}
-                        </Card>
-                    </Col>
-                </Row>
-            </Card.Body>
-        </Card>
-    );
-};
-
-export default DocumentsUpload;
 import React, { useCallback, useEffect, useState } from "react";
 import { useForm, FormProvider } from "react-hook-form";
-import DynamicField from "./formCommon/DynamicField";
-import Collapsible from "./formCommon/Collapsible";
-import { uploadDocument } from "../../../services/documentUploadService";
-import "./StepFirst.css";
+import DocumentsUpload from "./DocumentsUpload";
 import 'bootstrap/dist/css/bootstrap.min.css';
 
-const StepFirst = ({ provideSubmitHandler, formData, onValidationComplete }) => {
+const StepFourth = ({ provideSubmitHandler, formData, onValidationComplete }) => {
     const [isUploading, setIsUploading] = useState(false);
     const [uploadError, setUploadError] = useState(null);
 
@@ -383,15 +12,13 @@ const StepFirst = ({ provideSubmitHandler, formData, onValidationComplete }) => 
         reValidateMode: "onChange"
     });
     
-    const { register, handleSubmit, formState: { errors, isValid }, trigger, setValue, control, getValues, watch } = methods;
-
-    const watchIdentificationType = watch("identificationTypeRadio", "incorporated");
+    const { handleSubmit, formState: { errors, isValid }, trigger, getValues } = methods;
 
     const handleFileUpload = async (file) => {
         try {
             setIsUploading(true);
             setUploadError(null);
-            const result = await uploadDocument(file, 'identification');
+            const result = await uploadDocument(file, 'document');
             return result;
         } catch (error) {
             setUploadError(error.message);
@@ -400,212 +27,6 @@ const StepFirst = ({ provideSubmitHandler, formData, onValidationComplete }) => 
             setIsUploading(false);
         }
     };
-
-    const basicDetailsSchema = [
-        {
-            name: "financialCreditorName",
-            label: <>Name of the financial creditor <span className="required-asterisk">*</span></>,
-            type: "text",
-            rules: { 
-                required: "Financial creditor name is required",
-                minLength: {
-                    value: 2,
-                    message: "Name must be at least 2 characters"
-                }
-            },
-            placeholder: "Enter financial creditor name",
-            tooltip: "Legal name of the financial creditor"
-        },
-        {
-            name: "financialCreditorEmail",
-            label: <>Email address of the financial creditor <span className="required-asterisk">*</span></>,
-            type: "email",
-            rules: { 
-                required: "Email is required",
-                pattern: {
-                    value: /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i,
-                    message: "Invalid email address"
-                }
-            },
-            placeholder: "Enter email address",
-            tooltip: "Official email address of the financial creditor"
-        },
-        {
-            name: "identificationTypeRadio",
-            label: <>Identification type <span className="required-asterisk">*</span></>,
-            type: "radio-group",
-            options: [
-                { value: "incorporated", label: "Incorporated body" },
-                { value: "partnership", label: "Partnership or individual" }
-            ],
-            rules: { required: "Identification type is required" },
-            defaultValue: "incorporated",
-            className: "mb-4"
-        }
-    ];
-
-    const incorporatedBodyFields = [
-        {
-            name: "incorporatedIdentificationNumber",
-            label: <>Identification Number  of the financial creditor (Aadhar, PAN,voter id etc.)<span className="required-asterisk">*</span></>,
-            type: "text",
-            rules: { 
-                required: watchIdentificationType === "incorporated" && "Identification number is required",
-                pattern: {
-                    value: /^[A-Z0-9]{8,15}$/,
-                    message: "Invalid identification number"
-                }
-            },
-            placeholder: "Enter identification number",
-            tooltip: "Corporate identification number or similar",
-           
-        },
-        {
-            name: "incorporatedProofDocument",
-            label: <>Proof of identification <span className="required-asterisk">*</span></>,
-            type: "file",
-            rules: { 
-                required: watchIdentificationType === "incorporated" && "Proof document is required",
-                validate: {
-                    fileSize: (files) => {
-                        if (files && files[0]) {
-                            const fileSizeInMB = files[0].size / (1024 * 1024);
-                            return fileSizeInMB <= 5 || "File size must be ≤ 5MB";
-                        }
-                        return true;
-                    }
-                }
-            },
-            tooltip: "Upload certificate of incorporation or similar",
-            accept: "image/*,.pdf",
-            onFileUpload: handleFileUpload,
-            isUploading,
-            uploadError,
-            note: "Max file size: 5MB (PDF, JPEG, PNG)"
-        }
-    ];
-
-    const partnershipIndividualFields = [
-        {
-            name: "identificationRecords",
-            label: <>Identification Records <span className="required-asterisk">*</span></>,
-            type: "textarea",
-            rules: { 
-                required: watchIdentificationType === "partnership" && "Identification records are required",
-                minLength: {
-                    value: 10,
-                    message: "Please provide detailed identification records"
-                }
-            },
-            placeholder: "Enter identification records ",
-            tooltip: "Detailed identification records",
-            className: "mb-3"
-        },
-        {
-            name: "identificationRecordsallpart",
-            label: <>Identification Records  all the partners  on the individual <span className="required-asterisk">*</span></>,
-            type: "textarea",
-            rules: { 
-                required: watchIdentificationType === "partnership" && "Identification records are required",
-                minLength: {
-                    value: 10,
-                    message: "Please provide detailed Identification Records  all the partners  on the individuals"
-                }
-            },
-            placeholder: "Enter identification records for all partners or individual",
-            tooltip: "Detailed identification information for all partners or individual",
-            className: "mb-3"
-        },
-        // {
-        //     name: "identificationRecordsProof",
-        //     label: <>Identification Records Proof <span className="required-asterisk">*</span></>,
-        //     type: "file",
-        //     rules: { 
-        //         required: watchIdentificationType === "partnership" && "Identification proof is required",
-        //         validate: {
-        //             fileSize: (files) => {
-        //                 if (files && files[0]) {
-        //                     const fileSizeInMB = files[0].size / (1024 * 1024);
-        //                     return fileSizeInMB <= 5 || "File size must be ≤ 5MB";
-        //                 }
-        //                 return true;
-        //             }
-        //         }
-        //     },
-        //     tooltip: "Upload identification proof for all partners or individual",
-        //     accept: "image/*,.pdf",
-        //     onFileUpload: handleFileUpload,
-        //     isUploading,
-        //     uploadError,
-        //     note: "Max file size: 5MB (PDF, JPEG, PNG)"
-        // }
-    ];
-
-    const addressDetailsSchema = [
-        {
-            name: "addressLine1",
-            label: <>Address line 1 <span className="required-asterisk">*</span></>,
-            type: "text",
-            rules: { 
-                required: "Address line 1 is required",
-                minLength: {
-                    value: 5,
-                    message: "Address must be at least 5 characters"
-                }
-            },
-            placeholder: "Enter address line 1",
-            tooltip: "Street address, P.O. box, company name"
-        },
-        {
-            name: "addressLine2",
-            label: "Address line 2",
-            type: "text",
-            placeholder: "Enter address line 2",
-            tooltip: "Apartment, suite, unit, building, floor, etc."
-        },
-        {
-            name: "city",
-            label: <>City <span className="required-asterisk">*</span></>,
-            type: "text",
-            rules: { 
-                required: "City is required",
-                minLength: {
-                    value: 2,
-                    message: "City name must be at least 2 characters"
-                }
-            },
-            placeholder: "Enter city",
-            tooltip: "City or locality"
-        },
-        {
-            name: "state",
-            label: <>State <span className="required-asterisk">*</span></>,
-            type: "text",
-            rules: { 
-                required: "State is required",
-                minLength: {
-                    value: 2,
-                    message: "State name must be at least 2 characters"
-                }
-            },
-            placeholder: "Enter state",
-            tooltip: "State or province"
-        },
-        {
-            name: "pincode",
-            label: <>Pincode <span className="required-asterisk">*</span></>,
-            type: "text",
-            rules: { 
-                required: "Pincode is required",
-                pattern: {
-                    value: /^[1-9][0-9]{5}$/,
-                    message: "Invalid Indian pincode"
-                }
-            },
-            placeholder: "Enter 6-digit pincode",
-            tooltip: "Postal code or ZIP code"
-        }
-    ];
 
     const onSubmit = useCallback(async () => {
         const isValid = await trigger();
@@ -625,10 +46,10 @@ const StepFirst = ({ provideSubmitHandler, formData, onValidationComplete }) => 
     useEffect(() => {
         if (formData) {
             Object.keys(formData).forEach((key) => {
-                setValue(key, formData[key]);
+                methods.setValue(key, formData[key]);
             });
         }
-    }, [formData, setValue]);
+    }, [formData, methods.setValue]);
 
     useEffect(() => {
         if (provideSubmitHandler) {
@@ -639,102 +60,58 @@ const StepFirst = ({ provideSubmitHandler, formData, onValidationComplete }) => 
     return (
         <FormProvider {...methods}>
             <form className="form-stepper">
-                <div className="mb-4 bg-light p-4 rounded-3">
-                    <Collapsible title="Basic Details" defaultOpen={true}>
-                        <div className="container-fluid">
-                            <div className="row g-3">
-                                {basicDetailsSchema.map((fieldConfig) => (
-                                    <div key={fieldConfig.name} className="col-md-6">
-                                        <DynamicField
-                                            fieldConfig={fieldConfig}
-                                            control={control}
-                                            register={register}
-                                            errors={errors}
-                                            setValue={setValue}
-                                            trigger={trigger}
-                                            getValues={getValues}
-                                        />
-                                    </div>
-                                ))}
-                            </div>
-                            
-                            {watchIdentificationType === "incorporated" && (
-                                <div className="row g-3 mt-2">
-                                    {incorporatedBodyFields.map((fieldConfig) => (
-                                        <div key={fieldConfig.name} className="col-md-6">
-                                            <DynamicField
-                                                fieldConfig={{
-                                                    ...fieldConfig,
-                                                    isUploading,
-                                                    uploadError,
-                                                    setIsUploading,
-                                                    setUploadError,
-                                                    onFileUpload: handleFileUpload
-                                                }}
-                                                control={control}
-                                                register={register}
-                                                errors={errors}
-                                                setValue={setValue}
-                                                trigger={trigger}
-                                                getValues={getValues}
-                                            />
-                                        </div>
-                                    ))}
-                                </div>
-                            )}
-
-                            {watchIdentificationType === "partnership" && (
-                                <div className="mt-3">
-                                    <div className="row g-3">
-                                        {partnershipIndividualFields.map((fieldConfig) => (
-                                            <div key={fieldConfig.name} className={fieldConfig.type === "textarea" ? "col-12" : "col-md-6"}>
-                                                <DynamicField
-                                                    fieldConfig={{
-                                                        ...fieldConfig,
-                                                        isUploading,
-                                                        uploadError,
-                                                        setIsUploading,
-                                                        setUploadError,
-                                                        onFileUpload: handleFileUpload
-                                                    }}
-                                                    control={control}
-                                                    register={register}
-                                                    errors={errors}
-                                                    setValue={setValue}
-                                                    trigger={trigger}
-                                                    getValues={getValues}
-                                                />
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-                    </Collapsible>
-
-                    <Collapsible title="Address Details" defaultOpen={true}>
-                        <div className="container-fluid">
-                            <div className="row g-3">
-                                {addressDetailsSchema.map((fieldConfig) => (
-                                    <div key={fieldConfig.name} className="col-md-6">
-                                        <DynamicField
-                                            fieldConfig={fieldConfig}
-                                            control={control}
-                                            register={register}
-                                            errors={errors}
-                                            setValue={setValue}
-                                            trigger={trigger}
-                                            getValues={getValues}
-                                        />
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-                    </Collapsible>
-                </div>
+                <DocumentsUpload 
+                    isUploading={isUploading}
+                    uploadError={uploadError}
+                    setIsUploading={setIsUploading}
+                    setUploadError={setUploadError}
+                    onFileUpload={handleFileUpload}
+                />
             </form>
         </FormProvider>
     );
 };
 
-export default StepFirst;
+export default StepFourth;
+
+const DocumentsUpload = ({ 
+    isUploading, 
+    uploadError, 
+    setIsUploading, 
+    setUploadError, 
+    onFileUpload 
+}) => {
+    const formContext = useFormContext();
+    
+    if (!formContext) {
+        throw new Error("DocumentUpload must be used within a FormProvider");
+    }
+    
+    const { control, watch, setValue, formState: { errors } } = formContext;
+    const [showSignatureUpload, setShowSignatureUpload] = useState(false);
+    const [uploadSuccess, setUploadSuccess] = useState(false);
+
+    // ... rest of your component code ...
+
+    const handleFileUpload = async (file, fieldName) => {
+        try {
+            setIsUploading(true);
+            setUploadError(null);
+            setUploadSuccess(false);
+            const result = await onFileUpload(file); // Use the passed onFileUpload
+            setValue(fieldName, {
+                fileId: result.fileId,
+                fileName: file.name,
+                fileType: file.type
+            });
+            setUploadSuccess(true);
+            return result;
+        } catch (error) {
+            setUploadError(error.message);
+            throw error;
+        } finally {
+            setIsUploading(false);
+        }
+    };
+
+    // ... rest of your component ...
