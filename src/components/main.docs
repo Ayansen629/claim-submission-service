@@ -6,7 +6,408 @@ import { FaInfoCircle, FaPlus, FaMinus } from "react-icons/fa";
 import axios from "axios";
 import "./FormC.css";
 
-// ... (keep all the existing component definitions like DynamicField, IFSCSearch, etc.)
+// DynamicField component with enhanced validation
+const DynamicField = ({ fieldConfig, control, register, errors, setValue, getValues, watch }) => {
+  const { name, label, type, options, rules, tooltip, placeholder, rows, show } = fieldConfig;
+  const hasError = errors[name];
+
+  const handleRadioChange = (value) => {
+    setValue(name, value, { shouldValidate: true });
+    if (fieldConfig.onChange) fieldConfig.onChange(value);
+  };
+
+  if (show !== undefined && !show) return null;
+
+  return (
+    <div className={`form-group ${type === "radio" ? "radio-group-container" : ""}`}>
+      <label className="form-label">
+        {label}
+        {rules?.required && <span className="required-asterisk">*</span>}
+        {tooltip && (
+          <Tooltip title={tooltip} arrow>
+            <span className="form-tooltip">
+              <FaInfoCircle />
+            </span>
+          </Tooltip>
+        )}
+      </label>
+      
+      {type === "select" ? (
+        <select
+          {...register(name, rules)}
+          className={`form-control ${hasError ? "is-invalid" : ""}`}
+          onChange={(e) => {
+            setValue(name, e.target.value, { shouldValidate: true });
+            if (fieldConfig.onChange) fieldConfig.onChange(e.target.value);
+          }}
+        >
+          {options.map((option) => (
+            <option key={option.value} value={option.value} disabled={option.disabled}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      ) : type === "radio" ? (
+        <div className="radio-group">
+          {options.map((option) => (
+            <label key={option.value} className="radio-option">
+              <input
+                type="radio"
+                {...register(name, rules)}
+                value={option.value}
+                checked={watch(name) === option.value}
+                onChange={() => handleRadioChange(option.value)}
+                className="radio-input"
+              />
+              <span className="radio-label">{option.label}</span>
+            </label>
+          ))}
+        </div>
+      ) : type === "textarea" ? (
+        <textarea
+          {...register(name, rules)}
+          className={`form-control ${hasError ? "is-invalid" : ""}`}
+          rows={rows || 3}
+          placeholder={placeholder}
+        />
+      ) : type === "date" ? (
+        <input
+          {...register(name, rules)}
+          type="date"
+          className={`form-control ${hasError ? "is-invalid" : ""}`}
+          placeholder={placeholder}
+        />
+      ) : (
+        <input
+          {...register(name, rules)}
+          type={type}
+          className={`form-control ${hasError ? "is-invalid" : ""}`}
+          placeholder={placeholder}
+        />
+      )}
+      {hasError && <div className="invalid-feedback">{errors[name]?.message}</div>}
+    </div>
+  );
+};
+
+// IFSCSearch component
+const IFSCSearch = ({ fieldConfig, register, errors, setValue, trigger }) => {
+  const [bankDetails, setBankDetails] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  const fetchBankDetails = async (ifsc) => {
+    if (ifsc.length < 4) return;
+    
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await axios.get(`https://ifsc.razorpay.com/${ifsc}`);
+      setBankDetails(response.data);
+      
+      setValue("bankName", response.data.BANK, { shouldValidate: true });
+      setValue("branchName", response.data.BRANCH, { shouldValidate: true });
+      setValue("branchAddress", `${response.data.ADDRESS}, ${response.data.CITY}, ${response.data.STATE}`, { shouldValidate: true });
+      setValue("city", response.data.CITY, { shouldValidate: true });
+      setValue("state", response.data.STATE, { shouldValidate: true });
+      setValue("district", response.data.DISTRICT, { shouldValidate: true });
+      
+      await Promise.all([
+        trigger("bankName"),
+        trigger("branchName"),
+        trigger("branchAddress"),
+        trigger("city"),
+        trigger("state"),
+        trigger("district")
+      ]);
+    } catch (err) {
+      setError("Invalid IFSC code or failed to fetch details");
+      setBankDetails(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="form-group">
+      <label className="form-label">
+        {fieldConfig.label}
+        {fieldConfig.rules?.required && <span className="required-asterisk">*</span>}
+      </label>
+      <input
+        {...register(fieldConfig.name, fieldConfig.rules)}
+        type="text"
+        className={`form-control ${errors[fieldConfig.name] ? "is-invalid" : ""}`}
+        placeholder={fieldConfig.placeholder}
+        onChange={async (e) => {
+          setValue(fieldConfig.name, e.target.value.toUpperCase(), { shouldValidate: true });
+          await trigger(fieldConfig.name);
+          fetchBankDetails(e.target.value);
+        }}
+      />
+      {loading && <div className="loading-indicator">Loading bank details...</div>}
+      {error && <div className="invalid-feedback">{error}</div>}
+      {errors[fieldConfig.name] && (
+        <div className="invalid-feedback">{errors[fieldConfig.name].message}</div>
+      )}
+    </div>
+  );
+};
+const ClaimTypeFields = ({ 
+  claimType, 
+  control, 
+  register, 
+  errors, 
+  setValue, 
+  getValues, 
+  watch,
+  trigger
+}) => {
+  const [showSecurityFields, setShowSecurityFields] = useState(false);
+  const [showGuaranteeFields, setShowGuaranteeFields] = useState(false);
+  const [entityFields, setEntityFields] = useState([1]);
+
+  const handleSecurityInterestChange = (value) => {
+    setShowSecurityFields(value === "yes");
+    if (value === "no") {
+      setValue("securityValue", "", { shouldValidate: false });
+      setValue("securityDate", "", { shouldValidate: false });
+    }
+  };
+
+  const handleGuaranteeChange = (value) => {
+    setShowGuaranteeFields(value === "yes");
+    if (value === "no") {
+      setValue("guaranteeValue", "", { shouldValidate: false });
+      setValue("guaranteeDate", "", { shouldValidate: false });
+    }
+  };
+
+  const addEntityField = async () => {
+    const newIndex = entityFields.length + 1;
+    setEntityFields([...entityFields, newIndex]);
+    await new Promise(resolve => setTimeout(resolve, 100));
+    document.getElementById(`${claimType}Name${newIndex}`)?.focus();
+  };
+
+  const removeEntityField = async (index) => {
+    if (entityFields.length <= 1) return;
+    
+    const newFields = [...entityFields];
+    newFields.splice(index, 1);
+    setEntityFields(newFields);
+    
+    const entityNum = index + 1;
+    setValue(`${claimType}Name${entityNum}`, undefined, { shouldValidate: false });
+    setValue(`${claimType}Address${entityNum}`, undefined, { shouldValidate: false });
+    await trigger();
+  };
+
+  const commonClaimFields = [
+    {
+      name: "claimAmount",
+      label: "Amount of claim",
+      type: "number",
+      rules: { 
+        required: "Claim amount is required",
+        min: { value: 1, message: "Amount must be greater than 0" }
+      },
+      placeholder: "Enter claim amount"
+    }
+  ];
+
+  const additionalFields = [
+    {
+      name: "hasSecurityInterest",
+      label: "Amount of claim covered by security interest",
+      type: "radio",
+      options: [
+        { value: "yes", label: "Yes" },
+        { value: "no", label: "No" }
+      ],
+      rules: { required: "This field is required" },
+      onChange: handleSecurityInterestChange,
+      show: claimType !== "financialDebt"
+    },
+    {
+      name: "securityValue",
+      label: "Value of the security",
+      type: "number",
+      rules: showSecurityFields ? { 
+        required: "Security value is required",
+        min: { value: 1, message: "Value must be greater than 0" }
+      } : {},
+      placeholder: "Enter security value",
+      show: showSecurityFields && claimType !== "financialDebt"
+    },
+    {
+      name: "securityDate",
+      label: "Date of the security",
+      type: "date",
+      rules: showSecurityFields ? { 
+        required: "Security date is required",
+        validate: value => {
+          const today = new Date().toISOString().split('T')[0];
+          return value <= today || "Date cannot be in the future";
+        }
+      } : {},
+      placeholder: "Select security date",
+      show: showSecurityFields && claimType !== "financialDebt"
+    },
+    {
+      name: "hasGuarantee",
+      label: "Amount of claim covered by guarantee",
+      type: "radio",
+      options: [
+        { value: "yes", label: "Yes" },
+        { value: "no", label: "No" }
+      ],
+      rules: { required: "This field is required" },
+      onChange: handleGuaranteeChange,
+      show: claimType !== "financialDebt"
+    },
+    {
+      name: "guaranteeValue",
+      label: "Value of the guarantee",
+      type: "number",
+      rules: showGuaranteeFields ? { 
+        required: "Guarantee value is required",
+        min: { value: 1, message: "Value must be greater than 0" }
+      } : {},
+      placeholder: "Enter guarantee value",
+      show: showGuaranteeFields && claimType !== "financialDebt"
+    },
+    {
+      name: "guaranteeDate",
+      label: "Date of the guarantee",
+      type: "date",
+      rules: showGuaranteeFields ? { 
+        required: "Guarantee date is required",
+        validate: value => {
+          const today = new Date().toISOString().split('T')[0];
+          return value <= today || "Date cannot be in the future";
+        }
+      } : {},
+      placeholder: "Select guarantee date",
+      show: showGuaranteeFields && claimType !== "financialDebt"
+    }
+  ];
+
+  const getEntityFieldLabels = () => {
+    switch (claimType) {
+      case "principalBorrower":
+        return {
+          nameLabel: "Name of the Guarantee",
+          addressLabel: "Address of the Guarantee"
+        };
+      case "guarantor":
+        return {
+          nameLabel: "Name of the Principal Borrower",
+          addressLabel: "Address of the Principal Borrower"
+        };
+      case "financialDebt":
+        return {
+          nameLabel: "Name of the Beneficiary",
+          addressLabel: "Address of the Beneficiary"
+        };
+      default:
+        return {
+          nameLabel: "Name",
+          addressLabel: "Address"
+        };
+    }
+  };
+
+  const { nameLabel, addressLabel } = getEntityFieldLabels();
+
+  return (
+    <div className="form-section">
+      {commonClaimFields.map((field) => (
+        <DynamicField
+          key={field.name}
+          fieldConfig={field}
+          control={control}
+          register={register}
+          errors={errors}
+          setValue={setValue}
+          getValues={getValues}
+          watch={watch}
+        />
+      ))}
+
+      {additionalFields.map((field) => (
+        <DynamicField
+          key={field.name}
+          fieldConfig={field}
+          control={control}
+          register={register}
+          errors={errors}
+          setValue={setValue}
+          getValues={getValues}
+          watch={watch}
+        />
+      ))}
+
+      {entityFields.map((entityNum, index) => (
+        <React.Fragment key={entityNum}>
+          <div className="form-group-with-action">
+            <DynamicField
+              fieldConfig={{
+                name: `${claimType}Name${entityNum}`,
+                label: `${nameLabel} ${entityNum}`,
+                type: "text",
+                rules: { required: "This field is required" },
+                placeholder: `Enter ${nameLabel.toLowerCase()}`,
+                id: `${claimType}Name${entityNum}`
+              }}
+              control={control}
+              register={register}
+              errors={errors}
+              setValue={setValue}
+              getValues={getValues}
+              watch={watch}
+            />
+            {index > 0 && (
+              <button 
+                type="button" 
+                className="btn btn-danger btn-sm remove-btn"
+                onClick={() => removeEntityField(index)}
+                aria-label={`Remove ${nameLabel} ${entityNum}`}
+              >
+                <FaMinus />
+              </button>
+            )}
+          </div>
+
+          <DynamicField
+            fieldConfig={{
+              name: `${claimType}Address${entityNum}`,
+              label: `${addressLabel} ${entityNum}`,
+              type: "text",
+              rules: { required: "This field is required" },
+              placeholder: `Enter ${addressLabel.toLowerCase()}`
+            }}
+            control={control}
+            register={register}
+            errors={errors}
+            setValue={setValue}
+            getValues={getValues}
+            watch={watch}
+          />
+        </React.Fragment>
+      ))}
+
+      <button 
+        type="button" 
+        className="btn btn-outline-primary btn-sm add-more-btn"
+        onClick={addEntityField}
+      >
+        <FaPlus /> Add {claimType === "guarantor" ? "Principal Borrower" : 
+                        claimType === "principalBorrower" ? "Guarantee" : "Beneficiary"}
+      </button>
+    </div>
+  );
+};
 
 const FormCDetails = ({ provideSubmitHandler, formData, onValidationComplete }) => {
   const methods = useForm({ mode: "onChange" });
@@ -23,10 +424,77 @@ const FormCDetails = ({ provideSubmitHandler, formData, onValidationComplete }) 
   } = methods;
   
   const [selectedClaimType, setSelectedClaimType] = useState("");
-  const [showDetails, setShowDetails] = useState(false);
 
   const bankAccountFields = [
-    // ... (keep existing bank account fields)
+    {
+      name: "accountNumber",
+      label: "Account Number",
+      type: "text",
+      rules: { 
+        required: "Account number is required",
+        pattern: {
+          value: /^[0-9]{9,18}$/,
+          message: "Account number must be 9-18 digits"
+        }
+      },
+      placeholder: "Enter account number"
+    },
+    {
+      name: "ifscCode",
+      label: "IFSC Code",
+      type: "text",
+      rules: { 
+        required: "IFSC code is required",
+        pattern: {
+          value: /^[A-Za-z]{4}0[A-Za-z0-9]{6}$/,
+          message: "Invalid IFSC code format (e.g., ABCD0123456)"
+        }
+      },
+      placeholder: "Enter IFSC code (e.g., ABCD0123456)",
+      component: IFSCSearch
+    },
+    {
+      name: "bankName",
+      label: "Bank Name",
+      type: "text",
+      rules: { required: "Bank name is required" },
+      placeholder: "Enter bank name"
+    },
+    {
+      name: "branchName",
+      label: "Branch Name",
+      type: "text",
+      rules: { required: "Branch name is required" },
+      placeholder: "Enter branch name"
+    },
+    {
+      name: "branchAddress",
+      label: "Branch Address",
+      type: "text",
+      rules: { required: "Branch address is required" },
+      placeholder: "Enter branch address"
+    },
+    {
+      name: "city",
+      label: "City",
+      type: "text",
+      rules: { required: "City is required" },
+      placeholder: "Enter city"
+    },
+    {
+      name: "state",
+      label: "State",
+      type: "text",
+      rules: { required: "State is required" },
+      placeholder: "Enter state"
+    },
+    {
+      name: "district",
+      label: "District",
+      type: "text",
+      rules: { required: "District is required" },
+      placeholder: "Enter district"
+    }
   ];
 
   const claimTypeOptions = [
@@ -52,14 +520,12 @@ const FormCDetails = ({ provideSubmitHandler, formData, onValidationComplete }) 
       });
       if (formData.claimType) {
         setSelectedClaimType(formData.claimType);
-        setShowDetails(true);
       }
     }
   }, [formData, setValue]);
 
   const handleClaimTypeChange = async (value) => {
     setSelectedClaimType(value);
-    setShowDetails(value !== "");
     reset({
       claimType: value,
       hasSecurityInterest: "",
@@ -71,11 +537,11 @@ const FormCDetails = ({ provideSubmitHandler, formData, onValidationComplete }) 
   const getClaimTitle = () => {
     switch (selectedClaimType) {
       case "principalBorrower":
-        return "Corporate Debtor as Principal Borrower Details";
+        return " Corporate Debtor as Principal Borrower";
       case "guarantor":
-        return "Corporate Debtor as Guarantor Details";
+        return " Corporate Debtor as Guarantor";
       case "financialDebt":
-        return "Financial Debt Covered Details";
+        return " Financial Debt Covered";
       default:
         return "Claim Details";
     }
@@ -90,7 +556,7 @@ const FormCDetails = ({ provideSubmitHandler, formData, onValidationComplete }) 
   return (
     <FormProvider {...methods}>
       <form className="form-stepper">
-        {/* Claim Type Selection - Always shown */}
+        {/* Claim Type Selection */}
         <div className="form-section">
           <div className="form-group">
             <label className="form-label">
@@ -112,198 +578,139 @@ const FormCDetails = ({ provideSubmitHandler, formData, onValidationComplete }) 
           </div>
         </div>
 
-        {/* Only show other fields after claim type is selected */}
-        {showDetails && (
-          <>
-            {/* Claim Details Section - Two fields per row */}
-            <div className="form-section">
-              <Collapsible title="Details of Claim" defaultOpen={true}>
-                <div className="form-grid">
-                  <div className="form-row">
-                    <div className="form-col">
-                      <div className="form-group">
-                        <label className="form-label">
-                          Claim Type <span className="required-asterisk">*</span>
-                        </label>
-                        <input
-                          {...register("claimTypeDisplay", { required: "Claim type is required" })}
-                          type="text"
-                          className={`form-control ${errors.claimTypeDisplay ? "is-invalid" : ""}`}
-                          value={selectedClaimType ? 
-                            claimTypeOptions.find(opt => opt.value === selectedClaimType)?.label || "" 
-                            : ""}
-                          readOnly
-                        />
-                      </div>
-                    </div>
-                    
-                    <div className="form-col">
-                      <DynamicField
-                        fieldConfig={{
-                          name: "debtDate",
-                          label: "Date of debt incurred",
-                          type: "date",
-                          rules: { 
-                            required: "This field is required",
-                            validate: value => {
-                              const today = new Date().toISOString().split('T')[0];
-                              return value <= today || "Date cannot be in the future";
-                            }
-                          },
-                          placeholder: "Select date"
-                        }}
-                        control={control}
-                        register={register}
-                        errors={errors}
-                        setValue={setValue}
-                        getValues={getValues}
-                        watch={watch}
-                      />
-                    </div>
-                  </div>
+        {/* Always visible claim details section */}
+        
+        <div className="form-section">
+          <Collapsible title="Details of Claim" defaultOpen={true}>
+            <div className="form-grid">
+              <div className="form-group">
+                <label className="form-label">
+                  Claim Type <span className="required-asterisk">*</span>
+                </label>
+                <input
+                  {...register("claimTypeDisplay", { required: "Claim type is required" })}
+                  type="text"
+                  className={`form-control ${errors.claimTypeDisplay ? "is-invalid" : ""}`}
+                  placeholder="Claim type"
+                  value={selectedClaimType ? 
+                    claimTypeOptions.find(opt => opt.value === selectedClaimType)?.label || "" 
+                    : ""}
+                  readOnly
+                />
+              </div>
 
-                  <div className="form-row">
-                    <div className="form-col full-width">
-                      <DynamicField
-                        fieldConfig={{
-                          name: "debtDetails",
-                          label: "Details of how debt incurred",
-                          type: "textarea",
-                          rules: { required: "This field is required" },
-                          placeholder: "Enter details of how debt was incurred",
-                          rows: 3
-                        }}
-                        control={control}
-                        register={register}
-                        errors={errors}
-                        setValue={setValue}
-                        getValues={getValues}
-                        watch={watch}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="form-row">
-                    <div className="form-col full-width">
-                      <DynamicField
-                        fieldConfig={{
-                          name: "mutualDetails",
-                          label: "Details of any mutual credit, mutual debts, or other mutual dealings between the corporate debtor and the creditor which may be set-off against the claim",
-                          type: "textarea",
-                          rows: 5,
-                          placeholder: "Enter details of any mutual dealings"
-                        }}
-                        control={control}
-                        register={register}
-                        errors={errors}
-                        setValue={setValue}
-                        getValues={getValues}
-                        watch={watch}
-                      />
-                    </div>
-                  </div>
-                </div>
-              </Collapsible>
-            </div>
-
-            {/* Claim Type Specific Fields */}
-            <div className="form-section">
-              <Collapsible title={getClaimTitle()} defaultOpen={true}>
-                <ClaimTypeFields 
-                  claimType={selectedClaimType}
+              <div className="form-group">
+                <DynamicField
+                  fieldConfig={{
+                    name: "debtDetails",
+                    label: "Details of how debt incurred",
+                    type: "textarea",
+                    rules: { required: "This field is required" },
+                    placeholder: "Enter details of how debt was incurred",
+                    rows: 3
+                  }}
                   control={control}
                   register={register}
                   errors={errors}
                   setValue={setValue}
                   getValues={getValues}
                   watch={watch}
-                  trigger={trigger}
                 />
-              </Collapsible>
-            </div>
+              </div>
 
-            {/* Bank Account Details Section */}
-            <div className="form-section">
-              <Collapsible title="Bank Account Details" defaultOpen={true}>
-                <div className="form-grid">
-                  <div className="form-row">
-                    {bankAccountFields.slice(0, 2).map((field) => (
-                      <div className="form-col" key={field.name}>
-                        {field.component ? (
-                          <field.component
-                            fieldConfig={field}
-                            register={register}
-                            errors={errors}
-                            setValue={setValue}
-                            trigger={trigger}
-                          />
-                        ) : (
-                          <DynamicField
-                            fieldConfig={field}
-                            control={control}
-                            register={register}
-                            errors={errors}
-                            setValue={setValue}
-                            getValues={getValues}
-                            watch={watch}
-                          />
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                  
-                  <div className="form-row">
-                    {bankAccountFields.slice(2, 4).map((field) => (
-                      <div className="form-col" key={field.name}>
-                        <DynamicField
-                          fieldConfig={field}
-                          control={control}
-                          register={register}
-                          errors={errors}
-                          setValue={setValue}
-                          getValues={getValues}
-                          watch={watch}
-                        />
-                      </div>
-                    ))}
-                  </div>
-                  
-                  <div className="form-row">
-                    {bankAccountFields.slice(4, 6).map((field) => (
-                      <div className="form-col" key={field.name}>
-                        <DynamicField
-                          fieldConfig={field}
-                          control={control}
-                          register={register}
-                          errors={errors}
-                          setValue={setValue}
-                          getValues={getValues}
-                          watch={watch}
-                        />
-                      </div>
-                    ))}
-                  </div>
-                  
-                  <div className="form-row">
-                    {bankAccountFields.slice(6).map((field) => (
-                      <div className="form-col" key={field.name}>
-                        <DynamicField
-                          fieldConfig={field}
-                          control={control}
-                          register={register}
-                          errors={errors}
-                          setValue={setValue}
-                          getValues={getValues}
-                          watch={watch}
-                        />
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </Collapsible>
+              <div className="form-group">
+                <DynamicField
+                  fieldConfig={{
+                    name: "debtDate",
+                    label: "Date of debt incurred",
+                    type: "date",
+                    rules: { 
+                      required: "This field is required",
+                      validate: value => {
+                        const today = new Date().toISOString().split('T')[0];
+                        return value <= today || "Date cannot be in the future";
+                      }
+                    },
+                    placeholder: "Select date"
+                  }}
+                  control={control}
+                  register={register}
+                  errors={errors}
+                  setValue={setValue}
+                  getValues={getValues}
+                  watch={watch}
+                />
+              </div>
+
+              <div className="form-group full-width">
+                <DynamicField
+                  fieldConfig={{
+                    name: "mutualDetails",
+                    label: "Details of any mutual credit, mutual debts, or other mutual dealings between the corporate debtor and the creditor which may be set-off against the claim",
+                    type: "textarea",
+                    rows: 5,
+                    placeholder: "Enter details of any mutual dealings"
+                  }}
+                  control={control}
+                  register={register}
+                  errors={errors}
+                  setValue={setValue}
+                  getValues={getValues}
+                  watch={watch}
+                />
+              </div>
             </div>
-          </>
+          </Collapsible>
+        </div>
+
+        {/* Claim Type Specific Fields */}
+        {selectedClaimType && (
+          <div className="form-section">
+            <Collapsible title={getClaimTitle()} defaultOpen={true}>
+              <ClaimTypeFields 
+                claimType={selectedClaimType}
+                control={control}
+                register={register}
+                errors={errors}
+                setValue={setValue}
+                getValues={getValues}
+                watch={watch}
+                trigger={trigger}
+              />
+            </Collapsible>
+          </div>
         )}
+
+        {/* Bank Account Details Section */}
+        <div className="form-section">
+          <Collapsible title="Bank Account Details" defaultOpen={true}>
+            <div className="form-grid">
+              {bankAccountFields.map((field) => (
+                field.component ? (
+                  <field.component
+                    key={field.name}
+                    fieldConfig={field}
+                    register={register}
+                    errors={errors}
+                    setValue={setValue}
+                    trigger={trigger}
+                  />
+                ) : (
+                  <DynamicField
+                    key={field.name}
+                    fieldConfig={field}
+                    control={control}
+                    register={register}
+                    errors={errors}
+                    setValue={setValue}
+                    getValues={getValues}
+                    watch={watch}
+                  />
+                )
+              ))}
+            </div>
+          </Collapsible>
+        </div>
       </form>
     </FormProvider>
   );
