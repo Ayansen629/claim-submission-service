@@ -1,34 +1,262 @@
-.form-stepper {
-  max-width: 1200px;
-  margin: 0 auto;
-}
+import React from 'react';
+import { useFormContext } from 'react-hook-form';
+import "react-datepicker/dist/react-datepicker.css";
+import { Download, CheckCircle } from "lucide-react";
+import { Button } from "react-bootstrap";
 
-.required-asterisk {
-  color: red;
-}
+const DynamicField = ({
+  fieldConfig,
+  register,
+  errors,
+  setValue,
+  trigger,
+  getValues,
+  control,
+}) => {
+  const {
+    name,
+    label,
+    type,
+    rules = {},
+    options = [],
+    placeholder = '',
+    disabled = false,
+    tooltip = '',
+    note = '',
+    accept = '',
+    isUploading = false,
+    uploadError = null,
+    onFileUpload = () => {},
+    setIsUploading = () => {},
+    setUploadError = () => {},
+    defaultValue = null,
+    onChange = () => {},
+  } = fieldConfig;
 
-.form-text {
-  font-size: 0.875em;
-  margin-top: 0.25rem;
-}
+  const { watch } = useFormContext();
+  const value = watch(name);
+  const hasError = errors[name];
+  const [uploadSuccess, setUploadSuccess] = React.useState(false);
 
-.btn-sm {
-  padding: 0.25rem 0.5rem;
-  font-size: 0.875rem;
-}
+  const handleFileChange = async (e) => {
+    const file = e.target.files[0];
+    if (file && fieldConfig.onFileUpload) {
+      try {
+        fieldConfig.setIsUploading(true);
+        fieldConfig.setUploadError(null);
+        setUploadSuccess(false);
 
-.border {
-  border: 1px solid #ddd;
-}
+        const result = await fieldConfig.onFileUpload(file);
 
-.rounded {
-  border-radius: 0.25rem;
-}
+        if (result.success) {
+          setValue(name, {
+            fileId: result.fileId,
+            docName: result.docName,
+            docType: result.docType,
+            docSource: result.docSource,
+            fileUrl: result.fileUrl
+          }, { shouldValidate: true });
+          setUploadSuccess(true);
+        }
+      } catch (error) {
+        fieldConfig.setUploadError(error.message);
+        setValue(name, null, { shouldValidate: true });
+        setUploadSuccess(false);
+      } finally {
+        fieldConfig.setIsUploading(false);
+      }
+    }
+  };
 
-.mb-4 {
-  margin-bottom: 1.5rem !important;
-}
+  const renderFilePreview = (fileValue) => {
+    if (!fileValue) return null;
 
-.g-3 {
-  gap: 1rem;
-}
+    const fileUrl = typeof fileValue === 'object' ? 
+      `${process.env.REACT_APP_FILE_SERVICE}v1/files/id?fileStoreId=${fileValue.fileId}` : 
+      fileValue;
+
+    const fileName = typeof fileValue === 'object' ? 
+      fileValue.docName || fileValue.name || 'Uploaded file' : 
+      fileValue;
+
+    return (
+      <div className="file-preview-container">
+        {uploadSuccess && (
+          <div className="text-success d-flex align-items-center gap-2 mb-2">
+            <CheckCircle size={16} />
+            <span>File uploaded successfully!</span>
+          </div>
+        )}
+        <div className="d-flex align-items-center gap-2">
+          <span>{fileName}</span>
+          <Button
+            variant="link"
+            size="sm"
+            href={fileUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            download
+            className="p-0"
+            title="Download file"
+          >
+            <Download size={16} />
+          </Button>
+        </div>
+      </div>
+    );
+  };
+
+  const handleRadioChange = (e) => {
+    const selectedValue = e.target.value;
+    setValue(name, selectedValue, { shouldValidate: true });
+    onChange(e); // Call the custom onChange handler if provided
+  };
+
+  const renderField = () => {
+    switch (type) {
+      case 'text':
+      case 'email':
+      case 'number':
+        return (
+          <input
+            type={type}
+            id={name}
+            className={`form-control ${errors[name] ? 'is-invalid' : ''}`}
+            placeholder={placeholder}
+            disabled={disabled}
+            {...register(name, rules)}
+          />
+        );
+      case 'textarea':
+        return (
+          <textarea
+            id={name}
+            className={`form-control ${errors[name] ? 'is-invalid' : ''}`}
+            placeholder={placeholder}
+            rows={3}
+            {...register(name, rules)}
+          />
+        );
+
+        
+      case 'select':
+        return (
+          <select
+            id={name}
+            className={`form-control ${errors[name] ? 'is-invalid' : ''}`}
+            {...register(name, rules)}
+          >
+            {options.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        );
+        case 'radio':
+          return (
+            <div className="d-flex gap-3">
+              {options.map((option) => (
+                <div key={option.value} className="form-check">
+                  <input
+                    type="radio"
+                    id={`${name}-${option.value}`}
+                    className="form-check-input"
+                    value={option.value}
+                    checked={value === option.value}
+                    {...register(name, rules)}
+                    onChange={handleRadioChange}
+                  />
+                  <label
+                    htmlFor={`${name}-${option.value}`}
+                    className="form-check-label"
+                  >
+                    {option.label}
+                  </label>
+                </div>
+              ))}
+            </div>
+          );
+      case 'radio-group':
+        return (
+          <div className="radio-group">
+            {options.map((option) => (
+              <div key={option.value} className="form-check form-check-inline">
+                <input
+                  type="radio"
+                  id={`${name}-${option.value}`}
+                  className="form-check-input"
+                  value={option.value}
+                  defaultChecked={defaultValue === option.value}
+                  {...register(name, rules)}
+                />
+                <label
+                  htmlFor={`${name}-${option.value}`}
+                  className="form-check-label"
+                >
+                  {option.label}
+                </label>
+              </div>
+            ))}
+          </div>
+        );
+      case 'file':
+        return (
+          <div className="custom-file-input">
+          {fieldConfig.note && (
+            <div className="file-upload-note text-muted small mb-2">
+              {fieldConfig.note}
+              </div>
+          )}
+          <input
+            type="file"
+            id={name}
+            onChange={handleFileChange}
+            className={`form-input ${hasError ? "input-error" : ""}`}
+            style={{ display: "none" }}
+            disabled={fieldConfig.isUploading || disabled}
+            accept={fieldConfig.accept}
+          />
+          <label
+            htmlFor={name}
+            className={`file-label ${hasError ? "input-error" : ""} ${fieldConfig.isUploading ? "uploading" : ""}`}
+          >
+            {fieldConfig.isUploading ? "Uploading..." : "Choose File"}
+          </label>
+
+          {getValues(name) && renderFilePreview(getValues(name))}
+
+          {fieldConfig.uploadError && <p className="error-message">{fieldConfig.uploadError}</p>}
+          {hasError && !fieldConfig.uploadError && <p className="error-message">{errors[name]?.message}</p>}
+        </div>
+        );
+      default:
+        return null;
+    }
+  };
+
+  return (
+    <div className={`form-group ${type === 'radio-group' ? 'radio-group-container' : ''}`}>
+      <label htmlFor={name} className="form-label">
+        {label}
+        {tooltip && (
+          <span
+            className="ms-1 tooltip-icon"
+            title={tooltip}
+            data-bs-toggle="tooltip"
+          >
+            <i className="bi bi-info-circle"></i>
+          </span>
+        )}
+      </label>
+      {renderField()}
+      {errors[name] && (
+        <div className="invalid-feedback d-block">
+          {errors[name].message}
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default DynamicField;
