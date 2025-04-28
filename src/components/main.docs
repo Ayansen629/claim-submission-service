@@ -1,196 +1,231 @@
-import React, { useCallback, useEffect, useState } from "react";
-import { useForm, FormProvider } from "react-hook-form";
-import DynamicField from "./formCommon/DynamicField";
-import Collapsible from "./formCommon/Collapsible";
-import 'bootstrap/dist/css/bootstrap.min.css';
+import React from 'react';
+import { useFormContext } from 'react-hook-form';
+import "react-datepicker/dist/react-datepicker.css";
+import { Download, CheckCircle } from "lucide-react";
+import { Button } from "react-bootstrap";
 
-const StepThird = ({ provideSubmitHandler, formData }) => {
-    const methods = useForm({
-        mode: "onChange",
-        reValidateMode: "onChange"
-    });
-    
-    const { 
-        register, 
-        handleSubmit, 
-        formState: { errors, isValid }, 
-        trigger, 
-        setValue, 
-        control, 
-        getValues,
-        watch
-    } = methods;
+const DynamicField = ({
+  fieldConfig,
+  register,
+  errors,
+  setValue,
+  trigger,
+  getValues,
+  control,
+}) => {
+  const {
+    name,
+    label,
+    type,
+    rules = {},
+    options = [],
+    placeholder = '',
+    disabled = false,
+    tooltip = '',
+    note = '',
+    accept = '',
+    isUploading = false,
+    uploadError = null,
+    onFileUpload = () => {},
+    setIsUploading = () => {},
+    setUploadError = () => {},
+    defaultValue = null,
+  } = fieldConfig;
 
-    const [hasSignature, setHasSignature] = useState(false);
-    const watchAllFields = watch();
+  const { watch } = useFormContext();
+  const value = watch(name);
+  const hasError = errors[name];
+  const [uploadSuccess, setUploadSuccess] = React.useState(false);
 
-    const creditorDetailsSchema = [
-        { 
-            name: "creditorName", 
-            label: <>Name of financial creditor (in BLOCK LETTERS) <span className="required-asterisk">*</span></>, 
-            type: "text", 
-            rules: { 
-                required: "Creditor name is required",
-                pattern: {
-                    value: /^[A-Z\s]+$/,
-                    message: "Please enter in BLOCK LETTERS only"
-                },
-                minLength: {
-                    value: 3,
-                    message: "Name must be at least 3 characters"
-                }
-            },
-            placeholder: "Enter name in BLOCK LETTERS",
-            className: "mb-3",
-            onChange: async (e) => {
-                await trigger("creditorName");
-            },
-            colSize: 6
-        },
-        { 
-            name: "creditorPosition", 
-            label: <>Position with or in relation to creditor <span className="required-asterisk">*</span></>, 
-            type: "text", 
-            rules: { 
-                required: "Position is required",
-                minLength: {
-                    value: 3,
-                    message: "Position must be at least 3 characters"
-                }
-            },
-            placeholder: "Enter position/relation to creditor",
-            className: "mb-3",
-            onChange: async (e) => {
-                await trigger("creditorPosition");
-            },
-            colSize: 6
-        },
-        { 
-            name: "creditorAddress", 
-            label: <>Address of person signing <span className="required-asterisk">*</span></>, 
-            type: "textarea",
-            rules: { 
-                required: "Address is required",
-                minLength: {
-                    value: 10,
-                    message: "Address must be at least 10 characters"
-                }
-            },
-            placeholder: "Enter complete address",
-            className: "mb-3",
-            rows: 3,
-            onChange: async (e) => {
-                await trigger("creditorAddress");
-            },
-            colSize: 12
-        },
-        {
-            name: "hasSignature",
-            label: "Do you have a signature to upload?",
-            type: "radio",
-            options: [
-                { value: "yes", label: "Yes" },
-                { value: "no", label: "No" }
-            ],
-            rules: { required: "Please select an option" },
-            className: "mb-3",
-            onChange: (e) => {
-                setHasSignature(e.target.value === "yes");
-                setValue("signatureFile", null);
-            },
-            colSize: 12
-        },
-        ...(hasSignature ? [{
-            name: "signatureFile",
-            label: "Upload Signature",
-            type: "file",
-            rules: { 
-                required: "Signature file is required",
-                validate: {
-                    fileSize: (files) => {
-                        if (!files || files.length === 0) return true;
-                        const file = files[0];
-                        return file.size <= 2 * 1024 * 1024 || "File size must be less than 2MB";
-                    },
-                    fileType: (files) => {
-                        if (!files || files.length === 0) return true;
-                        const file = files[0];
-                        return ['image/jpeg', 'image/png', 'application/pdf'].includes(file.type) || 
-                               "Only JPG, PNG, or PDF files are allowed";
-                    }
-                }
-            },
-            accept: ".jpg,.jpeg,.png,.pdf",
-            className: "mb-3",
-            colSize: 6
-        }] : [])
-    ];
+  const handleFileChange = async (e) => {
+    const file = e.target.files[0];
+    if (file && fieldConfig.onFileUpload) {
+      try {
+        fieldConfig.setIsUploading(true);
+        fieldConfig.setUploadError(null);
+        setUploadSuccess(false);
 
-    const onSubmit = useCallback(async () => {
-        const isValid = await trigger();
-        
-        if (!isValid) {
-            const errorField = Object.keys(errors)[0];
-            if (errorField) {
-                document.querySelector(`[name="${errorField}"]`)?.scrollIntoView({ 
-                    behavior: 'smooth', 
-                    block: 'center' 
-                });
-            }
-            return false;
+        const result = await fieldConfig.onFileUpload(file);
+
+        if (result.success) {
+          setValue(name, {
+            fileId: result.fileId,
+            docName: result.docName,
+            docType: result.docType,
+            docSource: result.docSource,
+            fileUrl: result.fileUrl
+          }, { shouldValidate: true });
+          setUploadSuccess(true);
         }
-        
-        return getValues();
-    }, [trigger, getValues, errors]);
+      } catch (error) {
+        fieldConfig.setUploadError(error.message);
+        setValue(name, null, { shouldValidate: true });
+        setUploadSuccess(false);
+      } finally {
+        fieldConfig.setIsUploading(false);
+      }
+    }
+  };
 
-    useEffect(() => {
-        if (formData) {
-            Object.keys(formData).forEach((key) => {
-                setValue(key, formData[key], { shouldValidate: true });
-            });
-            if (formData.hasSignature) {
-                setHasSignature(formData.hasSignature === "yes");
-            }
-        }
-    }, [formData, setValue]);
+  const renderFilePreview = (fileValue) => {
+    if (!fileValue) return null;
 
-    useEffect(() => {
-        if (provideSubmitHandler) {
-            provideSubmitHandler(onSubmit);
-        }
-    }, [provideSubmitHandler, onSubmit]);
+    const fileUrl = typeof fileValue === 'object' ? 
+      `${process.env.REACT_APP_FILE_SERVICE}v1/files/id?fileStoreId=${fileValue.fileId}` : 
+      fileValue;
+
+    const fileName = typeof fileValue === 'object' ? 
+      fileValue.docName || fileValue.name || 'Uploaded file' : 
+      fileValue;
 
     return (
-        <FormProvider {...methods}>
-            <form className="form-stepper">
-                <div className="mb-4 bg-light p-4 rounded">
-                    <Collapsible 
-                        title="Signature of financial creditor or person authorised to act on its behalf" 
-                        defaultOpen={true}
-                    >
-                        <div className="row g-3">
-                            {creditorDetailsSchema.map((fieldConfig) => (
-                                <div 
-                                    key={fieldConfig.name} 
-                                    className={`col-md-${fieldConfig.colSize || 12}`}
-                                >
-                                    <DynamicField
-                                        fieldConfig={fieldConfig}
-                                        control={control}
-                                        register={register}
-                                        errors={errors}
-                                        setValue={setValue}
-                                        trigger={trigger}
-                                        getValues={getValues}
-                                    />
-                                </div>
-                            ))}
-                        </div>
-                    </Collapsible>
-                </div>
-            </form>
-        </FormProvider>
+      <div className="file-preview-container">
+        {uploadSuccess && (
+          <div className="text-success d-flex align-items-center gap-2 mb-2">
+            <CheckCircle size={16} />
+            <span>File uploaded successfully!</span>
+          </div>
+        )}
+        <div className="d-flex align-items-center gap-2">
+          <span>{fileName}</span>
+          <Button
+            variant="link"
+            size="sm"
+            href={fileUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            download
+            className="p-0"
+            title="Download file"
+          >
+            <Download size={16} />
+          </Button>
+        </div>
+      </div>
     );
+  };
+
+  const renderField = () => {
+    switch (type) {
+      case 'text':
+      case 'email':
+      case 'number':
+        return (
+          <input
+            type={type}
+            id={name}
+            className={`form-control ${errors[name] ? 'is-invalid' : ''}`}
+            placeholder={placeholder}
+            disabled={disabled}
+            {...register(name, rules)}
+          />
+        );
+      case 'textarea':
+        return (
+          <textarea
+            id={name}
+            className={`form-control ${errors[name] ? 'is-invalid' : ''}`}
+            placeholder={placeholder}
+            rows={3}
+            {...register(name, rules)}
+          />
+        );
+
+        
+      case 'select':
+        return (
+          <select
+            id={name}
+            className={`form-control ${errors[name] ? 'is-invalid' : ''}`}
+            {...register(name, rules)}
+          >
+            {options.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        );
+      case 'radio-group':
+        return (
+          <div className="radio-group">
+            {options.map((option) => (
+              <div key={option.value} className="form-check form-check-inline">
+                <input
+                  type="radio"
+                  id={`${name}-${option.value}`}
+                  className="form-check-input"
+                  value={option.value}
+                  defaultChecked={defaultValue === option.value}
+                  {...register(name, rules)}
+                />
+                <label
+                  htmlFor={`${name}-${option.value}`}
+                  className="form-check-label"
+                >
+                  {option.label}
+                </label>
+              </div>
+            ))}
+          </div>
+        );
+      case 'file':
+        return (
+          <div className="custom-file-input">
+          {fieldConfig.note && (
+            <div className="file-upload-note text-muted small mb-2">
+              {fieldConfig.note}
+              </div>
+          )}
+          <input
+            type="file"
+            id={name}
+            onChange={handleFileChange}
+            className={`form-input ${hasError ? "input-error" : ""}`}
+            style={{ display: "none" }}
+            disabled={fieldConfig.isUploading || disabled}
+            accept={fieldConfig.accept}
+          />
+          <label
+            htmlFor={name}
+            className={`file-label ${hasError ? "input-error" : ""} ${fieldConfig.isUploading ? "uploading" : ""}`}
+          >
+            {fieldConfig.isUploading ? "Uploading..." : "Choose File"}
+          </label>
+
+          {getValues(name) && renderFilePreview(getValues(name))}
+
+          {fieldConfig.uploadError && <p className="error-message">{fieldConfig.uploadError}</p>}
+          {hasError && !fieldConfig.uploadError && <p className="error-message">{errors[name]?.message}</p>}
+        </div>
+        );
+      default:
+        return null;
+    }
+  };
+
+  return (
+    <div className={`form-group ${type === 'radio-group' ? 'radio-group-container' : ''}`}>
+      <label htmlFor={name} className="form-label">
+        {label}
+        {tooltip && (
+          <span
+            className="ms-1 tooltip-icon"
+            title={tooltip}
+            data-bs-toggle="tooltip"
+          >
+            <i className="bi bi-info-circle"></i>
+          </span>
+        )}
+      </label>
+      {renderField()}
+      {errors[name] && (
+        <div className="invalid-feedback d-block">
+          {errors[name].message}
+        </div>
+      )}
+    </div>
+  );
 };
 
-export default StepThird;
+export default DynamicField;
