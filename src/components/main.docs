@@ -10,8 +10,13 @@ import { FaPlus, FaTimes, FaDownload } from "react-icons/fa";
 const StepFirst = ({ provideSubmitHandler, formData, onValidationComplete }) => {
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState(null);
+  const [identificationRecords, setIdentificationRecords] = useState([
+    { id: 1, details: "", proof: null }
+  ]);
+
   const methods = useForm({
     mode: "onChange",
+    reValidateMode: "onChange",
     defaultValues: {
       identificationType: "incorporated",
       financialCreditorName: "",
@@ -38,34 +43,40 @@ const StepFirst = ({ provideSubmitHandler, formData, onValidationComplete }) => 
   } = methods;
 
   const watchIdentificationType = watch("identificationType", "incorporated");
-  const identificationDetails = watch("identificationtype_details", []);
-  const [initialLoad, setInitialLoad] = useState(true);
 
-  // Initialize form on first load only
+  // Initialize form data
   useEffect(() => {
-    if (formData && initialLoad) {
-      const cleanData = { ...formData };
-
-      Object.keys(cleanData).forEach(key => {
-        setValue(key, cleanData[key]);
+    if (formData) {
+      // First set all basic values including identificationType
+      Object.keys(formData).forEach((key) => {
+        setValue(key, formData[key]);
       });
 
-      if (!cleanData.identificationtype_details || cleanData.identificationtype_details.length === 0) {
-        setValue("identificationtype_details", [{ id: 1, details: "", proof: null }]);
+      // Then handle identificationtype_details
+      if (formData.identificationtype_details && formData.identificationtype_details.length > 0) {
+        setIdentificationRecords(formData.identificationtype_details);
+        setValue("identificationtype_details", formData.identificationtype_details);
+      } else {
+        // Initialize with default record if none exists
+        initializeIdentificationRecords();
       }
-
-      setInitialLoad(false);
     }
-  }, [formData, setValue, initialLoad]);
+  }, [formData, setValue]);
 
-  // Clear all data when switching between Identification Types
+  // Handle identification type change
   useEffect(() => {
-    if (!initialLoad) {
-      setValue("identificationtype_details", [{ id: 1, details: "", proof: null }]);
+    if (!formData) { // Only reset if we're not initializing from saved data
+      initializeIdentificationRecords();
     }
-  }, [watchIdentificationType, setValue, initialLoad]);
+  }, [watchIdentificationType]);
 
-  // Upload handler
+  const initializeIdentificationRecords = () => {
+    const defaultRecord = { id: 1, details: "", proof: null };
+    const records = watchIdentificationType === "incorporated" ? [defaultRecord] : [defaultRecord];
+    setIdentificationRecords(records);
+    setValue("identificationtype_details", records);
+  };
+
   const handleFileUpload = async (file) => {
     try {
       setIsUploading(true);
@@ -77,92 +88,124 @@ const StepFirst = ({ provideSubmitHandler, formData, onValidationComplete }) => 
         fileType: file.type
       };
     } catch (error) {
-      setUploadError(error.message);
+      setUploadError(error.message || "Upload failed");
       throw error;
     } finally {
       setIsUploading(false);
     }
   };
 
-  // Add new record
   const addIdentificationRecord = () => {
-    const newId = identificationDetails.length > 0
-      ? Math.max(...identificationDetails.map(r => r.id)) + 1
+    const newId = identificationRecords.length > 0
+      ? Math.max(...identificationRecords.map(r => r.id)) + 1
       : 1;
     const newRecord = { id: newId, details: "", proof: null };
-    setValue("identificationtype_details", [...identificationDetails, newRecord]);
+    const updatedRecords = [...identificationRecords, newRecord];
+    setIdentificationRecords(updatedRecords);
+    setValue("identificationtype_details", updatedRecords);
   };
 
-  // Remove record
   const removeIdentificationRecord = (id) => {
-    if (identificationDetails.length > 1) {
-      const updatedRecords = identificationDetails.filter(record => record.id !== id);
+    if (identificationRecords.length > 1) {
+      const updatedRecords = identificationRecords.filter(r => r.id !== id);
+      setIdentificationRecords(updatedRecords);
       setValue("identificationtype_details", updatedRecords);
     }
   };
 
-  // Update details
   const updateRecordDetails = (id, value) => {
-    const updated = identificationDetails.map(rec =>
-      rec.id === id ? { ...rec, details: value } : rec
+    const updatedRecords = identificationRecords.map(record =>
+      record.id === id ? { ...record, details: value } : record
     );
-    setValue("identificationtype_details", updated);
+    setIdentificationRecords(updatedRecords);
+    setValue("identificationtype_details", updatedRecords);
   };
 
-  // Upload proof
   const updateRecordProof = async (e, id) => {
     const file = e.target.files[0];
     if (!file) return;
     try {
       const doc = await handleFileUpload(file);
-      const updated = identificationDetails.map(rec =>
-        rec.id === id ? { ...rec, proof: doc } : rec
+      const updatedRecords = identificationRecords.map(record =>
+        record.id === id ? { ...record, proof: doc } : record
       );
-      setValue("identificationtype_details", updated);
+      setIdentificationRecords(updatedRecords);
+      setValue("identificationtype_details", updatedRecords);
     } catch (err) {
       console.error("Upload failed:", err);
     }
   };
 
-  // Remove proof
   const handleRemoveProof = (id) => {
-    const updated = identificationDetails.map(rec =>
-      rec.id === id ? { ...rec, proof: null } : rec
+    const updatedRecords = identificationRecords.map(record =>
+      record.id === id ? { ...record, proof: null } : record
     );
-    setValue("identificationtype_details", updated);
+    setIdentificationRecords(updatedRecords);
+    setValue("identificationtype_details", updatedRecords);
   };
 
-  // Submit handler
-  const onSubmit = useCallback(async () => {
-    const isValid = await trigger();
-    if (!isValid) return false;
-
-    const values = getValues();
-
-    return {
-      step1: {
-        identificationType: values.identificationType,
-        financialCreditorName: values.financialCreditorName,
-        financialCreditorEmail: values.financialCreditorEmail,
-        addressLine1: values.addressLine1,
-        addressLine2: values.addressLine2,
-        city: values.city,
-        state: values.state,
-        pincode: values.pincode,
-        identificationtype_details: values.identificationtype_details
+  const basicDetailsSchema = [
+    {
+      name: "financialCreditorName",
+      label: <>Name of the financial creditor <span className="required-asterisk">*</span></>,
+      type: "text",
+      rules: { required: "Financial creditor name is required" }
+    },
+    {
+      name: "financialCreditorEmail",
+      label: <>Email address of the financial creditor <span className="required-asterisk">*</span></>,
+      type: "email",
+      rules: {
+        required: "Email is required",
+        pattern: {
+          value: /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i,
+          message: "Invalid email address"
+        }
       }
-    };
-  }, [trigger, getValues]);
+    },
+    {
+      name: "identificationType",
+      label: <>Identification type <span className="required-asterisk">*</span></>,
+      type: "radio",
+      options: [
+        { value: "incorporated", label: "Incorporated body" },
+        { value: "partnership", label: "Partnership or individual" }
+      ],
+      rules: { required: "Select an identification type" }
+    }
+  ];
 
-  // Provide submit handler to parent
-  useEffect(() => {
-    if (provideSubmitHandler) provideSubmitHandler(onSubmit);
-  }, [provideSubmitHandler, onSubmit]);
+  const addressDetailsSchema = [
+    { name: "addressLine1", label: <>Address line 1 <span className="required-asterisk">*</span></>, type: "text", rules: { required: "Address line 1 is required" } },
+    { name: "addressLine2", label: "Address line 2", type: "text" },
+    { name: "city", label: <>City <span className="required-asterisk">*</span></>, type: "text", rules: { required: "City is required" } },
+    { name: "state", label: <>State <span className="required-asterisk">*</span></>, type: "text", rules: { required: "State is required" } },
+    { name: "pincode", label: <>Pincode <span className="required-asterisk">*</span></>, type: "text", rules: { required: "Pincode is required" } }
+  ];
 
-  // Handle validation status
+  const onSubmit = useCallback(async () => {
+    // Manually validate all fields including identificationtype_details
+    const isValid = await trigger();
+    
+    // Additional validation for identificationtype_details
+    const records = getValues("identificationtype_details") || [];
+    const recordsValid = records.every(record => 
+      record.details && record.proof && 
+      (!errors.identificationtype_details || !errors.identificationtype_details[records.indexOf(record)])
+    );
+    
+    if (!isValid || !recordsValid) return false;
+    
+    return getValues();
+  }, [trigger, getValues, errors]);
+
   useEffect(() => {
     if (onValidationComplete) onValidationComplete(isValid);
   }, [isValid, onValidationComplete]);
+
+  useEffect(() => {
+    if (provideSubmitHandler) provideSubmitHandler(onSubmit);
+  }, [provideSubmitHandler, onSubmit]);
 
   return (
     <FormProvider {...methods}>
@@ -171,36 +214,7 @@ const StepFirst = ({ provideSubmitHandler, formData, onValidationComplete }) => 
           <Collapsible title="Basic Details" defaultOpen>
             <div className="container-fluid">
               <div className="row g-3">
-                {/* Basic Fields */}
-                {[
-                  {
-                    name: "financialCreditorName",
-                    label: <>Name of the financial creditor <span className="required-asterisk">*</span></>,
-                    rules: { required: "Name is required" }
-                  },
-                  {
-                    name: "financialCreditorEmail",
-                    label: <>Email address <span className="required-asterisk">*</span></>,
-                    type: "email",
-                    rules: {
-                      required: "Email is required",
-                      pattern: {
-                        value: /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i,
-                        message: "Invalid email"
-                      }
-                    }
-                  },
-                  {
-                    name: "identificationType",
-                    label: <>Identification Type <span className="required-asterisk">*</span></>,
-                    type: "radio",
-                    options: [
-                      { value: "incorporated", label: "Incorporated body" },
-                      { value: "partnership", label: "Partnership or individual" }
-                    ],
-                    rules: { required: "Select an option" }
-                  }
-                ].map((f) => (
+                {basicDetailsSchema.map((f) => (
                   <div key={f.name} className="col-md-6">
                     <DynamicField
                       fieldConfig={f}
@@ -217,15 +231,16 @@ const StepFirst = ({ provideSubmitHandler, formData, onValidationComplete }) => 
 
               <div className="mt-3">
                 <h5>
-                  {watchIdentificationType === "incorporated" ? "Incorporation Details" : "Partnership Records"}
+                  {watchIdentificationType === "incorporated" 
+                    ? "Incorporation Details" 
+                    : "Partnership or Individual Records"}
                 </h5>
-
-                {identificationDetails.map((record, index) => (
+                {identificationRecords.map((record, index) => (
                   <div key={record.id} className="mb-4 p-3 border rounded">
                     {watchIdentificationType === "partnership" && (
                       <div className="d-flex justify-content-between align-items-center mb-3">
                         <h6>Record {index + 1}</h6>
-                        {identificationDetails.length > 1 && (
+                        {identificationRecords.length > 1 && (
                           <button
                             type="button"
                             className="btn btn-sm btn-danger"
@@ -236,14 +251,12 @@ const StepFirst = ({ provideSubmitHandler, formData, onValidationComplete }) => 
                         )}
                       </div>
                     )}
-
                     <div className="row g-3">
                       <div className="col-12">
                         <label>
                           {watchIdentificationType === "incorporated" 
                             ? "Identification Number" 
-                            : "Partner Name / Details"}{" "}
-                          <span className="required-asterisk">*</span>
+                            : "Identification Details"} <span className="required-asterisk">*</span>
                         </label>
                         <input
                           type="text"
@@ -252,8 +265,8 @@ const StepFirst = ({ provideSubmitHandler, formData, onValidationComplete }) => 
                           onChange={(e) => updateRecordDetails(record.id, e.target.value)}
                           placeholder={
                             watchIdentificationType === "incorporated" 
-                              ? "Enter Identification Number" 
-                              : "Enter Partner Details"
+                              ? "Enter Identification number" 
+                              : "Enter identification details"
                           }
                         />
                         {errors.identificationtype_details?.[index]?.details && (
@@ -262,10 +275,11 @@ const StepFirst = ({ provideSubmitHandler, formData, onValidationComplete }) => 
                           </div>
                         )}
                       </div>
-
                       <div className="col-12">
                         <label>
-                          Proof of Identification <span className="required-asterisk">*</span>
+                          {watchIdentificationType === "incorporated" 
+                            ? "Proof of Identification" 
+                            : "Proof of Identification"} <span className="required-asterisk">*</span>
                         </label>
                         {record.proof ? (
                           <div className="d-flex align-items-center mt-2">
@@ -287,7 +301,6 @@ const StepFirst = ({ provideSubmitHandler, formData, onValidationComplete }) => 
                             </button>
                           </div>
                         ) : null}
-
                         <input
                           type="file"
                           id={`proof_${record.id}`}
@@ -298,12 +311,11 @@ const StepFirst = ({ provideSubmitHandler, formData, onValidationComplete }) => 
                         <label htmlFor={`proof_${record.id}`} className="btn btn-outline-primary w-100 mt-2">
                           {isUploading ? (
                             <>
-                              <span className="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
+                              <span className="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
                               Uploading...
                             </>
                           ) : "Choose File"}
                         </label>
-
                         {errors.identificationtype_details?.[index]?.proof && (
                           <div className="invalid-feedback d-block">
                             {errors.identificationtype_details[index].proof.message}
@@ -314,14 +326,13 @@ const StepFirst = ({ provideSubmitHandler, formData, onValidationComplete }) => 
                     </div>
                   </div>
                 ))}
-
                 {watchIdentificationType === "partnership" && (
                   <button
                     type="button"
                     className="btn btn-outline-primary mt-2"
                     onClick={addIdentificationRecord}
                   >
-                    <FaPlus /> Add Another Record
+                    <FaPlus /> Add Another Identification Record
                   </button>
                 )}
               </div>
@@ -332,13 +343,7 @@ const StepFirst = ({ provideSubmitHandler, formData, onValidationComplete }) => 
           <Collapsible title="Address Details" defaultOpen>
             <div className="container-fluid">
               <div className="row g-3">
-                {[
-                  { name: "addressLine1", label: <>Address line 1 <span className="required-asterisk">*</span></>, rules: { required: "Required" } },
-                  { name: "addressLine2", label: "Address line 2" },
-                  { name: "city", label: <>City <span className="required-asterisk">*</span></>, rules: { required: "Required" } },
-                  { name: "state", label: <>State <span className="required-asterisk">*</span></>, rules: { required: "Required" } },
-                  { name: "pincode", label: <>Pincode <span className="required-asterisk">*</span></>, rules: { required: "Required" } }
-                ].map(f => (
+                {addressDetailsSchema.map((f) => (
                   <div key={f.name} className="col-md-6">
                     <DynamicField
                       fieldConfig={f}
