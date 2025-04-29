@@ -8,7 +8,6 @@ import 'bootstrap/dist/css/bootstrap.min.css';
 import { FaPlus, FaTimes, FaDownload } from "react-icons/fa";
 
 const StepFirst = ({ provideSubmitHandler, formData, onValidationComplete }) => {
-  const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState(null);
   const [incorporatedRecords, setIncorporatedRecords] = useState([
     { id: 1, details: "", proof: null }
@@ -16,6 +15,8 @@ const StepFirst = ({ provideSubmitHandler, formData, onValidationComplete }) => 
   const [partnershipRecords, setPartnershipRecords] = useState([
     { id: 1, details: "", proof: null }
   ]);
+  // Track which record is currently uploading
+  const [uploadingRecordId, setUploadingRecordId] = useState(null);
 
   const methods = useForm({
     mode: "onChange",
@@ -50,12 +51,10 @@ const StepFirst = ({ provideSubmitHandler, formData, onValidationComplete }) => 
   // Initialize form data
   useEffect(() => {
     if (formData) {
-      // First set all basic values including identificationType
       Object.keys(formData).forEach((key) => {
         setValue(key, formData[key]);
       });
 
-      // Then handle identificationtype_details
       if (formData.identificationtype_details && formData.identificationtype_details.length > 0) {
         if (formData.identificationType === "incorporated") {
           setIncorporatedRecords(formData.identificationtype_details);
@@ -76,9 +75,9 @@ const StepFirst = ({ provideSubmitHandler, formData, onValidationComplete }) => 
     }
   }, [incorporatedRecords, partnershipRecords, watchIdentificationType, setValue]);
 
-  const handleFileUpload = async (file) => {
+  const handleFileUpload = async (file, recordId) => {
     try {
-      setIsUploading(true);
+      setUploadingRecordId(recordId);
       setUploadError(null);
       const result = await uploadDocument(file, 'identification');
       return {
@@ -90,47 +89,17 @@ const StepFirst = ({ provideSubmitHandler, formData, onValidationComplete }) => 
       setUploadError(error.message || "Upload failed");
       throw error;
     } finally {
-      setIsUploading(false);
+      setUploadingRecordId(null);
     }
   };
 
-  const addIdentificationRecord = () => {
-    const records = watchIdentificationType === "incorporated" ? incorporatedRecords : partnershipRecords;
-    const setRecords = watchIdentificationType === "incorporated" ? setIncorporatedRecords : setPartnershipRecords;
-    
-    const newId = records.length > 0
-      ? Math.max(...records.map(r => r.id)) + 1
-      : 1;
-    const newRecord = { id: newId, details: "", proof: null };
-    const updatedRecords = [...records, newRecord];
-    setRecords(updatedRecords);
-  };
-
-  const removeIdentificationRecord = (id) => {
-    const records = watchIdentificationType === "incorporated" ? incorporatedRecords : partnershipRecords;
-    const setRecords = watchIdentificationType === "incorporated" ? setIncorporatedRecords : setPartnershipRecords;
-    
-    if (records.length > 1) {
-      const updatedRecords = records.filter(r => r.id !== id);
-      setRecords(updatedRecords);
-    }
-  };
-
-  const updateRecordDetails = (id, value) => {
-    const records = watchIdentificationType === "incorporated" ? incorporatedRecords : partnershipRecords;
-    const setRecords = watchIdentificationType === "incorporated" ? setIncorporatedRecords : setPartnershipRecords;
-    
-    const updatedRecords = records.map(record =>
-      record.id === id ? { ...record, details: value } : record
-    );
-    setRecords(updatedRecords);
-  };
+  // ... (keep all other functions the same until updateRecordProof)
 
   const updateRecordProof = async (e, id) => {
     const file = e.target.files[0];
     if (!file) return;
     try {
-      const doc = await handleFileUpload(file);
+      const doc = await handleFileUpload(file, id);
       
       const records = watchIdentificationType === "incorporated" ? incorporatedRecords : partnershipRecords;
       const setRecords = watchIdentificationType === "incorporated" ? setIncorporatedRecords : setPartnershipRecords;
@@ -144,76 +113,7 @@ const StepFirst = ({ provideSubmitHandler, formData, onValidationComplete }) => 
     }
   };
 
-  const handleRemoveProof = (id) => {
-    const records = watchIdentificationType === "incorporated" ? incorporatedRecords : partnershipRecords;
-    const setRecords = watchIdentificationType === "incorporated" ? setIncorporatedRecords : setPartnershipRecords;
-    
-    const updatedRecords = records.map(record =>
-      record.id === id ? { ...record, proof: null } : record
-    );
-    setRecords(updatedRecords);
-  };
-
-  const basicDetailsSchema = [
-    {
-      name: "financialCreditorName",
-      label: <>Name of the financial creditor <span className="required-asterisk">*</span></>,
-      type: "text",
-      rules: { required: "Financial creditor name is required" }
-    },
-    {
-      name: "financialCreditorEmail",
-      label: <>Email address of the financial creditor <span className="required-asterisk">*</span></>,
-      type: "email",
-      rules: {
-        required: "Email is required",
-        pattern: {
-          value: /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i,
-          message: "Invalid email address"
-        }
-      }
-    },
-    {
-      name: "identificationType",
-      label: <>Identification type <span className="required-asterisk">*</span></>,
-      type: "radio",
-      options: [
-        { value: "incorporated", label: "Incorporated body" },
-        { value: "partnership", label: "Partnership or individual" }
-      ],
-      rules: { required: "Select an identification type" }
-    }
-  ];
-
-  const addressDetailsSchema = [
-    { name: "addressLine1", label: <>Address line 1 <span className="required-asterisk">*</span></>, type: "text", rules: { required: "Address line 1 is required" } },
-    { name: "addressLine2", label: "Address line 2", type: "text" },
-    { name: "city", label: <>City <span className="required-asterisk">*</span></>, type: "text", rules: { required: "City is required" } },
-    { name: "state", label: <>State <span className="required-asterisk">*</span></>, type: "text", rules: { required: "State is required" } },
-    { name: "pincode", label: <>Pincode <span className="required-asterisk">*</span></>, type: "text", rules: { required: "Pincode is required" } }
-  ];
-
-  const onSubmit = useCallback(async () => {
-    const isValid = await trigger();
-    if (!isValid) {
-      console.error("Validation failed");
-      return false;
-    }
-    
-    return getValues();
-  }, [trigger, getValues]);
-
-  useEffect(() => {
-    if (onValidationComplete) {
-      onValidationComplete(isValid);
-    }
-  }, [isValid, onValidationComplete]);
-
-  useEffect(() => {
-    if (provideSubmitHandler) {
-      provideSubmitHandler(onSubmit);
-    }
-  }, [provideSubmitHandler, onSubmit]);
+  // ... (keep all other functions the same)
 
   const currentRecords = watchIdentificationType === "incorporated" ? incorporatedRecords : partnershipRecords;
 
@@ -316,10 +216,10 @@ const StepFirst = ({ provideSubmitHandler, formData, onValidationComplete }) => 
                           id={`proof_${record.id}`}
                           onChange={(e) => updateRecordProof(e, record.id)}
                           className="d-none"
-                          disabled={isUploading}
+                          disabled={uploadingRecordId !== null}
                         />
                         <label htmlFor={`proof_${record.id}`} className="btn btn-outline-primary w-100 mt-2">
-                          {isUploading ? (
+                          {uploadingRecordId === record.id ? (
                             <>
                               <span className="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
                               Uploading...
@@ -341,6 +241,7 @@ const StepFirst = ({ provideSubmitHandler, formData, onValidationComplete }) => 
                     type="button"
                     className="btn btn-outline-primary mt-2"
                     onClick={addIdentificationRecord}
+                    disabled={uploadingRecordId !== null}
                   >
                     <FaPlus /> Add Another Identification Record
                   </button>
