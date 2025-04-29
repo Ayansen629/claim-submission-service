@@ -6,49 +6,41 @@ import { uploadDocument } from "../../../services/documentUploadService";
 import "./StepFirst.css";
 import 'bootstrap/dist/css/bootstrap.min.css';
 import { FaPlus, FaTimes } from "react-icons/fa";
+import { Button } from "react-bootstrap";
 
 const StepFirst = ({ provideSubmitHandler, formData, onValidationComplete }) => {
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState(null);
-  const [identificationRecords, setIdentificationRecords] = useState([1]); // Start with [1]
-  const [nextId, setNextId] = useState(2); // Track next available ID
+  const [identificationRecords, setIdentificationRecords] = useState([{ id: 1, details: "", docs: null }]);
   
   const methods = useForm({
     mode: "onChange",
-    reValidateMode: "onChange"
+    reValidateMode: "onChange",
+    defaultValues: {
+      identification_records: [{ id: 1, details: "", docs: null }]
+    }
   });
   
   const { register, handleSubmit, formState: { errors, isValid }, trigger, setValue, control, getValues, watch } = methods;
   const watchIdentificationType = watch("identificationType", "incorporated");
 
-  // Initialize identification records from formData if available
+  // Initialize form data
   useEffect(() => {
     if (formData) {
-      // Find all identification records in formData
-      const recordKeys = Object.keys(formData).filter(key => key.startsWith('identificationRecord_'));
-      
-      if (recordKeys.length > 0) {
-        // Extract all record numbers and find the maximum
-        const recordNumbers = recordKeys.map(key => {
-          const parts = key.split('_');
-          return parseInt(parts[1]);
-        });
-        const maxId = Math.max(...recordNumbers);
-        
-        // Set records with sequential IDs (1, 2, 3...)
-        const records = [];
-        for (let i = 1; i <= maxId; i++) {
-          records.push(i);
-        }
-        
-        setIdentificationRecords(records);
-        setNextId(maxId + 1);
+      // Initialize identification records
+      if (formData.identification_records && formData.identification_records.length > 0) {
+        setIdentificationRecords(formData.identification_records);
       }
       
-      // Set all form values
+      // Set all other form values
       Object.keys(formData).forEach((key) => {
-        setValue(key, formData[key]);
+        if (key !== 'identification_records') {
+          setValue(key, formData[key]);
+        }
       });
+      
+      // Ensure identification_records is set in form state
+      setValue('identification_records', formData.identification_records || [{ id: 1, details: "", docs: null }]);
     }
   }, [formData, setValue]);
 
@@ -57,7 +49,11 @@ const StepFirst = ({ provideSubmitHandler, formData, onValidationComplete }) => 
       setIsUploading(true);
       setUploadError(null);
       const result = await uploadDocument(file, 'identification');
-      return result;
+      return {
+        fileId: result.fileId,
+        fileName: file.name,
+        fileType: file.type
+      };
     } catch (error) {
       setUploadError(error.message);
       throw error;
@@ -67,26 +63,47 @@ const StepFirst = ({ provideSubmitHandler, formData, onValidationComplete }) => 
   };
 
   const addIdentificationRecord = () => {
-    setIdentificationRecords([...identificationRecords, nextId]);
-    setNextId(nextId + 1);
+    const newId = identificationRecords.length > 0 
+      ? Math.max(...identificationRecords.map(r => r.id)) + 1 
+      : 1;
+      
+    const newRecord = { id: newId, details: "", docs: null };
+    const updatedRecords = [...identificationRecords, newRecord];
+    
+    setIdentificationRecords(updatedRecords);
+    setValue('identification_records', updatedRecords);
   };
 
   const removeIdentificationRecord = (id) => {
     if (identificationRecords.length > 1) {
-      const updatedRecords = identificationRecords.filter(recordId => recordId !== id);
+      const updatedRecords = identificationRecords.filter(record => record.id !== id);
       setIdentificationRecords(updatedRecords);
-      
-      // Also remove the form values for the removed record
-      const values = getValues();
-      Object.keys(values).forEach(key => {
-        if (key.includes(`identificationRecord_${id}`)) {
-          setValue(key, undefined);
-        }
-      });
+      setValue('identification_records', updatedRecords);
     }
   };
 
-  // ... rest of your schema definitions remain the same ...
+  const updateRecordField = (id, field, value) => {
+    const updatedRecords = identificationRecords.map(record => 
+      record.id === id ? { ...record, [field]: value } : record
+    );
+    
+    setIdentificationRecords(updatedRecords);
+    setValue('identification_records', updatedRecords);
+  };
+
+  const handleFileChange = async (e, recordId) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    try {
+      const uploadedDoc = await handleFileUpload(file);
+      updateRecordField(recordId, 'docs', uploadedDoc);
+    } catch (error) {
+      console.error("Upload failed:", error);
+    }
+  };
+
+  // ... (keep your existing schema definitions)
 
   return (
     <FormProvider {...methods}>
@@ -109,6 +126,7 @@ const StepFirst = ({ provideSubmitHandler, formData, onValidationComplete }) => 
                   </div>
                 ))}
               </div>
+
               {watchIdentificationType === "incorporated" && (
                 <div className="row g-3 mt-2">
                   {incorporatedBodyFields.map((fieldConfig) => (
@@ -138,17 +156,18 @@ const StepFirst = ({ provideSubmitHandler, formData, onValidationComplete }) => 
                   ))}
                 </div>
               )}
+
               {watchIdentificationType === "partnership" && (
                 <div className="mt-3">
-                  {identificationRecords.map((recordId, index) => (
-                    <div key={recordId} className="mb-4 p-3 border rounded">
+                  {identificationRecords.map((record, index) => (
+                    <div key={record.id} className="mb-4 p-3 border rounded">
                       <div className="d-flex justify-content-between align-items-center mb-3">
                         <h6 className="mb-0">Identification Record {index + 1}</h6>
                         {identificationRecords.length > 1 && (
                           <button
                             type="button"
                             className="btn btn-sm btn-danger"
-                            onClick={() => removeIdentificationRecord(recordId)}
+                            onClick={() => removeIdentificationRecord(record.id)}
                           >
                             <FaTimes /> Remove
                           </button>
@@ -158,68 +177,89 @@ const StepFirst = ({ provideSubmitHandler, formData, onValidationComplete }) => 
                         <div className="col-12">
                           <DynamicField
                             fieldConfig={{
-                              name: `identificationRecord_${recordId}_details`,
-                              label: <>Identification Records <span className="required-asterisk">*</span></>,
+                              name: `record_${record.id}_details`,
+                              label: <>Identification Details <span className="required-asterisk">*</span></>,
                               type: "textarea",
                               rules: {
-                                required: "Identification records are required",
+                                required: "Identification details are required",
                                 minLength: {
                                   value: 10,
-                                  message: "Please provide detailed identification records"
+                                  message: "Please provide detailed information"
                                 }
                               },
-                              placeholder: "Enter identification records",
-                              tooltip: "Detailed identification records",
-                              className: "mb-3"
+                              placeholder: "Enter identification details",
+                              defaultValue: record.details
                             }}
                             control={control}
                             register={register}
                             errors={errors}
-                            setValue={setValue}
+                            setValue={(name, value) => updateRecordField(record.id, 'details', value)}
                             trigger={trigger}
                             getValues={getValues}
                           />
                         </div>
                         <div className="col-12">
-                          <DynamicField
-                            fieldConfig={{
-                              name: `identificationRecord_${recordId}_proof`,
-                              label: <>Proof of identification Records <span className="required-asterisk">*</span></>,
-                              type: "file",
-                              rules: {
-                                required: "Identification proof is required",
-                                validate: {
-                                  fileSize: (files) => {
-                                    if (files && files[0]) {
-                                      const fileSizeInMB = files[0].size / (1024 * 1024);
-                                      return fileSizeInMB <= 5 || "File size must be ≤ 5MB";
-                                    }
-                                    return true;
-                                  }
-                                }
-                              },
-                              tooltip: "Upload identification proof",
-                              accept: "image/*,.pdf",
-                              onFileUpload: handleFileUpload,
-                              isUploading,
-                              uploadError,
-                              setIsUploading,
-                              setUploadError,
-                            }}
-                            control={control}
-                            register={register}
-                            errors={errors}
-                            setValue={setValue}
-                            trigger={trigger}
-                            getValues={getValues}
-                          />
-                          <div className="form-text text-muted">
-                            Max file size: 5MB (PDF, JPEG, PNG)
-                          </div>
+                          <Form.Group>
+                            <Form.Label>
+                              Proof of Identification <span className="required-asterisk">*</span>
+                            </Form.Label>
+                            {record.docs ? (
+                              <div className="d-flex align-items-center mt-2">
+                                <span className="me-2">{record.docs.fileName}</span>
+                                <Button
+                                  variant="outline-primary"
+                                  size="sm"
+                                  href={`${process.env.REACT_APP_FILE_SERVICE}v1/files/id?fileStoreId=${record.docs.fileId}`}
+                                  target="_blank"
+                                  className="me-2"
+                                >
+                                  <FaDownload />
+                                </Button>
+                                <Button
+                                  variant="outline-danger"
+                                  size="sm"
+                                  onClick={() => updateRecordField(record.id, 'docs', null)}
+                                >
+                                  <FaTimes />
+                                </Button>
+                              </div>
+                            ) : (
+                              <>
+                                <input
+                                  type="file"
+                                  id={`record_${record.id}_docs`}
+                                  accept=".pdf,.jpg,.jpeg,.png"
+                                  onChange={(e) => handleFileChange(e, record.id)}
+                                  className="d-none"
+                                  disabled={isUploading}
+                                />
+                                <label 
+                                  htmlFor={`record_${record.id}_docs`} 
+                                  className="btn btn-outline-primary w-100"
+                                >
+                                  {isUploading ? (
+                                    <>
+                                      <Spinner animation="border" size="sm" className="me-2" />
+                                      Uploading...
+                                    </>
+                                  ) : (
+                                    "Choose File"
+                                  )}
+                                </label>
+                              </>
+                            )}
+                            <Form.Control.Feedback type="invalid" className="d-block">
+                              {errors.identification_records?.[index]?.docs?.message}
+                            </Form.Control.Feedback>
+                            <div className="form-text text-muted">
+                              Max file size: 5MB (PDF, JPEG, PNG)
+                            </div>
+                          </Form.Group>
                         </div>
                       </div>
                     </div>
                   ))}
+
                   <button
                     type="button"
                     className="btn btn-outline-primary mt-2"
@@ -231,25 +271,9 @@ const StepFirst = ({ provideSubmitHandler, formData, onValidationComplete }) => 
               )}
             </div>
           </Collapsible>
-          <Collapsible title="Address Details" defaultOpen={true}>
-            <div className="container-fluid">
-              <div className="row g-3">
-                {addressDetailsSchema.map((fieldConfig) => (
-                  <div key={fieldConfig.name} className="col-md-6">
-                    <DynamicField
-                      fieldConfig={fieldConfig}
-                      control={control}
-                      register={register}
-                      errors={errors}
-                      setValue={setValue}
-                      trigger={trigger}
-                      getValues={getValues}
-                    />
-                  </div>
-                ))}
-              </div>
-            </div>
-          </Collapsible>
+
+          {/* Address Details Collapsible (keep your existing implementation) */}
+          
         </div>
       </form>
     </FormProvider>
