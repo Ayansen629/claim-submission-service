@@ -2,10 +2,23 @@ import React, { useCallback, useEffect, useState } from "react";
 import { useForm, FormProvider } from "react-hook-form";
 import DynamicField from "./formCommon/DynamicField";
 import Collapsible from "./formCommon/Collapsible";
-import { uploadDocument } from "../../../services/documentUploadService"; // Import your upload service
-import "./StepFirst.css"; // Import your CSS file
+import "./StepFirst.css";
 import 'bootstrap/dist/css/bootstrap.min.css';
 import { FaPlus, FaTimes, FaDownload } from "react-icons/fa";
+
+// Mock upload function - Replace with actual API call
+const uploadDocument = async (file) => {
+  // Simulate a real upload
+  return new Promise((resolve) => {
+    setTimeout(() => {
+      resolve({
+        fileId: Math.random().toString(36).substr(2, 9),
+        fileName: file.name,
+        fileType: file.type
+      });
+    }, 500);
+  });
+};
 
 const StepFirst = ({ provideSubmitHandler, formData, onValidationComplete }) => {
   const [isUploading, setIsUploading] = useState(false);
@@ -16,10 +29,18 @@ const StepFirst = ({ provideSubmitHandler, formData, onValidationComplete }) => 
 
   const methods = useForm({
     mode: "onChange",
-    reValidateMode: "onChange",
     defaultValues: {
-      identification_records: [{ id: 1, details: "", proof: null }],
-      identificationType: "incorporated" // Set default to incorporated
+      identificationType: "incorporated",
+      financialCreditorName: "",
+      financialCreditorEmail: "",
+      incorporatedIdentificationNumber: "",
+      incorporatedProofDocument: null,
+      addressLine1: "",
+      addressLine2: "",
+      city: "",
+      state: "",
+      pincode: "",
+      identification_records: [{ id: 1, details: "", proof: null }]
     }
   });
 
@@ -31,119 +52,85 @@ const StepFirst = ({ provideSubmitHandler, formData, onValidationComplete }) => 
     setValue,
     control,
     getValues,
-    watch,
-    resetField
+    watch
   } = methods;
-  const watchIdentificationType = watch("identificationType");
+
+  const watchIdentificationType = watch("identificationType", "incorporated");
 
   // Initialize form data
   useEffect(() => {
     if (formData) {
-      // Set identification type
-      if (formData.identificationType) {
-        setValue("identificationType", formData.identificationType);
-      }
-      // Set identification records if they exist and type is partnership
-      if (
-        formData.identification_records &&
-        formData.identification_records.length > 0 &&
-        formData.identificationType === "partnership"
-      ) {
+      Object.keys(formData).forEach(key => {
+        if (key !== "identification_records") {
+          setValue(key, formData[key]);
+        }
+      });
+
+      if (formData.identification_records && formData.identification_records.length > 0) {
         setIdentificationRecords(formData.identification_records);
         setValue("identification_records", formData.identification_records);
-      } else if (formData.identificationType === "incorporated") {
-        // Clean up identification records if switching to incorporated
-        setIdentificationRecords([{ id: 1, details: "", proof: null }]);
-        setValue("identification_records", [{ id: 1, details: "", proof: null }]);
       }
-
-      // Clean up any old record_X_details fields from formData
-      const cleanFormData = { ...formData };
-      Object.keys(cleanFormData).forEach((key) => {
-        if (key.startsWith("record_") && key.endsWith("_details")) {
-          delete cleanFormData[key];
-        }
-      });
-
-      // Set all other form values
-      Object.keys(cleanFormData).forEach((key) => {
-        if (key !== "identification_records" && key !== "identificationType") {
-          setValue(key, cleanFormData[key]);
-        }
-      });
     }
   }, [formData, setValue]);
 
-  // Clear partnership data when identification type changes
+  // Clear partnership data when switching to incorporated
   useEffect(() => {
     if (watchIdentificationType === "incorporated") {
       setIdentificationRecords([{ id: 1, details: "", proof: null }]);
       setValue("identification_records", [{ id: 1, details: "", proof: null }]);
-      // Clear dynamic record details and proofs
-      identificationRecords.forEach(record => {
-        resetField(`record_${record.id}_details`);
-      });
-      setIdentificationRecords([{id: 1, details: "", proof: null}]);
-
     }
-  }, [watchIdentificationType, setValue, resetField, identificationRecords]);
+  }, [watchIdentificationType, setValue]);
 
-  const handleFileUpload = async (file) => {
+  const handleFileChange = async (field, e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
     try {
       setIsUploading(true);
       setUploadError(null);
-      const result = await uploadDocument(file, "identification"); // Use your upload service
-      return {
-        fileId: result.fileId,
-        fileName: file.name,
-        fileType: file.type,
-      };
+      const result = await uploadDocument(file);
+      field.onChange(result);
     } catch (error) {
-      setUploadError(error.message);
-      throw error;
+      setUploadError(error.message || "Upload failed");
     } finally {
       setIsUploading(false);
     }
   };
 
-  const addIdentificationRecord = () => {
-    const newId =
-      identificationRecords.length > 0
-        ? Math.max(...identificationRecords.map((r) => r.id)) + 1
-        : 1;
+  const handleRemoveIncorporatedProof = (field) => {
+    field.onChange(null);
+  };
 
+  const addIdentificationRecord = () => {
+    const newId = identificationRecords.length > 0
+      ? Math.max(...identificationRecords.map(r => r.id)) + 1
+      : 1;
     const newRecord = { id: newId, details: "", proof: null };
     const updatedRecords = [...identificationRecords, newRecord];
-
     setIdentificationRecords(updatedRecords);
     setValue("identification_records", updatedRecords);
   };
 
   const removeIdentificationRecord = (id) => {
     if (identificationRecords.length > 1) {
-      const updatedRecords = identificationRecords.filter((record) => record.id !== id);
+      const updatedRecords = identificationRecords.filter(record => record.id !== id);
       setIdentificationRecords(updatedRecords);
       setValue("identification_records", updatedRecords);
-
-      // Also remove any associated record_X_details fields
-      setValue(`record_${id}_details`, undefined);
     }
   };
 
   const updateRecordDetails = (id, value) => {
-    const updatedRecords = identificationRecords.map((record) =>
+    const updatedRecords = identificationRecords.map(record =>
       record.id === id ? { ...record, details: value } : record
     );
-
     setIdentificationRecords(updatedRecords);
     setValue("identification_records", updatedRecords);
   };
 
   const updateRecordProof = (id, proof) => {
-    const updatedRecords = identificationRecords.map((record) =>
+    const updatedRecords = identificationRecords.map(record =>
       record.id === id ? { ...record, proof } : record
     );
-
     setIdentificationRecords(updatedRecords);
     setValue("identification_records", updatedRecords);
   };
@@ -157,10 +144,13 @@ const StepFirst = ({ provideSubmitHandler, formData, onValidationComplete }) => 
     if (!file) return;
 
     try {
-      const uploadedDoc = await handleFileUpload(file);
-      updateRecordProof(id, uploadedDoc);
-    } catch (error) {
-      console.error("Upload failed:", error);
+      setIsUploading(true);
+      const result = await uploadDocument(file);
+      updateRecordProof(id, result);
+    } catch (err) {
+      setUploadError(err.message || "Failed to upload file");
+    } finally {
+      setIsUploading(false);
     }
   };
 
@@ -168,234 +158,138 @@ const StepFirst = ({ provideSubmitHandler, formData, onValidationComplete }) => 
     updateRecordProof(id, null);
   };
 
+  const downloadFile = (fileId) => {
+    alert(`Download file with ID: ${fileId}`);
+  };
+
   const basicDetailsSchema = [
     {
       name: "financialCreditorName",
-      label: (
-        <>
-          Name of the financial creditor <span className="required-asterisk">*</span>
-        </>
-      ),
+      label: <>Name of the financial creditor <span className="required-asterisk">*</span></>,
       type: "text",
       rules: {
-        required: "Financial creditor name is required",
-        minLength: {
-          value: 2,
-          message: "Name must be at least 2 characters",
-        },
-      },
-      placeholder: "Enter financial creditor name",
-      tooltip: "Legal name of the financial creditor",
+        required: "Financial creditor name is required"
+      }
     },
     {
       name: "financialCreditorEmail",
-      label: (
-        <>
-          Email address of the financial creditor{" "}
-          <span className="required-asterisk">*</span>
-        </>
-      ),
+      label: <>Email address of the financial creditor <span className="required-asterisk">*</span></>,
       type: "email",
       rules: {
         required: "Email is required",
         pattern: {
           value: /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i,
-          message: "Invalid email address",
-        },
-      },
-      placeholder: "Enter email address",
-      tooltip: "Official email address of the financial creditor",
+          message: "Invalid email address"
+        }
+      }
     },
     {
       name: "identificationType",
-      label: (
-        <>
-          Identification type <span className="required-asterisk">*</span>
-        </>
-      ),
+      label: <>Identification type <span className="required-asterisk">*</span></>,
       type: "radio",
       options: [
         { value: "incorporated", label: "Incorporated body" },
-        { value: "partnership", label: "Partnership or individual" },
+        { value: "partnership", label: "Partnership or individual" }
       ],
-      rules: { required: "Identification type is required" },
-      defaultValue: "incorporated",
-      className: "mb-4",
-    },
+      rules: { required: "Select an identification type" },
+      defaultValue: "incorporated"
+    }
   ];
 
   const incorporatedBodyFields = [
     {
       name: "incorporatedIdentificationNumber",
-      label: (
-        <>
-          Identification Number of the financial creditor{" "}
-          <span className="required-asterisk">*</span>
-        </>
-      ),
+      label: <>Identification Number of the financial creditor <span className="required-asterisk">*</span></>,
       type: "text",
       rules: {
-        required: watchIdentificationType === "incorporated" && "Identification number is required",
-        pattern: {
-          value: /^[A-Z0-9]{8,15}$/,
-          message: "Invalid identification number",
-        },
-      },
-      placeholder: "Enter identification number",
-      tooltip: "Corporate identification number or similar",
+        required: watchIdentificationType === "incorporated" && "Identification number is required"
+      }
     },
     {
       name: "incorporatedProofDocument",
-      label: (
-        <>
-          Proof of identification <span className="required-asterisk">*</span>
-        </>
-      ),
+      label: <>Proof of identification <span className="required-asterisk">*</span></>,
       type: "file",
       rules: {
         required: watchIdentificationType === "incorporated" && "Proof document is required",
         validate: {
-          fileSize: (files) => {
-            if (files && files[0]) {
-              const fileSizeInMB = files[0].size / (1024 * 1024);
-              return fileSizeInMB <= 5 || "File size must be ≤ 5MB";
+          fileSize: (file) => {
+            if (file?.size) {
+              const sizeMB = file.size / (1024 * 1024);
+              return sizeMB <= 5 || "Max file size is 5MB";
             }
             return true;
-          },
-        },
+          }
+        }
       },
-      tooltip: "Upload certificate of incorporation or similar",
-      accept: "image/*,.pdf",
-      onFileUpload: handleFileUpload,
-      isUploading,
-      uploadError,
-    },
-  ];
-
-  const addressDetailsSchema = [
-    {
-      name: "addressLine1",
-      label: (
+      customComponent: ({ field }) => (
         <>
-          Address line 1 <span className="required-asterisk">*</span>
+          {!field.value ? (
+            <input
+              type="file"
+              accept=".pdf,.jpg,.jpeg,.png"
+              onChange={(e) => handleFileChange(field, e)}
+              disabled={isUploading}
+              className="d-none"
+              id="incorporatedProofDocumentInput"
+            />
+          ) : (
+            <div className="d-flex align-items-center mt-2">
+              <span className="me-2">{field.value.fileName}</span>
+              <button
+                type="button"
+                onClick={() => downloadFile(field.value.fileId)}
+                className="btn btn-sm btn-outline-primary me-2"
+              >
+                <FaDownload /> Download
+              </button>
+              <button
+                type="button"
+                className="btn btn-sm btn-outline-danger"
+                onClick={() => handleRemoveIncorporatedProof(field)}
+              >
+                <FaTimes /> Remove
+              </button>
+            </div>
+          )}
+          <label htmlFor="incorporatedProofDocumentInput" className="btn btn-outline-primary w-100 mt-2">
+            {isUploading ? (
+              <>
+                <span className="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
+                Uploading...
+              </>
+            ) : "Choose File"}
+          </label>
         </>
-      ),
-      type: "text",
-      rules: {
-        required: "Address line 1 is required",
-        minLength: {
-          value: 5,
-          message: "Address must be at least 5 characters",
-        },
-      },
-      placeholder: "Enter address line 1",
-      tooltip: "Street address, P.O. box, company name",
-    },
-    {
-      name: "addressLine2",
-      label: "Address line 2",
-      type: "text",
-      placeholder: "Enter address line 2",
-      tooltip: "Apartment, suite, unit, building, floor, etc.",
-    },
-    {
-      name: "city",
-      label: (
-        <>
-          City <span className="required-asterisk">*</span>
-        </>
-      ),
-      type: "text",
-      rules: {
-        required: "City is required",
-        minLength: {
-          value: 2,
-          message: "City name must be at least 2 characters",
-        },
-      },
-      placeholder: "Enter city",
-      tooltip: "City or locality",
-    },
-    {
-      name: "state",
-      label: (
-        <>
-          State <span className="required-asterisk">*</span>
-        </>
-      ),
-      type: "text",
-      rules: {
-        required: "State is required",
-        minLength: {
-          value: 2,
-          message: "State name must be at least 2 characters",
-        },
-      },
-      placeholder: "Enter state",
-      tooltip: "State or province",
-    },
-    {
-      name: "pincode",
-      label: (
-        <>
-          Pincode <span className="required-asterisk">*</span>
-        </>
-      ),
-      type: "text",
-      rules: {
-        required: "Pincode is required",
-        pattern: {
-          value: /^[1-9][0-9]{5}$/,
-          message: "Invalid Indian pincode",
-        },
-      },
-      placeholder: "Enter 6-digit pincode",
-      tooltip: "Postal code or ZIP code",
-    },
+      )
+    }
   ];
 
   const onSubmit = useCallback(async () => {
     const isValid = await trigger();
-    if (!isValid) {
-      console.error("Validation failed");
-      return false;
-    }
-
-    // Get form values and clean up any record_X_details fields
-    const formValues = getValues();
-    const cleanValues = { ...formValues };
-    Object.keys(cleanValues).forEach((key) => {
-      if (key.startsWith("record_") && key.endsWith("_details")) {
-        delete cleanValues[key];
-      }
-    });
-
-    return cleanValues;
+    if (!isValid) return false;
+    return getValues();
   }, [trigger, getValues]);
 
   useEffect(() => {
-    if (onValidationComplete) {
-      onValidationComplete(isValid);
-    }
+    if (onValidationComplete) onValidationComplete(isValid);
   }, [isValid, onValidationComplete]);
 
   useEffect(() => {
-    if (provideSubmitHandler) {
-      provideSubmitHandler(onSubmit);
-    }
+    if (provideSubmitHandler) provideSubmitHandler(onSubmit);
   }, [provideSubmitHandler, onSubmit]);
 
   return (
     <FormProvider {...methods}>
       <form className="form-stepper">
         <div className="mb-4 bg-light p-4 rounded-3">
-          <Collapsible title="Basic Details" defaultOpen={true}>
+          <Collapsible title="Basic Details" defaultOpen>
+            {/* Basic Fields */}
             <div className="container-fluid">
               <div className="row g-3">
-                {basicDetailsSchema.map((fieldConfig) => (
-                  <div key={fieldConfig.name} className="col-md-6">
+                {basicDetailsSchema.map((f) => (
+                  <div key={f.name} className="col-md-6">
                     <DynamicField
-                      fieldConfig={fieldConfig}
+                      fieldConfig={f}
                       control={control}
                       register={register}
                       errors={errors}
@@ -406,18 +300,18 @@ const StepFirst = ({ provideSubmitHandler, formData, onValidationComplete }) => 
                   </div>
                 ))}
               </div>
+
               {watchIdentificationType === "incorporated" && (
-                <div className="row g-3 mt-2">
-                  {incorporatedBodyFields.map((fieldConfig) => (
-                    <div key={fieldConfig.name} className="col-md-6">
+                <div className="row g-3 mt-3">
+                  {incorporatedBodyFields.map((f) => (
+                    <div key={f.name} className="col-md-6">
                       <DynamicField
                         fieldConfig={{
-                          ...fieldConfig,
+                          ...f,
                           isUploading,
                           uploadError,
                           setIsUploading,
-                          setUploadError,
-                          onFileUpload: handleFileUpload,
+                          setUploadError
                         }}
                         control={control}
                         register={register}
@@ -426,21 +320,17 @@ const StepFirst = ({ provideSubmitHandler, formData, onValidationComplete }) => 
                         trigger={trigger}
                         getValues={getValues}
                       />
-                      {fieldConfig.name === "incorporatedProofDocument" && (
-                        <div className="form-text text-muted">
-                          Max file size: 5MB (PDF, JPEG, PNG)
-                        </div>
-                      )}
                     </div>
                   ))}
                 </div>
               )}
+
               {watchIdentificationType === "partnership" && (
                 <div className="mt-3">
                   {identificationRecords.map((record, index) => (
                     <div key={record.id} className="mb-4 p-3 border rounded">
                       <div className="d-flex justify-content-between align-items-center mb-3">
-                        <h6 className="mb-0">Identification Record {index + 1}</h6>
+                        <h6>Identification Record {index + 1}</h6>
                         {identificationRecords.length > 1 && (
                           <button
                             type="button"
@@ -453,112 +343,64 @@ const StepFirst = ({ provideSubmitHandler, formData, onValidationComplete }) => 
                       </div>
                       <div className="row g-3">
                         <div className="col-12">
-                          <div className="form-group">
-                            <label>
-                              Identification Details{" "}
-                              <span className="required-asterisk">*</span>
-                            </label>
-                            <textarea
-                              className={`form-control ${
-                                errors.identification_records?.[index]?.details
-                                  ? "is-invalid"
-                                  : ""
-                              }`}
-                              value={record.details}
-                              onChange={(e) => handleDetailsChange(e, record.id)}
-                              placeholder="Enter identification details"
-                              {...register(`record_${record.id}_details`, {
-                                required: "Details are required",
-                              })}
-                            />
-                            {errors.identification_records?.[index]?.details && (
-                              <div className="invalid-feedback d-block">
-                                {errors.identification_records[index].details
-                                  .message}
-                              </div>
-                            )}
-                          </div>
+                          <label>Identification Details <span className="required-asterisk">*</span></label>
+                          <textarea
+                            className={`form-control ${errors.identification_records?.[index]?.details ? 'is-invalid' : ''}`}
+                            value={record.details}
+                            onChange={(e) => handleDetailsChange(e, record.id)}
+                            placeholder="Enter identification details"
+                          />
+                          {errors.identification_records?.[index]?.details && (
+                            <div className="invalid-feedback d-block">
+                              {errors.identification_records[index].details.message}
+                            </div>
+                          )}
                         </div>
                         <div className="col-12">
-                          <div className="form-group">
-                            <label>
-                              Proof of identification{" "}
-                              <span className="required-asterisk">*</span>
-                            </label>
-                            {record.proof ? (
-                              <div className="d-flex align-items-center mt-2">
-                                <span className="me-2">{record.proof.fileName}</span>
-                                 <a
-                                  href={`/api/documents/${record.proof.fileId}`} // Adjust the URL as needed
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="btn btn-sm btn-outline-secondary me-2"
-                                >
-                                  <FaDownload />
-                                </a>
-                                <button
-                                  type="button"
-                                  className="btn btn-sm btn-outline-danger"
-                                  onClick={() => handleRemoveProof(record.id)}
-                                >
-                                  <FaTimes /> Remove
-                                </button>
-                              </div>
-                            ) : (
-                              <>
-                                <input
-                                  type="file"
-                                  id={`proof_${record.id}`}
-                                  accept=".pdf,.jpg,.jpeg,.png"
-                                  onChange={(e) => handleProofChange(e, record.id)}
-                                  className="d-none"
-                                  disabled={isUploading}
-                                  {...register(`record_${record.id}_proof`, {
-                                    required: "Proof is required",
-                                    validate: {
-                                      fileSize: (files) => {
-                                        if (files && files[0]) {
-                                          const fileSizeInMB =
-                                            files[0].size / (1024 * 1024);
-                                          return (
-                                            fileSizeInMB <= 5 ||
-                                            "File size must be ≤ 5MB"
-                                          );
-                                        }
-                                        return true;
-                                      },
-                                    },
-                                  })}
-                                />
-                                <label
-                                  htmlFor={`proof_${record.id}`}
-                                  className="btn btn-outline-primary w-100"
-                                >
-                                  {isUploading ? (
-                                    <>
-                                      <span
-                                        className="spinner-border spinner-border-sm me-2"
-                                        role="status"
-                                        aria-hidden="true"
-                                      ></span>
-                                      Uploading...
-                                    </>
-                                  ) : (
-                                    "Choose File"
-                                  )}
-                                </label>
-                              </>
-                            )}
-                            {errors.identification_records?.[index]?.proof && (
-                              <div className="invalid-feedback d-block">
-                                {errors.identification_records[index].proof
-                                  .message}
-                              </div>
-                            )}
-                            <small className="form-text text-muted">
-                              Max file size: 5MB (PDF, JPEG, PNG)
-                            </small>
-                          </div>
+                          <label>Proof of identification <span className="required-asterisk">*</span></label>
+                          {record.proof ? (
+                            <div className="d-flex align-items-center mt-2">
+                              <span className="me-2">{record.proof.fileName}</span>
+                              <button
+                                type="button"
+                                onClick={() => downloadFile(record.proof.fileId)}
+                                className="btn btn-sm btn-outline-primary me-2"
+                              >
+                                <FaDownload /> Download
+                              </button>
+                              <button
+                                type="button"
+                                className="btn btn-sm btn-outline-danger"
+                                onClick={() => handleRemoveProof(record.id)}
+                              >
+                                <FaTimes /> Remove
+                              </button>
+                            </div>
+                          ) : (
+                            <>
+                              <input
+                                type="file"
+                                id={`proof_${record.id}`}
+                                accept=".pdf,.jpg,.jpeg,.png"
+                                onChange={(e) => handleProofChange(e, record.id)}
+                                className="d-none"
+                                disabled={isUploading}
+                              />
+                              <label htmlFor={`proof_${record.id}`} className="btn btn-outline-primary w-100">
+                                {isUploading ? (
+                                  <>
+                                    <span className="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
+                                    Uploading...
+                                  </>
+                                ) : "Choose File"}
+                              </label>
+                            </>
+                          )}
+                          {errors.identification_records?.[index]?.proof && (
+                            <div className="invalid-feedback d-block">
+                              {errors.identification_records[index].proof.message}
+                            </div>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -574,13 +416,28 @@ const StepFirst = ({ provideSubmitHandler, formData, onValidationComplete }) => 
               )}
             </div>
           </Collapsible>
-          <Collapsible title="Address Details" defaultOpen={true}>
+
+          {/* Address Details */}
+          <Collapsible title="Address Details" defaultOpen>
             <div className="container-fluid">
               <div className="row g-3">
-                {addressDetailsSchema.map((fieldConfig) => (
-                  <div key={fieldConfig.name} className="col-md-6">
+                {[
+                  { name: "addressLine1", label: "Address line 1", required: true },
+                  { name: "addressLine2", label: "Address line 2" },
+                  { name: "city", label: "City", required: true },
+                  { name: "state", label: "State", required: true },
+                  { name: "pincode", label: "Pincode", required: true }
+                ].map((f) => (
+                  <div key={f.name} className="col-md-6">
                     <DynamicField
-                      fieldConfig={fieldConfig}
+                      fieldConfig={{
+                        name: f.name,
+                        label: f.required ? (
+                          <>{f.label} <span className="required-asterisk">*</span></>
+                        ) : f.label,
+                        type: "text",
+                        rules: f.required ? { required: `${f.label} is required` } : {}
+                      }}
                       control={control}
                       register={register}
                       errors={errors}
@@ -600,4 +457,3 @@ const StepFirst = ({ provideSubmitHandler, formData, onValidationComplete }) => 
 };
 
 export default StepFirst;
-
