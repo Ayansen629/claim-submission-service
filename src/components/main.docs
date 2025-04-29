@@ -45,7 +45,7 @@ const StepFirst = ({ provideSubmitHandler, formData, onValidationComplete }) => 
     resetField
   } = methods;
 
-  const watchIdentificationType = watch("identificationType", methods.getValues("identificationType"));
+  const watchIdentificationType = watch("identificationType", "incorporated");
 
   // Initialize form data
   useEffect(() => {
@@ -62,6 +62,7 @@ const StepFirst = ({ provideSubmitHandler, formData, onValidationComplete }) => 
         } else {
           setPartnershipRecords(formData.identificationtype_details);
         }
+        setValue("identificationtype_details", formData.identificationtype_details);
       }
     }
   }, [formData, setValue]);
@@ -75,34 +76,19 @@ const StepFirst = ({ provideSubmitHandler, formData, onValidationComplete }) => 
     }
   }, [incorporatedRecords, partnershipRecords, watchIdentificationType, setValue]);
 
-  const handleFileUpload = async (file, recordId) => {
+  const handleFileUpload = async (file) => {
     try {
       setIsUploading(true);
       setUploadError(null);
       const result = await uploadDocument(file, 'identification');
-      const docInfo = {
+      return {
         fileId: result.fileId,
         fileName: file.name,
         fileType: file.type
       };
-
-      // Update the specific record's proof
-      if (watchIdentificationType === "incorporated") {
-        setIncorporatedRecords(prevRecords =>
-          prevRecords.map(record =>
-            record.id === recordId ? { ...record, proof: docInfo } : record
-          )
-        );
-      } else {
-        setPartnershipRecords(prevRecords =>
-          prevRecords.map(record =>
-            record.id === recordId ? { ...record, proof: docInfo } : record
-          )
-        );
-      }
     } catch (error) {
       setUploadError(error.message || "Upload failed");
-      console.error("Upload failed:", error);
+      throw error;
     } finally {
       setIsUploading(false);
     }
@@ -111,59 +97,61 @@ const StepFirst = ({ provideSubmitHandler, formData, onValidationComplete }) => 
   const addIdentificationRecord = () => {
     const records = watchIdentificationType === "incorporated" ? incorporatedRecords : partnershipRecords;
     const setRecords = watchIdentificationType === "incorporated" ? setIncorporatedRecords : setPartnershipRecords;
-
+    
     const newId = records.length > 0
       ? Math.max(...records.map(r => r.id)) + 1
       : 1;
     const newRecord = { id: newId, details: "", proof: null };
-    setRecords([...records, newRecord]);
+    const updatedRecords = [...records, newRecord];
+    setRecords(updatedRecords);
   };
 
   const removeIdentificationRecord = (id) => {
     const records = watchIdentificationType === "incorporated" ? incorporatedRecords : partnershipRecords;
     const setRecords = watchIdentificationType === "incorporated" ? setIncorporatedRecords : setPartnershipRecords;
-
+    
     if (records.length > 1) {
-      setRecords(records.filter(r => r.id !== id));
+      const updatedRecords = records.filter(r => r.id !== id);
+      setRecords(updatedRecords);
     }
   };
 
   const updateRecordDetails = (id, value) => {
-    if (watchIdentificationType === "incorporated") {
-      setIncorporatedRecords(prevRecords =>
-        prevRecords.map(record =>
-          record.id === id ? { ...record, details: value } : record
-        )
-      );
-    } else {
-      setPartnershipRecords(prevRecords =>
-        prevRecords.map(record =>
-          record.id === id ? { ...record, details: value } : record
-        )
-      );
-    }
+    const records = watchIdentificationType === "incorporated" ? incorporatedRecords : partnershipRecords;
+    const setRecords = watchIdentificationType === "incorporated" ? setIncorporatedRecords : setPartnershipRecords;
+    
+    const updatedRecords = records.map(record =>
+      record.id === id ? { ...record, details: value } : record
+    );
+    setRecords(updatedRecords);
   };
 
-  const handleRecordProofChange = async (e, id) => {
+  const updateRecordProof = async (e, id) => {
     const file = e.target.files[0];
     if (!file) return;
-    await handleFileUpload(file, id);
+    try {
+      const doc = await handleFileUpload(file);
+      
+      const records = watchIdentificationType === "incorporated" ? incorporatedRecords : partnershipRecords;
+      const setRecords = watchIdentificationType === "incorporated" ? setIncorporatedRecords : setPartnershipRecords;
+      
+      const updatedRecords = records.map(record =>
+        record.id === id ? { ...record, proof: doc } : record
+      );
+      setRecords(updatedRecords);
+    } catch (err) {
+      console.error("Upload failed:", err);
+    }
   };
 
   const handleRemoveProof = (id) => {
-    if (watchIdentificationType === "incorporated") {
-      setIncorporatedRecords(prevRecords =>
-        prevRecords.map(record =>
-          record.id === id ? { ...record, proof: null } : record
-        )
-      );
-    } else {
-      setPartnershipRecords(prevRecords =>
-        prevRecords.map(record =>
-          record.id === id ? { ...record, proof: null } : record
-        )
-      );
-    }
+    const records = watchIdentificationType === "incorporated" ? incorporatedRecords : partnershipRecords;
+    const setRecords = watchIdentificationType === "incorporated" ? setIncorporatedRecords : setPartnershipRecords;
+    
+    const updatedRecords = records.map(record =>
+      record.id === id ? { ...record, proof: null } : record
+    );
+    setRecords(updatedRecords);
   };
 
   const basicDetailsSchema = [
@@ -211,17 +199,12 @@ const StepFirst = ({ provideSubmitHandler, formData, onValidationComplete }) => 
       console.error("Validation failed");
       return false;
     }
-
+    
     const formValues = getValues();
-    // Include the current identification records in the form values
-    formValues.identificationtype_details = watchIdentificationType === "incorporated" ? incorporatedRecords : partnershipRecords;
-
-    // Call the provided submit handler with all form data
-    if (provideSubmitHandler) {
-      provideSubmitHandler(formValues);
-    }
+    // Save to localStorage
+    localStorage.setItem('stepFirstFormData', JSON.stringify(formValues));
     return formValues;
-  }, [trigger, getValues, provideSubmitHandler, incorporatedRecords, partnershipRecords, watchIdentificationType]);
+  }, [trigger, getValues]);
 
   useEffect(() => {
     if (onValidationComplete) {
@@ -229,27 +212,35 @@ const StepFirst = ({ provideSubmitHandler, formData, onValidationComplete }) => 
     }
   }, [isValid, onValidationComplete]);
 
-  // Load form data on initial render
+  // Load from localStorage on initial render
   useEffect(() => {
-    if (formData) {
-      Object.keys(formData).forEach((key) => {
-        setValue(key, formData[key]);
+    const savedData = localStorage.getItem('stepFirstFormData');
+    if (savedData) {
+      const parsedData = JSON.parse(savedData);
+      Object.keys(parsedData).forEach((key) => {
+        setValue(key, parsedData[key]);
       });
-      if (formData.identificationtype_details) {
-        if (formData.identificationType === "incorporated") {
-          setIncorporatedRecords(formData.identificationtype_details);
+      if (parsedData.identificationtype_details) {
+        if (parsedData.identificationType === "incorporated") {
+          setIncorporatedRecords(parsedData.identificationtype_details);
         } else {
-          setPartnershipRecords(formData.identificationtype_details);
+          setPartnershipRecords(parsedData.identificationtype_details);
         }
       }
     }
-  }, [formData, setValue]);
+  }, [setValue]);
+
+  useEffect(() => {
+    if (provideSubmitHandler) {
+      provideSubmitHandler(onSubmit);
+    }
+  }, [provideSubmitHandler, onSubmit]);
 
   const currentRecords = watchIdentificationType === "incorporated" ? incorporatedRecords : partnershipRecords;
 
   return (
     <FormProvider {...methods}>
-      <form className="form-stepper" onSubmit={handleSubmit(onSubmit)}>
+      <form className="form-stepper">
         <div className="mb-4 bg-light p-4 rounded-3">
           <Collapsible title="Basic Details" defaultOpen>
             <div className="container-fluid">
@@ -344,7 +335,7 @@ const StepFirst = ({ provideSubmitHandler, formData, onValidationComplete }) => 
                         <input
                           type="file"
                           id={`proof_${record.id}`}
-                          onChange={(e) => handleRecordProofChange(e, record.id)}
+                          onChange={(e) => updateRecordProof(e, record.id)}
                           className="d-none"
                           disabled={isUploading}
                         />
@@ -400,8 +391,6 @@ const StepFirst = ({ provideSubmitHandler, formData, onValidationComplete }) => 
             </div>
           </Collapsible>
         </div>
-        {/* You might want to move the Next button outside the form if the submit is handled by a parent component */}
-        {/* <button type="submit" className="btn btn-primary">Next</button> */}
       </form>
     </FormProvider>
   );
