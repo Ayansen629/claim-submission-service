@@ -13,89 +13,84 @@ const StepFirst = ({ provideSubmitHandler, formData, onValidationComplete }) => 
   const [identificationRecords, setIdentificationRecords] = useState([
     { id: 1, details: "", proof: null }
   ]);
-
+  
   const methods = useForm({
     mode: "onChange",
     reValidateMode: "onChange",
     defaultValues: {
-      identificationType: "incorporated",
-      financialCreditorName: "",
-      financialCreditorEmail: "",
-      incorporatedIdentificationNumber: "",
-      incorporatedProofDocument: null,
-      addressLine1: "",
-      addressLine2: "",
-      city: "",
-      state: "",
-      pincode: "",
-      identification_records: [{ id: 1, details: "", proof: null }]
+      identification_records: [{ id: 1, details: "", proof: null }],
+      identificationType: "incorporated"
     }
   });
-
-  const {
-    register,
-    handleSubmit,
-    formState: { errors, isValid },
-    trigger,
-    setValue,
-    control,
-    getValues,
-    watch
-  } = methods;
-
+  
+  const { register, handleSubmit, formState: { errors, isValid }, trigger, setValue, control, getValues, watch, resetField } = methods;
   const watchIdentificationType = watch("identificationType", "incorporated");
-
-  // Initialize form data
-  useEffect(() => {
-    if (formData) {
-      Object.keys(formData).forEach((key) => {
-        if (key !== "identification_records") {
-          setValue(key, formData[key]);
-        }
-      });
-
-      if (formData.identification_records && formData.identification_records.length > 0) {
-        setIdentificationRecords(formData.identification_records);
-        setValue("identification_records", formData.identification_records);
-      }
-    }
-  }, [formData, setValue]);
 
   // Clear partnership data when switching to incorporated
   useEffect(() => {
     if (watchIdentificationType === "incorporated") {
+      // Reset identification records
       setIdentificationRecords([{ id: 1, details: "", proof: null }]);
       setValue("identification_records", [{ id: 1, details: "", proof: null }]);
-      setValue("incorporatedProofDocument", null); // clear document
+      
+      // Clear any partnership-specific fields
+      resetField("incorporatedIdentificationNumber");
+      resetField("incorporatedProofDocument");
     }
-  }, [watchIdentificationType, setValue]);
+  }, [watchIdentificationType, setValue, resetField]);
 
-  const handleFileUpload = async (field, e) => {
-    const file = e.target.files[0];
-    if (!file) return;
+  // Initialize form data
+  useEffect(() => {
+    if (formData) {
+      // Set identification records if they exist
+      if (formData.identification_records && formData.identification_records.length > 0) {
+        setIdentificationRecords(formData.identification_records);
+        setValue("identification_records", formData.identification_records);
+      }
+      
+      // Clean up any old record_X_details fields from formData
+      const cleanFormData = { ...formData };
+      Object.keys(cleanFormData).forEach(key => {
+        if (key.startsWith('record_') && key.endsWith('_details')) {
+          delete cleanFormData[key];
+        }
+      });
+      
+      // Set all other form values
+      Object.keys(cleanFormData).forEach((key) => {
+        if (key !== "identification_records") {
+          setValue(key, cleanFormData[key]);
+        }
+      });
+    }
+  }, [formData, setValue]);
+
+  const handleFileUpload = async (file) => {
     try {
       setIsUploading(true);
       setUploadError(null);
       const result = await uploadDocument(file, 'identification');
-      field.onChange(result);
+      return {
+        fileId: result.fileId,
+        fileName: file.name,
+        fileType: file.type
+      };
     } catch (error) {
-      setUploadError(error.message || "Upload failed");
-      console.error("Upload failed:", error);
+      setUploadError(error.message);
+      throw error;
     } finally {
       setIsUploading(false);
     }
   };
 
-  const handleRemoveIncorporatedProof = (field) => {
-    field.onChange(null);
-  };
-
   const addIdentificationRecord = () => {
-    const newId = identificationRecords.length > 0
-      ? Math.max(...identificationRecords.map(r => r.id)) + 1
+    const newId = identificationRecords.length > 0 
+      ? Math.max(...identificationRecords.map(r => r.id)) + 1 
       : 1;
+      
     const newRecord = { id: newId, details: "", proof: null };
     const updatedRecords = [...identificationRecords, newRecord];
+    
     setIdentificationRecords(updatedRecords);
     setValue("identification_records", updatedRecords);
   };
@@ -105,21 +100,26 @@ const StepFirst = ({ provideSubmitHandler, formData, onValidationComplete }) => 
       const updatedRecords = identificationRecords.filter(record => record.id !== id);
       setIdentificationRecords(updatedRecords);
       setValue("identification_records", updatedRecords);
+      
+      // Also remove any associated record_X_details fields
+      setValue(`record_${id}_details`, undefined);
     }
   };
 
   const updateRecordDetails = (id, value) => {
-    const updatedRecords = identificationRecords.map(record =>
+    const updatedRecords = identificationRecords.map(record => 
       record.id === id ? { ...record, details: value } : record
     );
+    
     setIdentificationRecords(updatedRecords);
     setValue("identification_records", updatedRecords);
   };
 
   const updateRecordProof = (id, proof) => {
-    const updatedRecords = identificationRecords.map(record =>
+    const updatedRecords = identificationRecords.map(record => 
       record.id === id ? { ...record, proof } : record
     );
+    
     setIdentificationRecords(updatedRecords);
     setValue("identification_records", updatedRecords);
   };
@@ -131,14 +131,12 @@ const StepFirst = ({ provideSubmitHandler, formData, onValidationComplete }) => 
   const handleProofChange = async (e, id) => {
     const file = e.target.files[0];
     if (!file) return;
+
     try {
-      setIsUploading(true);
-      const result = await uploadDocument(file, 'identification');
-      updateRecordProof(id, result);
-    } catch (err) {
-      setUploadError("Failed to upload file");
-    } finally {
-      setIsUploading(false);
+      const uploadedDoc = await handleFileUpload(file);
+      updateRecordProof(id, uploadedDoc);
+    } catch (error) {
+      console.error("Upload failed:", error);
     }
   };
 
@@ -146,146 +144,37 @@ const StepFirst = ({ provideSubmitHandler, formData, onValidationComplete }) => 
     updateRecordProof(id, null);
   };
 
-  const downloadFile = (fileId) => {
-    window.open(`/api/documents/download/${fileId}`, '_blank'); // Replace with actual endpoint
+  const handleIncorporatedProofChange = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    try {
+      const uploadedDoc = await handleFileUpload(file);
+      setValue("incorporatedProofDocument", uploadedDoc);
+    } catch (error) {
+      console.error("Upload failed:", error);
+    }
   };
 
-  const basicDetailsSchema = [
-    {
-      name: "financialCreditorName",
-      label: <>Name of the financial creditor <span className="required-asterisk">*</span></>,
-      type: "text",
-      rules: {
-        required: "Financial creditor name is required"
-      }
-    },
-    {
-      name: "financialCreditorEmail",
-      label: <>Email address of the financial creditor <span className="required-asterisk">*</span></>,
-      type: "email",
-      rules: {
-        required: "Email is required",
-        pattern: {
-          value: /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i,
-          message: "Invalid email address"
-        }
-      }
-    },
-    {
-      name: "identificationType",
-      label: <>Identification type <span className="required-asterisk">*</span></>,
-      type: "radio",
-      options: [
-        { value: "incorporated", label: "Incorporated body" },
-        { value: "partnership", label: "Partnership or individual" }
-      ],
-      rules: { required: "Select an identification type" },
-      defaultValue: "incorporated"
-    }
-  ];
+  const handleRemoveIncorporatedProof = () => {
+    setValue("incorporatedProofDocument", null);
+  };
 
-  const incorporatedBodyFields = [
-    {
-      name: "incorporatedIdentificationNumber",
-      label: <>Identification Number of the financial creditor <span className="required-asterisk">*</span></>,
-      type: "text",
-      rules: {
-        required: watchIdentificationType === "incorporated" && "Identification number is required",
-        pattern: {
-          value: /^[A-Z0-9]{8,15}$/,
-          message: "Invalid identification number"
-        }
-      }
-    },
-    {
-      name: "incorporatedProofDocument",
-      label: <>Proof of identification <span className="required-asterisk">*</span></>,
-      type: "file",
-      rules: {
-        required: watchIdentificationType === "incorporated" && "Proof document is required",
-        validate: {
-          fileSize: (file) => {
-            if (file?.size) {
-              const sizeMB = file.size / (1024 * 1024);
-              return sizeMB <= 5 || "Max file size is 5MB";
-            }
-            return true;
-          }
-        }
-      },
-      customComponent: ({ field }) => (
-        <>
-          {!field.value ? (
-            <input
-              type="file"
-              accept=".pdf,.jpg,.jpeg,.png"
-              onChange={(e) => handleFileUpload(field, e)}
-              disabled={isUploading}
-              className="d-none"
-              id="incorporatedProofDocumentInput"
-            />
-          ) : (
-            <div className="d-flex align-items-center mt-2">
-              <span className="me-2">{field.value.fileName}</span>
-              <button
-                type="button"
-                onClick={() => downloadFile(field.value.fileId)}
-                className="btn btn-sm btn-outline-primary me-2"
-              >
-                <FaDownload /> Download
-              </button>
-              <button
-                type="button"
-                className="btn btn-sm btn-outline-danger"
-                onClick={() => handleRemoveIncorporatedProof(field)}
-              >
-                <FaTimes /> Remove
-              </button>
-            </div>
-          )}
-          <label htmlFor="incorporatedProofDocumentInput" className="btn btn-outline-primary w-100 mt-2">
-            {isUploading ? (
-              <>
-                <span className="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
-                Uploading...
-              </>
-            ) : "Choose File"}
-          </label>
+  // ... (keep your existing schema definitions)
 
-          {/* Moved up: Note moved after input */}
-          <small className="form-text text-muted mt-1">
-            Max file size: 5MB (PDF, JPEG, PNG)
-          </small>
-        </>
-      )
-    }
-  ];
-
-  const onSubmit = useCallback(async () => {
-    const isValid = await trigger();
-    if (!isValid) return false;
-    return getValues();
-  }, [trigger, getValues]);
-
-  useEffect(() => {
-    if (onValidationComplete) onValidationComplete(isValid);
-  }, [isValid, onValidationComplete]);
-
-  useEffect(() => {
-    if (provideSubmitHandler) provideSubmitHandler(onSubmit);
-  }, [provideSubmitHandler, onSubmit]);
+  const incorporatedProofDocument = watch("incorporatedProofDocument");
 
   return (
     <FormProvider {...methods}>
       <form className="form-stepper">
         <div className="mb-4 bg-light p-4 rounded-3">
-          <Collapsible title="Basic Details" defaultOpen>
+          <Collapsible title="Basic Details" defaultOpen={true}>
             <div className="container-fluid">
               <div className="row g-3">
-                {basicDetailsSchema.map((f) => (
-                  <div key={f.name} className="col-md-6">
+                {basicDetailsSchema.map((fieldConfig) => (
+                  <div key={fieldConfig.name} className="col-md-6">
                     <DynamicField
-                      fieldConfig={f}
+                      fieldConfig={fieldConfig}
                       control={control}
                       register={register}
                       errors={errors}
@@ -296,37 +185,95 @@ const StepFirst = ({ provideSubmitHandler, formData, onValidationComplete }) => 
                   </div>
                 ))}
               </div>
-
               {watchIdentificationType === "incorporated" && (
-                <div className="row g-3 mt-3">
-                  {incorporatedBodyFields.map((f) => (
-                    <div key={f.name} className="col-md-6">
-                      <DynamicField
-                        fieldConfig={{
-                          ...f,
-                          isUploading,
-                          uploadError,
-                          setIsUploading,
-                          setUploadError
-                        }}
-                        control={control}
-                        register={register}
-                        errors={errors}
-                        setValue={setValue}
-                        trigger={trigger}
-                        getValues={getValues}
-                      />
+                <div className="row g-3 mt-2">
+                  <div className="col-md-6">
+                    <DynamicField
+                      fieldConfig={{
+                        name: "incorporatedIdentificationNumber",
+                        label: <>Identification Number <span className="required-asterisk">*</span></>,
+                        type: "text",
+                        rules: {
+                          required: "Identification number is required",
+                          pattern: {
+                            value: /^[A-Z0-9]{8,15}$/,
+                            message: "Invalid identification number"
+                          }
+                        },
+                        placeholder: "Enter identification number"
+                      }}
+                      control={control}
+                      register={register}
+                      errors={errors}
+                      setValue={setValue}
+                      trigger={trigger}
+                      getValues={getValues}
+                    />
+                  </div>
+                  <div className="col-md-6">
+                    <div className="form-group">
+                      <label>
+                        Proof of identification <span className="required-asterisk">*</span>
+                      </label>
+                      {incorporatedProofDocument ? (
+                        <div className="d-flex align-items-center mt-2">
+                          <span className="me-2">{incorporatedProofDocument.fileName}</span>
+                          <a
+                            href={`${process.env.REACT_APP_FILE_SERVICE}v1/files/id?fileStoreId=${incorporatedProofDocument.fileId}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="btn btn-sm btn-outline-primary me-2"
+                          >
+                            <FaDownload /> Download
+                          </a>
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-outline-danger"
+                            onClick={handleRemoveIncorporatedProof}
+                          >
+                            <FaTimes /> Remove
+                          </button>
+                        </div>
+                      ) : (
+                        <>
+                          <input
+                            type="file"
+                            id="incorporatedProofDocument"
+                            accept=".pdf,.jpg,.jpeg,.png"
+                            onChange={handleIncorporatedProofChange}
+                            className="d-none"
+                            disabled={isUploading}
+                          />
+                          <label htmlFor="incorporatedProofDocument" className="btn btn-outline-primary w-100">
+                            {isUploading ? (
+                              <>
+                                <span className="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+                                Uploading...
+                              </>
+                            ) : (
+                              "Choose File"
+                            )}
+                          </label>
+                        </>
+                      )}
+                      {errors.incorporatedProofDocument && (
+                        <div className="invalid-feedback d-block">
+                          {errors.incorporatedProofDocument.message}
+                        </div>
+                      )}
+                      <small className="form-text text-muted">
+                        Max file size: 5MB (PDF, JPEG, PNG)
+                      </small>
                     </div>
-                  ))}
+                  </div>
                 </div>
               )}
-
               {watchIdentificationType === "partnership" && (
                 <div className="mt-3">
                   {identificationRecords.map((record, index) => (
                     <div key={record.id} className="mb-4 p-3 border rounded">
                       <div className="d-flex justify-content-between align-items-center mb-3">
-                        <h6>Identification Record {index + 1}</h6>
+                        <h6 className="mb-0">Identification Record {index + 1}</h6>
                         {identificationRecords.length > 1 && (
                           <button
                             type="button"
@@ -339,67 +286,78 @@ const StepFirst = ({ provideSubmitHandler, formData, onValidationComplete }) => 
                       </div>
                       <div className="row g-3">
                         <div className="col-12">
-                          <label>Identification Details <span className="required-asterisk">*</span></label>
-                          <textarea
-                            className={`form-control ${errors.identification_records?.[index]?.details ? 'is-invalid' : ''}`}
-                            value={record.details}
-                            onChange={(e) => handleDetailsChange(e, record.id)}
-                            placeholder="Enter identification details"
-                          />
-                          {errors.identification_records?.[index]?.details && (
-                            <div className="invalid-feedback d-block">
-                              {errors.identification_records[index].details.message}
-                            </div>
-                          )}
+                          <div className="form-group">
+                            <label>
+                              Identification Details <span className="required-asterisk">*</span>
+                            </label>
+                            <textarea
+                              className={`form-control ${errors.identification_records?.[index]?.details ? 'is-invalid' : ''}`}
+                              value={record.details}
+                              onChange={(e) => handleDetailsChange(e, record.id)}
+                              placeholder="Enter identification details"
+                            />
+                            {errors.identification_records?.[index]?.details && (
+                              <div className="invalid-feedback d-block">
+                                {errors.identification_records[index].details.message}
+                              </div>
+                            )}
+                          </div>
                         </div>
                         <div className="col-12">
-                          <label>Proof of identification <span className="required-asterisk">*</span></label>
-                          {record.proof ? (
-                            <div className="d-flex align-items-center mt-2">
-                              <span className="me-2">{record.proof.fileName}</span>
-                              <button
-                                type="button"
-                                onClick={() => downloadFile(record.proof.fileId)}
-                                className="btn btn-sm btn-outline-primary me-2"
-                              >
-                                <FaDownload /> Download
-                              </button>
-                              <button
-                                type="button"
-                                className="btn btn-sm btn-outline-danger"
-                                onClick={() => handleRemoveProof(record.id)}
-                              >
-                                <FaTimes /> Remove
-                              </button>
-                            </div>
-                          ) : (
-                            <>
-                              <input
-                                type="file"
-                                id={`proof_${record.id}`}
-                                accept=".pdf,.jpg,.jpeg,.png"
-                                onChange={(e) => handleProofChange(e, record.id)}
-                                className="d-none"
-                                disabled={isUploading}
-                              />
-                              <label htmlFor={`proof_${record.id}`} className="btn btn-outline-primary w-100">
-                                {isUploading ? (
-                                  <>
-                                    <span className="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
-                                    Uploading...
-                                  </>
-                                ) : "Choose File"}
-                              </label>
-                            </>
-                          )}
-                          {errors.identification_records?.[index]?.proof && (
-                            <div className="invalid-feedback d-block">
-                              {errors.identification_records[index].proof.message}
-                            </div>
-                          )}
-                          <small className="form-text text-muted mt-1">
-                            Max file size: 5MB (PDF, JPEG, PNG)
-                          </small>
+                          <div className="form-group">
+                            <label>
+                              Proof of identification <span className="required-asterisk">*</span>
+                            </label>
+                            {record.proof ? (
+                              <div className="d-flex align-items-center mt-2">
+                                <span className="me-2">{record.proof.fileName}</span>
+                                <a
+                                  href={`${process.env.REACT_APP_FILE_SERVICE}v1/files/id?fileStoreId=${record.proof.fileId}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="btn btn-sm btn-outline-primary me-2"
+                                >
+                                  <FaDownload /> Download
+                                </a>
+                                <button
+                                  type="button"
+                                  className="btn btn-sm btn-outline-danger"
+                                  onClick={() => handleRemoveProof(record.id)}
+                                >
+                                  <FaTimes /> Remove
+                                </button>
+                              </div>
+                            ) : (
+                              <>
+                                <input
+                                  type="file"
+                                  id={`proof_${record.id}`}
+                                  accept=".pdf,.jpg,.jpeg,.png"
+                                  onChange={(e) => handleProofChange(e, record.id)}
+                                  className="d-none"
+                                  disabled={isUploading}
+                                />
+                                <label htmlFor={`proof_${record.id}`} className="btn btn-outline-primary w-100">
+                                  {isUploading ? (
+                                    <>
+                                      <span className="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+                                      Uploading...
+                                    </>
+                                  ) : (
+                                    "Choose File"
+                                  )}
+                                </label>
+                              </>
+                            )}
+                            {errors.identification_records?.[index]?.proof && (
+                              <div className="invalid-feedback d-block">
+                                {errors.identification_records[index].proof.message}
+                              </div>
+                            )}
+                            <small className="form-text text-muted">
+                              Max file size: 5MB (PDF, JPEG, PNG)
+                            </small>
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -415,8 +373,25 @@ const StepFirst = ({ provideSubmitHandler, formData, onValidationComplete }) => 
               )}
             </div>
           </Collapsible>
-
-          {/* Address Fields Remain Unchanged */}
+          <Collapsible title="Address Details" defaultOpen={true}>
+            <div className="container-fluid">
+              <div className="row g-3">
+                {addressDetailsSchema.map((fieldConfig) => (
+                  <div key={fieldConfig.name} className="col-md-6">
+                    <DynamicField
+                      fieldConfig={fieldConfig}
+                      control={control}
+                      register={register}
+                      errors={errors}
+                      setValue={setValue}
+                      trigger={trigger}
+                      getValues={getValues}
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+          </Collapsible>
         </div>
       </form>
     </FormProvider>
