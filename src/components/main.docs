@@ -1,18 +1,238 @@
-const handleActionSubmit = async () => {
-  setIsSubmittingAction(true);
-  try {
-    // Skip the actual API call and just show success message
-    toast.success(`${actionType} action performed successfully`);
+import React, { useCallback, useEffect, useState } from "react";
+import { useForm, FormProvider } from "react-hook-form";
+import DynamicField from "./formCommon/DynamicField";
+import Collapsible from "./formCommon/Collapsible";
+import 'bootstrap/dist/css/bootstrap.min.css';
+import { uploadDocument } from "../../../services/documentUploadService";
+
+const StepThird = ({ provideSubmitHandler, formData, onValidationComplete }) => {
+    const methods = useForm({
+        mode: "onChange",
+        reValidateMode: "onChange"
+    });
     
-    // Navigate to dashboard after a short delay
-    setTimeout(() => {
-      navigate("/dashboard");
-    }, 1500);
-  } catch (error) {
-    console.error("Error submitting action:", error);
-    toast.error("Failed to perform action");
-  } finally {
-    setIsSubmittingAction(false);
-    handleModalClose();
-  }
+    const { 
+        register, 
+        handleSubmit, 
+        formState: { errors, isValid }, 
+        trigger, 
+        setValue, 
+        control, 
+        getValues,
+        watch
+    } = methods;
+
+    const [hasSignature, setHasSignature] = useState(false);
+    const watchAllFields = watch();
+    const [isUploading, setIsUploading] = useState(false);
+    const [uploadError, setUploadError] = useState(null);
+
+    const handleFileUpload = async (file) => {
+        try {
+            setIsUploading(true);
+            setUploadError(null);
+            const result = await uploadDocument(file, 'identification');
+            return result;
+        } catch (error) {
+            setUploadError(error.message);
+            throw error;
+        } finally {
+            setIsUploading(false);
+        }
+    };
+
+    const creditorDetailsSchema = [
+        { 
+            name: "creditorName", 
+            label: <>Name of financial creditor (in BLOCK LETTERS) <span className="required-asterisk">*</span></>, 
+            type: "text", 
+            rules: { 
+                required: "Creditor name is required",
+                pattern: {
+                    value: /^[A-Z\s]+$/,
+                    message: "Please enter in BLOCK LETTERS only"
+                },
+                minLength: {
+                    value: 3,
+                    message: "Name must be at least 3 characters"
+                }
+            },
+            placeholder: "Enter name in BLOCK LETTERS",
+            className: "mb-3",
+            onChange: async (e) => {
+                await trigger("creditorName");
+            },
+            colSize: 6
+        },
+        { 
+            name: "creditorPosition", 
+            label: <>Position with or in relation to creditor <span className="required-asterisk">*</span></>, 
+            type: "text", 
+            rules: { 
+                required: "Position is required",
+                minLength: {
+                    value: 3,
+                    message: "Position must be at least 3 characters"
+                }
+            },
+            placeholder: "Enter position/relation to creditor",
+            className: "mb-3",
+            onChange: async (e) => {
+                await trigger("creditorPosition");
+            },
+            colSize: 6
+        },
+        { 
+            name: "creditorSignatureText", 
+            label: <>Signature of financial creditor <span className="required-asterisk">*</span></>, 
+            type: "text", 
+            rules: { 
+                required: "Signature is required",
+                minLength: {
+                    value: 3,
+                    message: "Signature must be at least 3 characters"
+                }
+            },
+            placeholder: "Enter signature text",
+            className: "mb-3",
+            onChange: async (e) => {
+                await trigger("creditorSignatureText");
+            },
+            colSize: 6
+        },
+        { 
+            name: "hasSignature", 
+            label: "Do you have a signature to upload?", 
+            type: "radio", 
+            options: [
+                { value: "yes", label: "Yes" },
+                { value: "no", label: "No" }
+            ],
+            rules: { required: "Please select an option" },
+            className: "mb-3",
+            onChange: (e) => {
+                setHasSignature(e.target.value === "yes");
+                setValue("signatureFile", null);
+            },
+            colSize: 6
+        },
+        { 
+            name: "creditorAddress", 
+            label: <>Address of person signing <span className="required-asterisk">*</span></>, 
+            type: "textarea",
+            rules: { 
+                required: "Address is required",
+                minLength: {
+                    value: 10,
+                    message: "Address must be at least 10 characters"
+                }
+            },
+            placeholder: "Enter complete address",
+            className: "mb-3",
+            rows: 3,
+            onChange: async (e) => {
+                await trigger("creditorAddress");
+            },
+            colSize: 12
+        },
+        ...(hasSignature ? [{
+            name: "signatureFile",
+            label: "Upload Signature",
+            type: "file",
+            rules: { 
+                required: "Signature file is required",
+                validate: {
+                    fileSize: (files) => {
+                        if (files && files[0]) {
+                            const fileSizeInMB = files[0].size / (1024 * 1024);
+                            return fileSizeInMB <= 5 || "File size must be ≤ 5MB";
+                        }
+                        return true;
+                    }
+                }
+            },
+            accept: ".jpg,.jpeg,.png,.pdf",
+            onFileUpload: handleFileUpload,
+            isUploading,
+            uploadError,
+            note: "Max file size: 5MB (PDF, JPEG, PNG)",
+            className: "mb-3",
+            colSize: 6
+        }] : [])
+    ];
+
+    const onSubmit = useCallback(async () => {
+        const isValid = await trigger();
+        
+        if (!isValid) {
+            const errorField = Object.keys(errors)[0];
+            if (errorField) {
+                document.querySelector(`[name="${errorField}"]`)?.scrollIntoView({ 
+                    behavior: 'smooth', 
+                    block: 'center' 
+                });
+            }
+            return false;
+        }
+        
+        return getValues();
+    }, [trigger, getValues, errors]);
+
+    useEffect(() => {
+        if (formData) {
+            Object.keys(formData).forEach((key) => {
+                setValue(key, formData[key], { shouldValidate: true });
+            });
+            if (formData.hasSignature) {
+                setHasSignature(formData.hasSignature === "yes");
+            }
+        }
+    }, [formData, setValue]);
+
+    useEffect(() => {
+        if (provideSubmitHandler) {
+            provideSubmitHandler(onSubmit);
+        }
+    }, [provideSubmitHandler, onSubmit]);
+
+    return (
+        <FormProvider {...methods}>
+            <form className="form-stepper">
+                <div className="mb-4 bg-light p-4 rounded">
+                    <Collapsible 
+                        title="Signature of financial creditor or person authorised to act on its behalf" 
+                        defaultOpen={true}
+                    >
+                        <div className="row g-3">
+                            {creditorDetailsSchema.map((fieldConfig) => (
+                                <div 
+                                    key={fieldConfig.name} 
+                                    className={`col-md-${fieldConfig.colSize || 12}`}
+                                >
+                                    <DynamicField
+                                        fieldConfig={{
+                                            ...fieldConfig,
+                                            isUploading,
+                                            uploadError,
+                                            setIsUploading,
+                                            setUploadError,
+                                            onFileUpload: handleFileUpload
+                                        }}
+                                        control={control}
+                                        register={register}
+                                        errors={errors}
+                                        setValue={setValue}
+                                        trigger={trigger}
+                                        getValues={getValues}
+                                    />
+                                </div>
+                            ))}
+                        </div>
+                    </Collapsible>
+                </div>
+            </form>
+        </FormProvider>
+    );
 };
+
+export default StepThird;
