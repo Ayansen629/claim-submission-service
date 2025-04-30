@@ -1,234 +1,1065 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { Container, Row, Col, Spinner, Badge, Button } from "react-bootstrap";
-import Collapsible from "./formCommon/Collapsible";
-import { useFormData } from "../../context/FormDataContext";
-import PreviewCard from "../../private/Dashboard/PreviewCard";
-import { FaDownload } from "react-icons/fa";
+import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { useNavigate, useParams } from "react-router-dom";
+import { toast } from "react-toastify";
+import { Modal, Button, Form } from "react-bootstrap";
+import "./Stepper.css";
+import { useRegistration } from "../../context/ApplicationContext";
+import ReviewStep from "./ReviewStep";
+import { FormDataProvider } from "../../context/FormDataContext";
+import { postData } from "../../../services/http.service.ts";
+import { URLS_ENDPOINT } from "../../../utils/urlsConstants.ts";
 import axios from "axios";
+import { v4 as uuidv4 } from "uuid"; // Import UUID generator
+import { FaSmile } from "react-icons/fa";
 
-const ReviewStep = () => {
-  const { formData } = useFormData();
-  const [draftResponse, setDraftResponse] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [downloading, setDownloading] = useState({});
-  const staticApplicationNumber = "APP-2025-0001"; // Static application number
 
-  // Load draft data from localStorage on mount
-  useEffect(() => {
-    const savedDraft = localStorage.getItem("draftResponse");
-    if (savedDraft) {
-      try {
-        const parsedDraft = JSON.parse(savedDraft);
-        setDraftResponse(parsedDraft);
-      } catch (error) {
-        console.error("Error parsing draft data:", error);
-      }
+const deepEqual = (obj1, obj2) => {
+  return JSON.stringify(obj1) === JSON.stringify(obj2);
+};
+
+const generateFileId = (file) => {
+  return `file-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+};
+// const  idetificationType= localStorage.getItem("selectedIdentificationType");
+// const addressproofType = localStorage.getItem("selectedAddressProofType");
+const extractFileDetails = (file, source,documentType) => {
+  console.log("extractFileDetails", file, source);
+  if (!file) return null;
+
+  return {
+    docId: file.fileId ,
+    docName: file.docName,
+    docType: documentType, 
+    docSource: source,
+  };
+};
+
+const createFormPayload = (formData, isFinalSubmit, userFormData, applicationNumber = "", isActive, applicationUuid = "") => {
+  console.log("createFormPayload", formData);
+  
+  // Extract UUIDs from existing data or generate new ones
+  const creditorBasicDetailsUuid = formData.creditorBasicDetailsUuid || uuidv4();
+  const claimDetailsUuid = formData.claimDetailsUuid || uuidv4();
+  const signatoryDetailsUuid = formData.signatoryDetailsUuid || uuidv4();
+
+  return {
+    userInfo: userFormData?.fullloginDetails || {},
+    uuid: applicationUuid || uuidv4(),
+    applicationNumber: applicationNumber || "",
+    creditorBasicDetails: {
+      uuid: creditorBasicDetailsUuid,
+      financialCreditorName: formData.step1?.financialCreditorName || "",
+      financialCreditorEmail: formData.step1?.financialCreditorEmail || "",
+      identificationType: formData.step1?.identificationType || "",
+      identificationNumber: formData.step1?.incorporatedIdentificationNumber || "",
+    
+      document: extractFileDetails(formData.step1?.incorporatedProofDocument, "web_upload", "identification"),
+      // status: "",
+      // isActive: isActive,
+      // isFinalSubmit: isFinalSubmit
+    },
+    addressDetails:{
+      addressLine1: formData.step1?.addressLine1 || "",
+      addressLine2: formData.step1?.addressLine2 || "",
+      city: formData.step1?.city || "",
+      state: formData.step1?.state || "",
+      pincode: formData.step1?.pincode || "",
+
+    },
+    claimDetails: {
+      uuid: claimDetailsUuid,
+      claimType: formData.step2?.claimType || "",
+      hasSecurityInterest: formData.step2?.hasSecurityInterest || "",
+      hasGuarantee: formData.step2?.hasGuarantee || "",
+      claimAmount: parseFloat(formData.step2?.claimAmount) || 0,
+      principalBorrowerName: formData.step2?.principalBorrowerName1 || "",
+      principalBorrowerAddress: formData.step2?.principalBorrowerAddress1 || "",
+      debtDetails: formData.step2?.debtDetails || "",
+      debtDate: formData.step2?.debtDate || "",
+      mutualDetails: formData.step2?.mutualDetails || "",
+      
+      securityValue: parseFloat(formData.step2?.securityValue) || 0,
+      securityDate: formData.step2?.securityDate || "",
+      guaranteeValue: parseFloat(formData.step2?.guaranteeValue) || 0,
+      guaranteeDate: formData.step2?.guaranteeDate || "",
+      // status: "",
+      // isActive: isActive,
+      // isFinalSubmit: isFinalSubmit
+    },
+    bankAccountDetails: {
+      bankAccountNumber: formData.step2?.accountNumber || "",
+      bankIfscCode: formData.step2?.ifscCode || "",
+      bankName: formData.step2?.bankName || "",
+      bankBranchName: formData.step2?.branchName || "",
+      branchAddress: formData.step2?.branchAddress || "",
+      city: formData.step2?.city || "",
+      state: formData.step2?.state || "",
+      district: formData.step2?.district || "",
+    },
+    signatoryDetails: {
+      uuid: signatoryDetailsUuid,
+      creditorName: formData.step3?.creditorName || "",
+      creditorPosition: formData.step3?.creditorPosition || "",
+      creditorSignature: formData.step3?.creditorSignatureText || "",
+      hasSignature: formData.step3?.hasSignature || "",
+      creditorAddress: formData.step3?.creditorAddress || "",
+      document: extractFileDetails(formData.step3?.signatureFile, "web_upload", "signature"),
+      // status: "",
+      // isActive: isActive,
+      // isFinalSubmit: isFinalSubmit
+    },
+    uploadDocumentDetails: {
+      identityProofType: formData.step4?.identityProofType || "",
+      addressProofType: formData.step4?.addressProofType || "",
+      identityProofFile: extractFileDetails(formData.step4?.identityProofFile, "web_upload", "identity_proof"),
+      addressProofFile: extractFileDetails(formData.step4?.addressProofFile, "web_upload", "address_proof"),
+      // status: "",
+      // isActive: isActive,
+      // isFinalSubmit: isFinalSubmit
+    },
+    status: "",
+    isActive: isActive,
+    isFinalSubmit: isFinalSubmit
+  };
+};
+
+const getFileFieldsForStep = (stepNumber) => {
+  switch (stepNumber) {
+    case 1:
+      return ["identificationDocument"];
+    case 2:
+      return ["addressProof"];
+    case 3:
+      return ["signatoryDocument"];
+    default:
+      return [];
+  }
+};
+
+const processFileUploads = async (stepData, stepNumber) => {
+  const fileFields = getFileFieldsForStep(stepNumber);
+  const processedData = { ...stepData };
+
+  for (const field of fileFields) {
+    if (stepData[field] && stepData[field] instanceof File) {
+      // In a real application, you would upload the file here
+      // and get a server-side ID or URL.
+      processedData[field] = {
+        id: generateFileId(stepData[field]),
+        name: stepData[field].name,
+        size: stepData[field].size,
+        type: stepData[field].type,
+        uploadedAt: new Date().toISOString(),
+      };
+    } else if (stepData[field] && typeof stepData[field] === 'object' && stepData[field].name) {
+      // Keep existing file details if not a new file
+      processedData[field] = { ...stepData[field] };
     }
-    setLoading(false);
+  }
+
+  return processedData;
+};
+
+const Stepper = ({ stepsConfig = [], formAllData }) => {
+  const {
+    registrationData,
+    handleStepDataFetch,
+    updateRegistrationData,
+    handleApplicatioNFormView,
+    isDataLoaded,
+    applicationDetails
+  } = useRegistration();
+  const { id } = useParams();
+  const isEditMode = !!id;
+  const [currentStep, setCurrentStep] = useState(1);
+  const [isConfirmed, setIsConfirmed] = useState(false);
+  const [isComplete, setIsComplete] = useState(false);
+  const [isViewModalOpen, setIsViewModalOpen] = useState(false);
+  const [hasPreviewed, setHasPreviewed] = useState(false);
+  const [formData, setFormData] = useState(isEditMode ? registrationData || {} : {});
+  // const [formData, setFormData] = useState({});
+  const [margins, setMargins] = useState({ marginLeft: 0, marginRight: 0 });
+  const stepRef = useRef([]);
+  const navigate = useNavigate();
+  const [currentSubmitHandler, setCurrentSubmitHandler] = useState(null);
+  const [showModal, setShowModal] = useState(false);
+  const [comments, setComments] = useState("");
+  const [actionType, setActionType] = useState("");
+  const [isSavingDraft, setIsSavingDraft] = useState(false);
+  const[draftResponse, setDraftResponse] = useState(null);
+  const [isSubmittingAction, setIsSubmittingAction] = useState(false);
+
+
+  console.log("Registration Data:update", applicationDetails);
+
+  const userFormData = JSON.parse(localStorage.getItem("userFormData"));
+  const isCRPUser = userFormData?.userType === "CRP";
+
+  const filteredStepsConfig = useMemo(() => {
+    if (isCRPUser) {
+      return stepsConfig.filter((step) => step.name !== "Review & Submit");
+    }
+    return stepsConfig;
+  }, [stepsConfig, isCRPUser]);
+
+  useEffect(() => {
+    if (id) {
+      handleApplicatioNFormView({ uuid: id });
+    }
+  }, [id]);
+useEffect(() => {
+  if (isEditMode && registrationData && !deepEqual(formData, registrationData)) {
+    // Check if registrationData is not empty or null
+    if (registrationData && Object.keys(registrationData).length > 0) {
+      setFormData(registrationData);
+    } else {
+      setFormData({});  // Set to empty if the response is blank or invalid
+    }
+  }
+}, [isEditMode, registrationData]);
+
+
+
+
+
+ 
+
+  useEffect(() => {
+    const savedIsConfirmed = localStorage.getItem("isConfirmed");
+    if (savedIsConfirmed) {
+      setIsConfirmed(JSON.parse(savedIsConfirmed));
+    }
   }, []);
 
-  // Handle document download
-  const handleDownload = async (fileId, fileName) => {
-    try {
-      setDownloading(prev => ({ ...prev, [fileId]: true }));
+  useEffect(() => {
+    localStorage.setItem("isConfirmed", JSON.stringify(isConfirmed));
+  }, [isConfirmed]);
+  
 
-      const response = await axios.get(
-        `${process.env.REACT_APP_FILE_SERVICE}v1/files/id?fileStoreId=${fileId}`,
-        { responseType: 'blob' }
-      );
-
-      // Create download link
-      const url = window.URL.createObjectURL(new Blob([response.data]));
-      const link = document.createElement('a');
-      link.href = url;
-      link.setAttribute('download', fileName || 'document');
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-
-    } catch (error) {
-      console.error('Error downloading file:', error);
-      alert('Failed to download document');
-    } finally {
-      setDownloading(prev => ({ ...prev, [fileId]: false }));
+  useEffect(() => {
+    const newSubmitHandler = filteredStepsConfig[currentStep - 1]?.submitHandler;
+    if (newSubmitHandler && newSubmitHandler !== currentSubmitHandler) {
+      setCurrentSubmitHandler(() => newSubmitHandler);
     }
+  }, [currentStep, filteredStepsConfig]);
+
+  const updateSubmitHandler = useCallback((submitHandler) => {
+    setCurrentSubmitHandler(() => submitHandler);
+  }, []);
+
+  useEffect(() => {
+    if (stepRef.current.length > 0) {
+      const firstStep = stepRef.current[0]?.offsetWidth || 0;
+      const lastStep = stepRef.current[filteredStepsConfig.length - 1]?.offsetWidth || 0;
+      setMargins({
+        marginLeft: firstStep / 2,
+        marginRight: lastStep / 2,
+      });
+    }
+  }, [filteredStepsConfig.length]);
+
+  const validateStepData = (step, data) => {
+    const requiredFields = filteredStepsConfig[step - 1]?.requiredFields || [];
+    for (let field of requiredFields) {
+      if (!data[field]) {
+        toast.error(`${field} is required.`);
+        return false;
+      }
+    }
+    return true;
   };
-
-  // Format document display with download button
-  const formatFileInfo = (fileData) => {
-    if (!fileData) return "No file uploaded";
-    if (typeof fileData === "string") return fileData;
-
-    const fileName = fileData.fileName || fileData.docName || "File uploaded";
-    const fileId = fileData.fileId || fileData.docId;
-    const details = fileData.details || "";
-
-    return (
-      <div>
-        <div className="d-flex align-items-center">
-          <span className="me-2">{fileName}</span>
-          <Button
-            variant="link"
-            size="sm"
-            className="p-0"
-            onClick={() => handleDownload(fileId, fileName)}
-            disabled={downloading[fileId]}
-          >
-            {downloading[fileId] ? (
-              <Spinner animation="border" size="sm" />
-            ) : (
-              <FaDownload className="text-primary" />
-            )}
-          </Button>
-        </div>
-        {details && <div className="text-muted small">{details}</div>}
-      </div>
-    );
+  const buildIncrementalPayload = (formData, currentStep) => {
+    const payload = {};
+  
+    // Step 1 data
+    if (currentStep >= 1) {
+      payload.creditorBasicDetails = {
+        uuid: formData.creditorBasicDetailsUuid || uuidv4(),
+        financialCreditorName: formData.step1?.financialCreditorName || "",
+        financialCreditorEmail: formData.step1?.financialCreditorEmail || "",
+        identificationType: formData.step1?.identificationType || "",
+        identificationNumber: formData.step1?.incorporatedIdentificationNumber || "",
+        document: extractFileDetails(formData.step1?.incorporatedProofDocument, "web_upload", "identification"),
+      };
+  
+      payload.addressDetails = {
+        addressLine1: formData.step1?.addressLine1 || "",
+        addressLine2: formData.step1?.addressLine2 || "",
+        city: formData.step1?.city || "",
+        state: formData.step1?.state || "",
+        pincode: formData.step1?.pincode || "",
+      };
+    }
+  
+    // Step 2 data
+    if (currentStep >= 2) {
+      payload.claimDetails = {
+        uuid: formData.claimDetailsUuid || uuidv4(),
+        claimType: formData.step2?.claimType || "",
+        hasSecurityInterest: formData.step2?.hasSecurityInterest || "",
+        hasGuarantee: formData.step2?.hasGuarantee || "",
+        claimAmount: parseFloat(formData.step2?.claimAmount) || 0,
+        principalBorrowerName: formData.step2?.principalBorrowerName1 || "",
+        principalBorrowerAddress: formData.step2?.principalBorrowerAddress1 || "",
+        debtDetails: formData.step2?.debtDetails || "",
+        debtDate: formData.step2?.debtDate || "",
+        mutualDetails: formData.step2?.mutualDetails || "",
+        securityValue: parseFloat(formData.step2?.securityValue) || 0,
+        securityDate: formData.step2?.securityDate || "",
+        guaranteeValue: parseFloat(formData.step2?.guaranteeValue) || 0,
+        guaranteeDate: formData.step2?.guaranteeDate || "",
+      };
+  
+      payload.bankAccountDetails = {
+        bankAccountNumber: formData.step2?.accountNumber || "",
+        bankIfscCode: formData.step2?.ifscCode || "",
+        bankName: formData.step2?.bankName || "",
+        bankBranchName: formData.step2?.branchName || "",
+        branchAddress: formData.step2?.branchAddress || "",
+        city: formData.step2?.city || "",
+        state: formData.step2?.state || "",
+        district: formData.step2?.district || "",
+      };
+    }
+  
+    // Step 3 data
+    if (currentStep >= 3) {
+      payload.signatoryDetails = {
+        uuid: formData.signatoryDetailsUuid || uuidv4(),
+        creditorName: formData.step3?.creditorName || "",
+        creditorPosition: formData.step3?.creditorPosition || "",
+        creditorSignature: formData.step3?.creditorSignatureText || "",
+        hasSignature: formData.step3?.hasSignature || "",
+        creditorAddress: formData.step3?.creditorAddress || "",
+        document: extractFileDetails(formData.step3?.signatureFile, "web_upload", "signature"),
+      };
+    }
+  
+    // Step 4 data
+    if (currentStep >= 4) {
+      payload.uploadDocumentDetails = {
+        identityProofType: formData.step4?.identityProofType || "",
+        addressProofType: formData.step4?.addressProofType || "",
+        identityProofFile: extractFileDetails(formData.step4?.identityProofFile, "web_upload", "identity_proof"),
+        addressProofFile: extractFileDetails(formData.step4?.addressProofFile, "web_upload", "address_proof"),
+      };
+    }
+  
+    return payload;
   };
-
-  // Transform the form data for display
-  const formattedData = useMemo(() => {
-    if (!formData) return null;
-
-    return {
-      step1: {
-        creditorDetails: {
-          "Financial Creditor Name": formData.step1.financialCreditorName,
-          "Financial Creditor Email": formData.step1.financialCreditorEmail,
-          "Address": `${formData.step1.addressLine1}, ${formData.step1.addressLine2}`,
-          "City": formData.step1.city,
-          "State": formData.step1.state,
-          "Pincode": formData.step1.pincode
-        },
-        identificationDetails: {
-          "Identification Type": formData.step1.identificationType,
-          "Identification Details": formData.step1.identificationtype_details?.map(detail => (
-            <div key={detail.id} className="mb-2">
-              <div><strong>Details:</strong> {detail.details}</div>
-              <div><strong>Proof:</strong> {formatFileInfo(detail.proof)}</div>
-            </div>
-          )) || "N/A"
-        }
-      },
-      step2: {
-        claimDetails: {
-          "Claim Type": formData.step2.claimType,
-          "Has Security Interest": formData.step2.hasSecurityInterest,
-          "Has Guarantee": formData.step2.hasGuarantee,
-          "Claim Amount": formData.step2.claimAmount,
-          "Principal Borrower Name": formData.step2.principalBorrowerName1,
-          "Principal Borrower Address": formData.step2.principalBorrowerAddress1,
-          "Debt Details": formData.step2.debtDetails,
-          "Debt Date": formData.step2.debtDate,
-          "Mutual Details": formData.step2.mutualDetails,
-          "Security Value": formData.step2.securityValue,
-          "Security Date": formData.step2.securityDate,
-          "Guarantee Value": formData.step2.guaranteeValue,
-          "Guarantee Date": formData.step2.guaranteeDate
-        },
-        bankDetails: {
-          "Account Number": formData.step2.accountNumber,
-          "IFSC Code": formData.step2.ifscCode,
-          "Bank Name": formData.step2.bankName,
-          "Branch Name": formData.step2.branchName,
-          "Branch Address": formData.step2.branchAddress,
-          "City": formData.step2.city,
-          "State": formData.step2.state,
-          "District": formData.step2.district
-        }
-      },
-      step3: {
-        signatoryDetails: {
-          "Creditor Name": formData.step3.creditorName,
-          "Creditor Position": formData.step3.creditorPosition,
-          "Creditor Signature": formData.step3.creditorSignatureText,
-          "Has Signature": formData.step3.hasSignature,
-          "Creditor Address": formData.step3.creditorAddress,
-          "Signature File": formatFileInfo(formData.step3.signatureFile)
-        }
-      },
-      step4: {
-        documentDetails: {
-          "Identity Proof Type": formData.step4.identityProofType,
-          "Address Proof Type": formData.step4.addressProofType,
-          "Identity Proof File": formatFileInfo(formData.step4.identityProofFile),
-          "Address Proof File": formatFileInfo(formData.step4.addressProofFile)
-        }
+  const handleNext = async () => {
+    if (!currentSubmitHandler) {
+      console.error("No submit handler available.");
+      return;
+    }
+  
+    const currentStepData = await currentSubmitHandler();
+    if (!currentStepData) {
+      console.error("Form validation failed.");
+      return;
+    }
+  
+    if (!validateStepData(currentStep, currentStepData)) {
+      return;
+    }
+  
+    const processedStepData = await processFileUploads(currentStepData, currentStep);
+  
+    // Update form data with current step's data
+    const updatedFormData = {
+      ...formData,
+      [`step${currentStep}`]: { ...formData[`step${currentStep}`], ...processedStepData },
+    };
+  
+    if (!deepEqual(updatedFormData, formData)) {
+      setFormData(updatedFormData);
+    }
+  
+    // Create payload with all collected data so far
+    const payload = {
+      userInfo: userFormData?.fullloginDetails || {},
+      applicationDetails: {
+        uuid: applicationDetails?.uuid || uuidv4(),
+        applicationNumber: applicationDetails?.applicationNumber || "",
+        status: "",
+        isFinalSubmit: false,
+        isActive: true,
+        ...buildIncrementalPayload(updatedFormData, currentStep)
       }
     };
-  }, [formData, downloading]);
+  
+    // Console.log the payload in JSON format
+    console.log(`Step ${currentStep} Payload:`, JSON.stringify({
+      step: currentStep,
+      stepName: filteredStepsConfig[currentStep - 1]?.name,
+      payload: payload,
+      applicationDetails: {
+        uuid: payload.applicationDetails.uuid,
+        applicationNumber: payload.applicationDetails.applicationNumber
+      }
+    }, null, 2));
+  
+    // Here you would typically send the payload to your API
+    // await sendPayloadToAPI(payload);
+  
+    setCurrentStep((prevStep) => prevStep + 1);
+  };
 
-  if (loading) {
-    return (
-      <div className="d-flex justify-content-center align-items-center" style={{ height: "100vh" }}>
-        <Spinner animation="border" />
-      </div>
-    );
-  }
+  // const handleNext = async () => {
+  //   if (!currentSubmitHandler) {
+  //     console.error("No submit handler available.");
+  //     return;
+  //   }
+  
+  //   const currentStepData = await currentSubmitHandler();
+  //   if (!currentStepData) {
+  //     console.error("Form validation failed.");
+  //     return;
+  //   }
+  
+  //   if (!validateStepData(currentStep, currentStepData)) {
+  //     return;
+  //   }
+  
+  //   const processedStepData = await processFileUploads(currentStepData, currentStep);
+  
+  //   const updatedFormData = {
+  //     ...formData,
+  //     [`step${currentStep}`]: { ...formData[`step${currentStep}`], ...processedStepData },
+  //   };
+  
+  //   if (!deepEqual(updatedFormData, formData)) {
+  //     setFormData(updatedFormData);
+  //   }
+  
+  //   console.log("Updated Form Data:", updatedFormData);
+  
+  //   // if (currentStep === filteredStepsConfig.length) {
+  //     try {
+  //       // Prepare the payload for submission
+  //       const payload = createFormPayload(
+  //         updatedFormData, 
+  //         false, // isFinalSubmit
+  //         userFormData,
+  //         applicationDetails?.applicationNumber || "",
+  //         true, // isActive
+  //         applicationDetails?.uuid || ""
+  //       );
+  
+  //       console.log("Submission Payload:", payload);
+  
+  //       // Call the stepper API
+  //       // const REQUEST = `${process.env.REACT_APP_APPLICATION_SERVICE}${URLS_ENDPOINT.APP_SERVICES.APPLICATION_FORMSUBMIT}`;
+  //       // const REQUEST="/stepper/submit"; // Replace with your actual endpoint
+  //       // const response = await postData(REQUEST, {
+  //       //   status: {
+  //       //     code: "",
+  //       //     message: ""
+  //       //   },
+  //       //   userInfo: userFormData?.fullloginDetails || {},
+  //       //   applicationDetails: payload
+  //       // });
 
-  if (!formattedData) {
-    return (
-      <div className="alert alert-info">
-        No form data available to display
-      </div>
-    );
-  }
+  //       setCurrentStep((prevStep) => prevStep + 1);
+       
+  
+  //       // if (response.data.status.code === "200") {
+  //       //   setIsComplete(true);
+  //       //   toast.success("Form submitted successfully");
+  //       //   // navigate("/dashboard");
+  //       // } else {
+  //       //   toast.error(`Failed to submit form: ${response.data.status.message}`);
+  //       // }
+  //     } catch (error) {
+  //       setCurrentStep((prevStep) => prevStep + 1);
+  //       console.error("Error submitting form:", error);
+  //       toast.error(error.message || "Failed to submit form");
+  //     }
+  //   // } else {
+  //   //   setCurrentStep((prevStep) => prevStep + 1);
+  //   // }
+  // };
 
-  const renderPreviewSection = (fields) => (
-    <Container fluid>
-      <Row className="g-3">
-        {Object.entries(fields).map(([key, value]) => (
-          <Col key={key} xs={12} sm={6} md={3} className="mb-3">
-            <PreviewCard
-              title={key}
-              value={value}
-            />
-          </Col>
-        ))}
-      </Row>
-    </Container>
-  );
 
-  const renderCard = (title, fields) => (
-    <div className="mb-3">
-      <h5 style={{ fontWeight: 600 }}>{title}</h5>
-      {renderPreviewSection(fields)}
-    </div>
-  );
+  // const handleNext = async () => {
+  //   if (!currentSubmitHandler) {
+  //     console.error("No submit handler available.");
+  //     return;
+  //   }
+  
+  //   const currentStepData = await currentSubmitHandler();
+  //   if (!currentStepData) {
+  //     console.error("Form validation failed.");
+  //     return;
+  //   }
+  
+  //   if (!validateStepData(currentStep, currentStepData)) {
+  //     return;
+  //   }
+  
+  //   const processedStepData = await processFileUploads(currentStepData, currentStep);
+  
+  //   const updatedFormData = {
+  //     ...formData,
+  //     [`step${currentStep}`]: { ...formData[`step${currentStep}`], ...processedStepData },
+  //   };
+  
+  //   if (!deepEqual(updatedFormData, formData)) {
+  //     setFormData(updatedFormData);
+  //     // updateRegistrationData(`step${currentStep}`, updatedFormData[`step${currentStep}`], id);
+  //   }
+  // console.log("Updated Form Data:", updatedFormData);
+  //   if (currentStep === filteredStepsConfig.length) {
+  //     // try {
+  //     //   setIsSavingDraft(true);
+        
+  //     //   // Get the draft response from state or localStorage
+  //     //   const lastDraftResponse = draftResponse || JSON.parse(localStorage.getItem("draftResponse") || "null");
+        
+  //     //   if (!lastDraftResponse) {
+  //     //     throw new Error("No draft data found. Please save a draft first.");
+  //     //   }
+  
+  //     //   // Create final payload by modifying the draft response
+  //     //   const finalSubmitPayload = {
+  //     //     ...lastDraftResponse.data, // Use all data from draft response
+  //     //     applicationDetails: {
+  //     //       ...lastDraftResponse.data.applicationDetails,
+  //     //       creditorBasicDetails: {
+  //     //         ...lastDraftResponse.data.applicationDetails.creditorBasicDetails,
+  //     //         isFinalSubmit: true, // Only change this flag
+  //     //         // isActive: true
+  //     //       },
+  //     //       isFinalSubmit:true,
+  //     //       // isActive:true
+  //     //     }
+  //     //   };
+  
+  //     //   console.log("Final Submit Payload:", finalSubmitPayload);
+  
+  //     //   const REQUEST = `${process.env.REACT_APP_APPLICATION_SERVICE}${URLS_ENDPOINT.APP_SERVICES.APPLICATION_FORMSUBMIT}`;
+  //     //   const response = await postData(REQUEST, finalSubmitPayload);
+  //     //   if (response.data.status.code === "200") {
+  //     //     // Clean up draft data
+  //     //     localStorage.removeItem("draftResponse");
+  //     //     setDraftResponse(null);
+          
+  //     //     setIsComplete(true);
+  //     //     toast.success("Form submitted successfully");
+  //     //     navigate("/dashboard");
+          
+  //     //     // Navigate to tracking page with application data
+  //     //     // navigate("/tracking", {
+  //     //     //   state: {
+  //     //     //     applicationId: response.data.applicationDetails.applicationNumber,
+  //     //     //     formData: updatedFormData
+  //     //     //   }
+  //     //     // });
+          
+  //     //     // Also store in localStorage as fallback
+  //     //     // localStorage.setItem("lastSubmittedApplication", response.data.applicationDetails.applicationNumber);
+  //     //     // localStorage.setItem("lastSubmittedFormData", JSON.stringify(updatedFormData));
+  //     //   } else {
+  //     //     toast.error(`Failed to submit form: ${response.data.status.message}`);
+  //     //   }
+  
+  //     //   // if (response.data.status.code === "200") {
+  //     //   //   // Clean up draft data
+  //     //   //   localStorage.removeItem("draftResponse");
+  //     //   //   setDraftResponse(null);
+          
+  //     //   //   setIsComplete(true);
+  //     //   //   toast.success("Form submitted successfully");
+  //     //   //   navigate("/dashboard");
+  //     //   // } else {
+  //     //   //   toast.error(`Failed to submit form: ${response.data.status.message}`);
+  //     //   // }
+  //     // } catch (error) {
+  //     //   console.error("Error submitting form:", error);
+  //     //   toast.error(error.message || "Failed to submit form");
+  //     // } finally {
+  //     //   setIsSavingDraft(false);
+  //     // }
+  //   } else {
+  //     setCurrentStep((prevStep) => prevStep + 1);
+  //   }
+  // };
+  const handlePreview = async () => {
+    if (!currentSubmitHandler) {
+      console.error("No submit handler available.");
+      return;
+    }
 
+    const currentStepData = await currentSubmitHandler();
+    if (!currentStepData) {
+      console.error("Form validation failed.");
+      return;
+    }
+
+    if (!validateStepData(currentStep, currentStepData)) {
+      return;
+    }
+
+    const processedStepData = await processFileUploads(currentStepData, currentStep);
+
+    const updatedFormData = {
+      ...formData,
+      [`step${currentStep}`]: { ...formData[`step${currentStep}`], ...processedStepData },
+    };
+
+    if (!deepEqual(updatedFormData, formData)) {
+      setFormData(updatedFormData);
+      updateRegistrationData(`step${currentStep}`, updatedFormData[`step${currentStep}`], id);
+    }
+    console.log("Updated Form Data:", updatedFormData);
+    const previewPayload = createFormPayload(updatedFormData, false, userFormData, id); // isFinalSubmit: false, use ID if editing
+console.log("Preview Payload:", JSON.stringify(previewPayload, null, 2));
+   
+    
+
+  //   try {
+
+
+
+  //   const previewPayload = createFormPayload(updatedFormData, false, userFormData, id); // isFinalSubmit: false, use ID if editing
+
+  //   console.log("Preview Payload:", JSON.stringify(previewPayload, null, 2));
+  //   const REQUEST = axios.post("/stepper/preview", previewPayload,
+  //   );
+  //   // console.log("Preview Response:", REQUEST.data);
+  //      setCurrentStep(filteredStepsConfig.length);
+  //      setHasPreviewed(true); // Enable preview button
+  // } catch (error) {
+  //   console.error("Error submitting form:", error);
+  //   setCurrentStep(filteredStepsConfig.length);
+  //   setHasPreviewed(true); // Enable preview button
+  // }
+    // localStorage.setItem("formPreviewData", JSON.stringify(previewPayload));
+
+    
+    setCurrentStep(filteredStepsConfig.length);
+    setHasPreviewed(true); 
+ 
+  };
+  
+
+
+
+
+
+
+
+  const handleSaveDraft = async () => {
+    // setIsSavingDraft(true);
+    console.log("handleSaveDraft", formData);
+    // try {
+    //   const currentStepData = currentSubmitHandler ? await currentSubmitHandler() : {};
+    //   const processedStepData = await processFileUploads(currentStepData, currentStep);
+    //   // const applicationFullDetails=isEditMode ? applicationDetails ||{};
+    //   // console.log("applicationNumber", applicationNumber);
+      
+    //   // Get the last draft response from localStorage if available
+    //   const lastDraftResponse = JSON.parse(localStorage.getItem("draftResponse") || "null");
+    //   const applicationUuid = isEditMode ? applicationDetails?.uuid : lastDraftResponse?.data?.applicationDetails?.uuid || "";
+    //   const draftId = isEditMode ? applicationDetails?.applicationNumber : lastDraftResponse?.data?.applicationDetails?.applicationNumber || "";
+  
+    //   // Prepare the draft data with existing UUIDs or generate new ones if not available
+    //   const creditorBasicDetailsUuid =isEditMode ? applicationDetails?.creditorBasicDetails.uuid: formData.creditorBasicDetailsUuid || "";
+      
+      
+    //   const claimDetailsUuid = isEditMode ? applicationDetails?.claimDetails.uuid: formData.claimDetailsUuid || "";
+    //   const signatoryDetailsUuid = isEditMode ? applicationDetails?.signatoryDetails.uuid: formData.signatoryDetailsUuid || "";
+  
+    //   const draftData = {
+    //     ...formData,
+    //     creditorBasicDetailsUuid,
+    //     claimDetailsUuid,
+    //     signatoryDetailsUuid,
+    //     applicationUuid,
+    //     [`step${currentStep}`]: {
+    //       ...formData[`step${currentStep}`],
+    //       ...processedStepData,
+    //     },
+    //     id: draftId,
+    //     status: "draft",
+    //     lastSaved: new Date().toISOString(),
+    //     currentStep,
+    //     formType: userFormData?.formType,
+    //     userType: userFormData?.userType,
+    //   };
+  
+    //   // Create the draft payload - use last draft response data if available
+    //   const draftPayload = lastDraftResponse 
+    //     ? {
+    //         ...lastDraftResponse.data,
+    //         applicationDetails: {
+    //           ...lastDraftResponse.data.applicationDetails,
+    //           // Update with current form data
+    //           creditorBasicDetails: {
+    //             ...lastDraftResponse.data.applicationDetails.creditorBasicDetails,
+    //             ...createFormPayload(draftData, false, userFormData, draftId, false,applicationUuid).creditorBasicDetails
+    //           },
+    //           claimDetails: {
+    //             ...lastDraftResponse.data.applicationDetails.claimDetails,
+    //             ...createFormPayload(draftData, false, userFormData, draftId, false,applicationUuid).claimDetails
+    //           },
+    //           signatoryDetails: {
+    //             ...lastDraftResponse.data.applicationDetails.signatoryDetails,
+    //             ...createFormPayload(draftData, false, userFormData, draftId, false,applicationUuid).signatoryDetails
+    //           }
+    //         }
+    //       }
+    //     : {
+    //         status: {
+    //           code: "",
+    //           message: ""
+    //         },
+    //         userInfo: userFormData?.fullloginDetails || {},
+    //         applicationDetails: createFormPayload(draftData, false, userFormData, draftId, false,applicationUuid),
+    //       };
+  
+    //   console.log("Draft Payload:", draftPayload);
+  
+    //   // Make API call to save draft
+    //   const REQUEST = `${process.env.REACT_APP_APPLICATION_SERVICE}${URLS_ENDPOINT.APP_SERVICES.APPLICATION_FORMSUBMIT}`;
+    //   const response = await postData(REQUEST, draftPayload);
+  
+    //   if (response.data.status.code === "200") {
+    //     // Save the response to localStorage for future updates
+    //     localStorage.setItem("draftResponse", JSON.stringify(response));
+    //     setDraftResponse(response); // Store in state
+  
+    //     // Update form data with the response data
+    //     setFormData(prev => ({
+    //       ...prev,
+    //       creditorBasicDetailsUuid: response.data.applicationDetails.creditorBasicDetails.uuid || prev.creditorBasicDetailsUuid,
+    //       claimDetailsUuid: response.data.applicationDetails.claimDetails.uuid || prev.claimDetailsUuid,
+    //       signatoryDetailsUuid: response.data.applicationDetails.signatoryDetails.uuid || prev.signatoryDetailsUuid,
+    //       applicationNumber: response.data.applicationDetails.applicationNumber || prev.applicationNumber,
+    //     }));
+  
+    //     setHasPreviewed(true); // Enable preview after saving draft
+    //     toast.success("Draft saved successfully");
+    //   } else {
+    //     toast.error(`Failed to save draft: ${response.data.status.message}`);
+    //   }
+    // } catch (error) {
+    //   console.error("Error saving draft:", error);
+    //   toast.error("Failed to save draft");
+    // } finally {
+    //   setIsSavingDraft(false);
+    // }
+  };
+
+
+
+
+    const handleWorkflowAction = async (action, comments) => {
+      try {
+        const userFormData = JSON.parse(localStorage.getItem("userFormData"));
+        const applicationNumber = JSON.parse(localStorage.getItem("applicationdatawithId"));
+        console.log("handleWorkflowAction", action, comments);
+        console.log("userFormData", userFormData);
+        console.log("applicationDataxxxxxxxxxxxxxx", applicationNumber);
+      
+  
+        // if (!userFormData || !userFormData.fullloginDetails) {
+        //   throw new Error("User information not found");
+        // }
+  
+        // if (!applicationData || !applicationData.applicationNumber) {
+        //   throw new Error("Application data not found");
+        // }
+  
+        const payload = {
+          userInfo: userFormData.fullloginDetails,
+          applicationNumber: applicationNumber,
+          comments: comments,
+          action: action
+        };
+        console.log("Workflow action payload:", payload);
+           const URL =
+              process.env.REACT_APP_APPLICATION_SERVICE +
+              URLS_ENDPOINT.APP_SERVICES.CORPORATE_APPLICATION_SUBMIT;
+  
+          const response = await postData(URL, payload);
+  
+        return response.data;
+      } catch (error) {
+        console.error("Error in workflow action:", error);
+        throw error;
+      }
+    };
+  
+    const handleActionSubmit = async () => {
+      setIsSubmittingAction(true);
+      try {
+        const actionMap = {
+          "Accept": "APPROVED",
+          "Reject": "REJECTED",
+          "Sendback To Claimants": "SEND_BACK_TO_CITIZEN",
+          "Accept as Contingent": "ACCEPTED_AS_CONTINGENT"
+        };
+  
+        const apiAction = actionMap[actionType];
+        if (!apiAction) {
+          throw new Error("Invalid action type");
+        }
+  
+        const response = await handleWorkflowAction(apiAction, comments);
+        console.log("Workflow response:", response);
+        
+        // if (response.status && response.status.code === "200") {
+          // toast.success(`${actionType} submitted successfully`);
+          toast.success(`${response.message}`);
+          navigate("/dashboard");
+        // } else {
+        //   toast.error(response.status?.message || "Action failed");
+        // }
+      } catch (error) {
+        console.error("Error submitting action:", error);
+        toast.error(error.message || "Failed to submit action");
+      } finally {
+        setIsSubmittingAction(false);
+        handleModalClose();
+      }
+    };
+
+  const handleActionClick = (action) => {
+    setActionType(action);
+    setShowModal(true);
+  };
+
+  const handleModalClose = () => {
+    setShowModal(false);
+    setComments("");
+  };
+
+  // const handleActionSubmit = () => {
+  //   console.log(`Action: ${actionType}, Comments: ${comments}`);
+  //   toast.success(`${actionType} submitted successfully`);
+  //   navigate("/dashboard");
+  // };
+
+  const handlePrevious = () => {
+    setCurrentStep((prevStep) => Math.max(1, prevStep - 1));
+    // setIsConfirmed(false);
+    // localStorage.removeItem("isConfirmed");
+  };
+
+  const handleCancel = () => {
+    navigate("/dashboard");
+  };
+
+  const calculateProgressBarWidth = () => {
+    return ((currentStep - 1) / (filteredStepsConfig.length - 1)) * 100;
+  };
+
+  const ActiveComponent = filteredStepsConfig[currentStep - 1]?.Component;
+  const shouldRenderReviewStep = currentStep === filteredStepsConfig.length && isDataLoaded;
+
+  // const flattenFormData = (formData) => {
+  //   const flattened = {
+  //     ...formData.step1,
+  //     ...formData.step2,
+  //     ...formData.step3,
+  //   };
+
+  //   return flattened;
+  // };
+  useEffect(() => {
+    if (currentStep === 3) {
+      setHasPreviewed(false);
+    }
+  }, [currentStep]);
+ 
   return (
-    <div className="form-stepper">
-      <div className="d-flex justify-content-between align-items-center mb-3 p-3 bg-light rounded">
-        <div>
-          <span className="text-muted small">Application Number:</span>
-          <span className="ms-2 fw-bold">{staticApplicationNumber}</span>
+    // <FormDataProvider formData={flattenFormData(formData)}>
+       <FormDataProvider formData={formData}>
+      <div className="stepper">
+        {filteredStepsConfig.map((step, index) => (
+          <div
+            key={step.name}
+            ref={(el) => (stepRef.current[index] = el)}
+            className={`step ${
+              currentStep > index + 1 || isComplete ? "complete" : ""
+            } ${currentStep === index + 1 ? "active" : ""}`}
+          >
+            <div className="step-number">
+              {currentStep > index + 1 || isComplete ? (
+                <span>✓</span>
+              ) : (
+                index + 1
+              )}
+            </div>
+            <div className="step-name">{step.name}</div>
+          </div>
+        ))}
+
+        <div
+          className="progress-bar"
+          style={{
+            marginLeft: margins.marginLeft,
+            marginRight: margins.marginRight,
+          }}
+        >
+          <div
+            className="progress"
+            style={{ width: `${calculateProgressBarWidth()}%` }}
+          ></div>
         </div>
-        {draftResponse && (
-          <Badge bg="warning" className="text-dark">
-            Draft Preview
-          </Badge>
-        )}
       </div>
 
-      <Collapsible title="Step 1: Creditor and Identification Details">
-        {renderCard("Creditor Details", formattedData.step1.creditorDetails)}
-        {renderCard("Identification Details", formattedData.step1.identificationDetails)}
-      </Collapsible>
+      {ActiveComponent && (
+        <ActiveComponent
+          formData={formData[`step${currentStep}`] || {}}
+          provideSubmitHandler={updateSubmitHandler}
+          // setFormData={setFormData}
+          setFormData={(newStepData) => {
+            setFormData(prev => ({
+              ...prev,
+              [`step${currentStep}`]: newStepData
+            }));
+          }}
+          isEditMode={isEditMode}
+        />
+      )}
 
-      <Collapsible title="Step 2: Claim and Financial Details">
-        {renderCard("Claim Details", formattedData.step2.claimDetails)}
-        {renderCard("Bank Details", formattedData.step2.bankDetails)}
-      </Collapsible>
+      {shouldRenderReviewStep && !isCRPUser && (
+        <ReviewStep />
+      )}
 
-      <Collapsible title="Step 3: Signatory Details">
-        {renderCard("Signatory Details", formattedData.step3.signatoryDetails)}
-      </Collapsible>
+      {currentStep === filteredStepsConfig.length && !isCRPUser && (
+        <div className="confirmation-container">
+          <Form.Group controlId="formConfirmation" className="mt-3 confirmation-checkbox">
+            <Form.Check
+              type="checkbox"
+              label="I confirm that the information provided is correct."
+              checked={isConfirmed}
+              onChange={(e) => setIsConfirmed(e.target.checked)}
+            />
+          </Form.Group>
+        </div>
+      )}
 
-      <Collapsible title="Step 4: Document Verification">
-        {renderCard("Document Details", formattedData.step4.documentDetails)}
-      </Collapsible>
-    </div>
+      <div className="stepper-buttons">
+        {currentStep > 1 && (
+          <button className="buttonplus previous-button" onClick={handlePrevious}>
+            Previous
+          </button>
+        )}
+        {currentStep === 1 && (
+          <button className="buttonplus cancel-button" onClick={handleCancel}>
+            Cancel
+          </button>
+        )}
+
+        {currentStep === 4 && !isCRPUser && (
+          <div className="last-step-buttons">
+            {/* <button
+              className="buttonplus draft-button"
+              onClick={handleSaveDraft}
+              disabled={isSavingDraft}
+            >
+              {isSavingDraft ? "Saving..." : "Save as Draft"}
+            </button> */}
+            
+
+<button
+className="buttonplus preview-button"
+onClick={handlePreview}
+// disabled={!hasPreviewed }
+>
+Preview
+</button>
+
+            
+
+           
+          </div>
+        )}
+
+        {currentStep !== 4 && currentStep !== filteredStepsConfig.length && (
+          <button
+            className="buttonplus next-button"
+            onClick={handleNext}
+            disabled={isComplete}
+          >
+            Save & Next
+          </button>
+        )}
+
+        {currentStep === filteredStepsConfig.length && isCRPUser ? (
+          <>
+            <button
+              className="buttonplus sendback-button"
+              onClick={() => handleActionClick("Sendback To Claimants")}
+            >
+              Sendback To Claimants
+            </button>
+            <button
+              className="buttonplus accept-contingent-button"
+              onClick={() => handleActionClick("Accept as Contingent")}
+            >
+              Accept as Contingent
+            </button>
+            <button
+              className="buttonplus accept-button"
+              onClick={() => handleActionClick("Accept")}
+            >
+              Accept
+            </button>
+            <button
+              className="buttonplus reject-button"
+              onClick={() => handleActionClick("Reject")}
+            >
+              Reject
+            </button>
+          </>
+        ) : currentStep === filteredStepsConfig.length ? (
+          <button
+            className="buttonplus next-button"
+            onClick={handleNext}
+            disabled={!isConfirmed || isComplete}
+          >
+            Submit
+          </button>
+        ) : null}
+      </div>
+
+      <Modal show={showModal} onHide={handleModalClose} centered>
+        <Modal.Header closeButton>
+          <Modal.Title>{actionType} Form</Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          <Form>
+            <Form.Group controlId="comments">
+              <Form.Label>Comments</Form.Label>
+              <Form.Control
+                as="textarea"
+                rows={3}
+                value={comments}
+                onChange={(e) => setComments(e.target.value)}
+                placeholder="Enter your comments..."
+              />
+            </Form.Group>
+          </Form>
+        </Modal.Body>
+        <Modal.Footer>
+          <Button className="modal-close-button" onClick={handleModalClose}>
+            Close
+          </Button>
+          <Button
+            className="modal-submit-button"
+            onClick={handleActionSubmit}
+            disabled={!comments.trim()}
+          >
+            Submit
+          </Button>
+        </Modal.Footer>
+      </Modal>
+    </FormDataProvider>
   );
 };
 
-export default React.memo(ReviewStep);
+export default Stepper;
