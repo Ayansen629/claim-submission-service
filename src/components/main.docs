@@ -1,158 +1,339 @@
-const handleNext = async () => {
-  if (!currentSubmitHandler) {
-    console.error("No submit handler available.");
-    return;
-  }
+import React, { useEffect, useMemo, useState } from "react";
+import { Container, Row, Col, Spinner, Badge, Button } from "react-bootstrap";
+import Collapsible from "./formCommon/Collapsible";
+import { useFormData } from "../../context/FormDataContext";
+import PreviewCard from "../../private/Dashboard/PreviewCard";
+import { FaDownload } from "react-icons/fa";
+import axios from "axios";
 
-  const currentStepData = await currentSubmitHandler();
-  if (!currentStepData) {
-    console.error("Form validation failed.");
-    return;
-  }
+const ReviewStep = () => {
+  const { formData } = useFormData();
+  const [draftResponse, setDraftResponse] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [downloading, setDownloading] = useState({});
 
-  if (!validateStepData(currentStep, currentStepData)) {
-    return;
-  }
+  // Load draft data from localStorage on mount
+  useEffect(() => {
+    const savedDraft = localStorage.getItem("draftResponse");
+    if (savedDraft) {
+      try {
+        const parsedDraft = JSON.parse(savedDraft);
+        setDraftResponse(parsedDraft);
+      } catch (error) {
+        console.error("Error parsing draft data:", error);
+      }
+    }
+    setLoading(false);
+  }, []);
 
-  const processedStepData = await processFileUploads(currentStepData, currentStep);
+  // Handle document download
+  const handleDownload = async (fileId, fileName) => {
+    try {
+      setDownloading(prev => ({ ...prev, [fileId]: true }));
+      
+      const response = await axios.get(
+        `${process.env.REACT_APP_FILE_SERVICE}v1/files/id?fileStoreId=${fileId}`,
+        { responseType: 'blob' }
+      );
 
-  // Update form data with current step's data
-  const updatedFormData = {
-    ...formData,
-    [`step${currentStep}`]: { ...formData[`step${currentStep}`], ...processedStepData },
-  };
-
-  if (!deepEqual(updatedFormData, formData)) {
-    setFormData(updatedFormData);
-  }
-
-  // Create payload with all collected data so far
-  const payload = {
-    userInfo: userFormData?.fullloginDetails || {},
-    applicationDetails: {
-      uuid: applicationDetails?.uuid || uuidv4(),
-      applicationNumber: applicationDetails?.applicationNumber || "",
-      status: "",
-      isFinalSubmit: false,
-      isActive: true,
-      ...buildIncrementalPayload(updatedFormData, currentStep)
+      // Create download link
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', fileName || 'document');
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      
+    } catch (error) {
+      console.error('Error downloading file:', error);
+      alert('Failed to download document');
+    } finally {
+      setDownloading(prev => ({ ...prev, [fileId]: false }));
     }
   };
 
-  // Console.log the payload in JSON format
-  console.log(`Step ${currentStep} Payload:`, JSON.stringify({
-    step: currentStep,
-    stepName: filteredStepsConfig[currentStep - 1]?.name,
-    payload: payload,
-    applicationDetails: {
-      uuid: payload.applicationDetails.uuid,
-      applicationNumber: payload.applicationDetails.applicationNumber
-    }
-  }, null, 2));
+  // Get application number from draft response
+  const applicationNumber = useMemo(() => {
+    if (!draftResponse) return null;
+    return draftResponse.data.applicationDetails?.applicationNumber || "N/A";
+  }, [draftResponse]);
 
-  // Here you would typically send the payload to your API
-  // await sendPayloadToAPI(payload);
-
-  setCurrentStep((prevStep) => prevStep + 1);
-};
-
-// Helper function to build payload incrementally based on current step
-const buildIncrementalPayload = (formData, currentStep) => {
-  const payload = {};
-
-  // Step 1 data
-  if (currentStep >= 1) {
-    payload.creditorBasicDetails = {
-      uuid: formData.creditorBasicDetailsUuid || uuidv4(),
-      financialCreditorName: formData.step1?.financialCreditorName || "",
-      financialCreditorEmail: formData.step1?.financialCreditorEmail || "",
-      identificationType: formData.step1?.identificationType || "",
-      identificationNumber: formData.step1?.incorporatedIdentificationNumber || "",
-      document: extractFileDetails(formData.step1?.incorporatedProofDocument, "web_upload", "identification"),
-    };
-
-    payload.addressDetails = {
-      addressLine1: formData.step1?.addressLine1 || "",
-      addressLine2: formData.step1?.addressLine2 || "",
-      city: formData.step1?.city || "",
-      state: formData.step1?.state || "",
-      pincode: formData.step1?.pincode || "",
-    };
-  }
-
-  // Step 2 data
-  if (currentStep >= 2) {
-    payload.claimDetails = {
-      uuid: formData.claimDetailsUuid || uuidv4(),
-      claimType: formData.step2?.claimType || "",
-      hasSecurityInterest: formData.step2?.hasSecurityInterest || "",
-      hasGuarantee: formData.step2?.hasGuarantee || "",
-      claimAmount: parseFloat(formData.step2?.claimAmount) || 0,
-      principalBorrowerName: formData.step2?.principalBorrowerName1 || "",
-      principalBorrowerAddress: formData.step2?.principalBorrowerAddress1 || "",
-      debtDetails: formData.step2?.debtDetails || "",
-      debtDate: formData.step2?.debtDate || "",
-      mutualDetails: formData.step2?.mutualDetails || "",
-      securityValue: parseFloat(formData.step2?.securityValue) || 0,
-      securityDate: formData.step2?.securityDate || "",
-      guaranteeValue: parseFloat(formData.step2?.guaranteeValue) || 0,
-      guaranteeDate: formData.step2?.guaranteeDate || "",
-    };
-
-    payload.bankAccountDetails = {
-      bankAccountNumber: formData.step2?.accountNumber || "",
-      bankIfscCode: formData.step2?.ifscCode || "",
-      bankName: formData.step2?.bankName || "",
-      bankBranchName: formData.step2?.branchName || "",
-      branchAddress: formData.step2?.branchAddress || "",
-      city: formData.step2?.city || "",
-      state: formData.step2?.state || "",
-      district: formData.step2?.district || "",
-    };
-  }
-
-  // Step 3 data
-  if (currentStep >= 3) {
-    payload.signatoryDetails = {
-      uuid: formData.signatoryDetailsUuid || uuidv4(),
-      creditorName: formData.step3?.creditorName || "",
-      creditorPosition: formData.step3?.creditorPosition || "",
-      creditorSignature: formData.step3?.creditorSignatureText || "",
-      hasSignature: formData.step3?.hasSignature || "",
-      creditorAddress: formData.step3?.creditorAddress || "",
-      document: extractFileDetails(formData.step3?.signatureFile, "web_upload", "signature"),
-    };
-  }
-
-  // Step 4 data
-  if (currentStep >= 4) {
-    payload.uploadDocumentDetails = {
-      identityProofType: formData.step4?.identityProofType || "",
-      addressProofType: formData.step4?.addressProofType || "",
-      identityProofFile: extractFileDetails(formData.step4?.identityProofFile, "web_upload", "identity_proof"),
-      addressProofFile: extractFileDetails(formData.step4?.addressProofFile, "web_upload", "address_proof"),
-    };
-  }
-
-  return payload;
-};
-
-// Example API call function (uncomment and implement as needed)
-/*
-const sendPayloadToAPI = async (payload) => {
-  try {
-    const REQUEST = `${process.env.REACT_APP_APPLICATION_SERVICE}${URLS_ENDPOINT.APP_SERVICES.APPLICATION_FORMSUBMIT}`;
-    const response = await postData(REQUEST, payload);
+  // Format document display with download button
+  const formatFileInfo = (fileData) => {
+    if (!fileData) return "No file uploaded";
+    if (typeof fileData === "string") return fileData;
     
-    if (response.data.status.code === "200") {
-      // Handle successful response
-      console.log("Data saved successfully for step");
-    } else {
-      toast.error(`Failed to save data: ${response.data.status.message}`);
-    }
-  } catch (error) {
-    console.error("Error saving data:", error);
-    toast.error(error.message || "Failed to save data");
+    return (
+      <div className="d-flex align-items-center">
+        <span className="me-2">{fileData.docName || "File uploaded"}</span>
+        <Button 
+          variant="link" 
+          size="sm" 
+          className="p-0"
+          onClick={() => handleDownload(fileData.docId, fileData.docName)}
+          disabled={downloading[fileData.docId]}
+        >
+          {downloading[fileData.docId] ? (
+            <Spinner animation="border" size="sm" />
+          ) : (
+            <FaDownload className="text-primary" />
+          )}
+        </Button>
+      </div>
+    );
+  };
+
+  // Transform the draft response to match your form structure
+  const transformedDraftData = useMemo(() => {
+    if (!draftResponse) return null;
+
+    const basicDetails = draftResponse.data.applicationDetails?.creditorBasicDetails || {};
+    const claimDetails = draftResponse.data.applicationDetails?.claimDetails || {};
+    const signatoryDetails = draftResponse.data.applicationDetails?.signatoryDetails || {};
+
+    return {
+      debtorName: basicDetails.debtorName,
+      CreditorName: basicDetails.creditorName,
+      totalClaimAmount: basicDetails.totalClaimAmount,
+      debtDetails: basicDetails.debtDetails,
+      mutualCreditDetails: basicDetails.mutualCreditDetails,
+      identificationType: basicDetails.document?.docType,
+      identificationNumber: basicDetails.identificationNumber,
+      identificationDocument: basicDetails.document,
+
+      securityInterestAmount: claimDetails.securityInterestAmount,
+      guaranteeAmount: claimDetails.guaranteeAmount,
+      guarantorName: claimDetails.guarantorName,
+      guarantorAddress: claimDetails.guarantorAddress,
+      creditorAddress: claimDetails.creditorAddress,
+      creditorEmail: claimDetails.creditorEmail,
+      beneficiaryName: claimDetails.beneficiaryName,
+      beneficiaryAddress: claimDetails.beneficiaryAddress,
+      corporateDebtorSecurityAmount: claimDetails.corporateDebtorSecurityAmount,
+      corporateDebtorGuaranteeAmount: claimDetails.corporateDebtorGuaranteeAmount,
+      principalBorrowerName: claimDetails.principalBorrowerName,
+      principalBorrowerAddress: claimDetails.principalBorrowerAddress,
+      accountNumber: claimDetails.bankAccountNumber,
+      ifscCode: claimDetails.bankIfscCode,
+      branchName: claimDetails.bankBranchName,
+      addressProofType: claimDetails.document?.docType,
+      addressProofNumber: claimDetails.addressProofNumber,
+      addressProofDocument: claimDetails.document,
+
+      signatoryName: signatoryDetails.name,
+      signatoryPosition: signatoryDetails.position,
+      signatoryAddress: signatoryDetails.address,
+      signatoryDocument: signatoryDetails.document,
+    };
+  }, [draftResponse]);
+
+  // Use draft data if available, otherwise use regular form data
+  const displayData = transformedDraftData || formData;
+
+  // Format the data for display
+  const formattedData = useMemo(() => {
+    if (!displayData || Object.keys(displayData).length === 0) return null;
+
+    return {
+      step1: {
+        creditorDetails: {
+          "Debtor Name": displayData.debtorName,
+          "Creditor Name": displayData.CreditorName,
+          "Total Claim Amount": displayData.totalClaimAmount,
+          "Debt Details": displayData.debtDetails,
+          "Mutual Credit Details": displayData.mutualCreditDetails,
+        },
+        identificationDetails: {
+          "Identification Type": displayData.identificationType,
+          "Identification Number": displayData.identificationNumber,
+          "Identification Document": formatFileInfo(displayData.identificationDocument),
+        }
+      },
+      step2: {
+        financialDetails: {
+          "Security Interest Amount": displayData.securityInterestAmount,
+          "Guarantee Amount": displayData.guaranteeAmount,
+          "Guarantor Name": displayData.guarantorName,
+          "Guarantor Address": displayData.guarantorAddress,
+          "Creditor Address": displayData.creditorAddress,
+          "Creditor Email": displayData.creditorEmail,
+        },
+        beneficiaryDetails: {
+          "Beneficiary Name": displayData.beneficiaryName,
+          "Beneficiary Address": displayData.beneficiaryAddress,
+          "Corporate Debtor Security Amount": displayData.corporateDebtorSecurityAmount,
+          "Corporate Debtor Guarantee Amount": displayData.corporateDebtorGuaranteeAmount,
+        },
+        addressproofDetails: {
+          "Address Proof Type": displayData.addressProofType,
+          "Address Proof Number": displayData.addressProofNumber,
+          "Address Proof Document": formatFileInfo(displayData.addressProofDocument),
+        },
+        bankDetails: {
+          "Principal Borrower Name": displayData.principalBorrowerName,
+          "Principal Borrower Address": displayData.principalBorrowerAddress,
+          "Account Number": displayData.accountNumber,
+          "IFSC Code": displayData.ifscCode,
+          "Branch Name": displayData.branchName,
+        }
+      },
+      step3: {
+        signatoryDetails: {
+          "Signatory Name": displayData.signatoryName,
+          "Signatory Position": displayData.signatoryPosition,
+          "Signatory Address": displayData.signatoryAddress,
+          "Signatory Document": formatFileInfo(displayData.signatoryDocument),
+        }
+      }
+    };
+  }, [displayData, downloading]);
+
+  if (loading) {
+    return (
+      <div className="d-flex justify-content-center align-items-center" style={{ height: "100vh" }}>
+        <Spinner animation="border" />
+      </div>
+    );
   }
+
+  if (!formattedData) {
+    return (
+      <div className="alert alert-info">
+        No form data available to display
+      </div>
+    );
+  }
+
+  const renderPreviewSection = (fields) => (
+    <Container fluid>
+      <Row className="g-3">
+        {Object.entries(fields).map(([key, value]) => (
+          <Col key={key} xs={12} sm={6} md={3} className="mb-3">
+            <PreviewCard 
+              title={key} 
+              value={value} 
+            />
+          </Col>
+        ))}
+      </Row>
+    </Container>
+  );
+
+  const renderCard = (title, fields) => (
+    <div className="mb-3">
+      <h5 style={{ fontWeight: 600 }}>{title}</h5>
+      {renderPreviewSection(fields)}
+    </div>
+  );
+
+  return (
+    <div className="form-stepper">
+      {draftResponse && (
+        <div className="d-flex justify-content-between align-items-center mb-3 p-3 bg-light rounded">
+          <div>
+            <span className="text-muted small">Application Number:</span>
+            <span className="ms-2 fw-bold">{applicationNumber}</span>
+          </div>
+          <Badge bg="warning" className="text-dark">
+            Draft Preview
+          </Badge>
+        </div>
+      )}
+
+      <Collapsible title="Step 1: Creditor and Identification Details">
+        {renderCard("Creditor Details", formattedData.step1.creditorDetails)}
+        {renderCard("Identification Details", formattedData.step1.identificationDetails)}
+      </Collapsible>
+
+      <Collapsible title="Step 2: Financial and Beneficiary Details">
+        {renderCard("Financial Details", formattedData.step2.financialDetails)}
+        {renderCard("Address Proof Details", formattedData.step2.addressproofDetails)}
+        {renderCard("Beneficiary Details", formattedData.step2.beneficiaryDetails)}
+        {renderCard("Bank Details", formattedData.step2.bankDetails)}
+      </Collapsible>
+
+      <Collapsible title="Step 3: Signatory Details">
+        {renderCard("Signatory Details", formattedData.step3.signatoryDetails)}
+      </Collapsible>
+    </div>
+  );
 };
-*/
+
+export default React.memo(ReviewStep);
+{
+    "step1": {
+        "identificationType": "incorporated",
+        "financialCreditorName": "ayan",
+        "financialCreditorEmail": "ayan@gmail.com",
+        "addressLine1": "kolkata",
+        "addressLine2": "",
+        "city": "kolkata",
+        "state": "west bengal",
+        "pincode": "700155",
+        "identificationtype_details": [
+            {
+                "id": 1,
+                "details": "213399288288",
+                "proof": {
+                    "fileId": "c1da8dbd-5634-484a-9680-e3c3b2d9576f",
+                    "fileName": "Rahul_Sharma_Analyst__DeloitteAnalyst (003).pdf",
+                    "fileType": "application/pdf"
+                }
+            }
+        ]
+    },
+    "step2": {
+        "claimType": "principalBorrower",
+        "hasSecurityInterest": "yes",
+        "hasGuarantee": "yes",
+        "claimAmount": "2992",
+        "financialDebtName1": "ayan",
+        "financialDebtAddress1": "kolkata",
+        "debtDetails": "tttt",
+        "debtDate": "2025-04-30",
+        "mutualDetails": "ttttttttttttttttttttttttttttttttttttttt",
+        "accountNumber": "5352355523",
+        "ifscCode": "BARB0AHMEDN",
+        "bankName": "Bank of Baroda",
+        "branchName": "AHMEDNAGAR BRANCH",
+        "branchAddress": "AHMEDNAGAR BRANCH,TULSI- VIHAR MANIK CHOWK, AHEMDNAGAR,AHMEDNAGAR,414001, AHMADNAGAR, MAHARASHTRA",
+        "city": "AHMADNAGAR",
+        "state": "MAHARASHTRA",
+        "district": "AHMADNAGAR",
+        "principalBorrowerName1": "ayan",
+        "principalBorrowerAddress1": "kolkata",
+        "securityValue": "212122112",
+        "securityDate": "2025-04-30",
+        "guaranteeValue": "12211221",
+        "guaranteeDate": "2025-04-30"
+    },
+    "step3": {
+        "creditorName": "AYAN",
+        "creditorPosition": "tttt",
+        "creditorSignatureText": "ayan",
+        "hasSignature": "yes",
+        "creditorAddress": "ssrrererereer",
+        "signatureFile": {
+            "fileId": "e5bbafc8-dfa6-4043-b81e-0363d490f511",
+            "docName": "Rahul_Sharma_Analyst__DeloitteAnalyst (003).pdf",
+            "docType": "identification",
+            "docSource": "web_upload",
+            "fileUrl": ""
+        }
+    },
+    "step4": {
+        "identityProofType": "aadhaar",
+        "addressProofType": "voter_id",
+        "identityProofFile": {
+            "fileId": "c71f7525-9c99-4c56-84f2-8df56e696d59",
+            "fileName": "Rahul_Sharma_Analyst__DeloitteAnalyst (003).pdf",
+            "fileType": "application/pdf"
+        },
+        "addressProofFile": {
+            "fileId": "e37b2b3e-4687-4a81-8b1b-4a6072a38d23",
+            "fileName": "Rahul_Sharma_Analyst__DeloitteAnalyst (003).pdf",
+            "fileType": "application/pdf"
+        }
+    }
+}
