@@ -1,84 +1,231 @@
-const ClaimTypeFields = ({ 
-  claimType, 
-  control, 
-  register, 
-  errors, 
-  setValue, 
-  getValues, 
-  watch,
-  trigger
-}) => {
-  // ... (other state declarations remain the same)
-
-  const collectEntityData = useCallback(() => {
-    const entityType = 
-      claimType === "principalBorrower" ? "PRINCIPAL_BORROWER" :
-      claimType === "guarantor" ? "GUARANTOR" :
-      "BENEFICIARY";
-
-    const entities = entityFields.map(entityNum => {
-      const name = getValues(`${claimType}Name${entityNum}`);
-      const address = getValues(`${claimType}Address${entityNum}`);
+ const handleNext = async () => {
+    if (!currentSubmitHandler) {
+      console.error("No submit handler available.");
+      return;
+    }
+  
+    const currentStepData = await currentSubmitHandler();
+    if (!currentStepData) {
+      console.error("Form validation failed.");
+      return;
+    }
+  
+    if (!validateStepData(currentStep, currentStepData)) {
+      return;
+    }
+  
+    const processedStepData = await processFileUploads(currentStepData, currentStep);
+  
+    // Update form data with current step's data
+    const updatedFormData = {
+      ...formData,
+      [`step${currentStep}`]: { ...formData[`step${currentStep}`], ...processedStepData },
+    };
+    console.log("updatedFormData", updatedFormData);
+    setFormData(updatedFormData);
+  
+    // If we already have an API response with an application number, use that as the base for our payload
+    let payload;
+    if (apiResponse && apiResponse.applicationDetails && apiResponse.applicationDetails.applicationNumber) {
+      // Clone the existing API response
+      payload = JSON.parse(JSON.stringify(apiResponse));
       
-      // Only include entities that have at least a name
-      if (name) {
-        return {
-          id: entityNum,
-          name: name || "",
-          address: address || "",
-          type: entityType
+      // Update only the current step's data in the payload
+      if (currentStep === 1) {
+        // Update creditorBasicDetails
+        payload.applicationDetails.creditorBasicDetails = {
+          uuid: formData.creditorBasicDetailsUuid || payload.applicationDetails.creditorBasicDetails?.uuid || "",
+          financialCreditorName: updatedFormData.step1?.financialCreditorName || "",
+          financialCreditorEmail: updatedFormData.step1?.financialCreditorEmail || "",
+          financialDebtorName: updatedFormData.step1?.corporateDebtorName || "",
+          identificationTypeDetails: {
+            identificationType: updatedFormData.step1?.identificationType || "",
+            identifications: updatedFormData.step1?.identificationtype_details?.map(item => ({
+              uuid: item.uuid || "",
+              creditorsBasicUuid: formData.creditorBasicDetailsUuid || payload.applicationDetails.creditorBasicDetails?.uuid || "",
+              identificationRecord: item.details || "",
+              proofOfIdentificationDocuments: {
+                uuid: item.proof?.uuid || "",
+                supportingDocumentUuid: "",
+                docId: item.proof?.fileId || "",
+                docType: "identification",
+                docSource: "identification_type",
+                docName: item.proof?.fileName || ""
+              }
+            })) || []
+          },
+          addressDetails: {
+            addressLine1: updatedFormData.step1?.addressLine1 || "",
+            addressLine2: updatedFormData.step1?.addressLine2 || "",
+            city: updatedFormData.step1?.city || "",
+            state: updatedFormData.step1?.state || "",
+            pincode: updatedFormData.step1?.pincode || ""
+          },
+          auditDetails: payload.applicationDetails.creditorBasicDetails?.auditDetails || null,
+          empty: false
+        };
+      } else if (currentStep === 2) {
+        // Update claimDetails
+        const entityData = updatedFormData.step2?.entityData || [];
+        const principalBorrowers=entityData.filter(e => e.type === "PRINCIPAL_BORROWER");
+        const gurantors = entityData.filter(e => e.type === "GUARANTOR");
+        const beneficiaries = entityData.filter(e => e.type === "BENEFICIARY");
+        
+        
+        payload.applicationDetails.claimDetails = {
+          uuid: formData.claimDetailsUuid || payload.applicationDetails.claimDetails?.uuid || "",
+          creditorBasicDetailsUuid: formData.creditorBasicDetailsUuid || "",
+          // creditorBasicDetailsUuid: formData.creditorBasicDetailsUuid || payload.applicationDetails.creditorBasicDetails?.uuid || "",
+          claimType: updatedFormData.step2?.claimType || "",
+          claimAmount: parseFloat(updatedFormData.step2?.claimAmount) || 0,
+          isAmountOfClaimCoverdBySecurityInterest: updatedFormData.step2?.hasSecurityInterest === "yes",
+          securityValue: parseFloat(updatedFormData.step2?.securityValue) || 0,
+          securityDate: updatedFormData.step2?.securityDate || "",
+          isAmountOfClaimCoverdByGuarantee: updatedFormData.step2?.hasGuarantee === "yes",
+          guaranteeValue: parseFloat(updatedFormData.step2?.guaranteeValue) || 0,
+          guaranteeDate: updatedFormData.step2?.guaranteeDate || "",
+          principalBorrowerDetails: principalBorrowers.map(e => ({
+            name: e.name || "",
+            address: e.address || ""
+           
+          })) || [],
+          // creditorDetails: entityData.filter(e => e.type === "CREDITOR")?.map(e => ({
+          //   name: 
+          //   address: e.address
+          // })) || [],
+          beneficiaryDetails: gurantors?.map(e => ({
+            name: e.name || "",
+            address: e.address || ""
+          })) || [],
+          guarantorDetails: beneficiaries?.map(e => ({
+            name: e.name || "",
+            address: e.address || ""
+          })) || [],
+          debtIncurredDetails: updatedFormData.step2?.debtDetails || "",
+          debtIncurredDate: updatedFormData.step2?.debtDate || "",
+          mutualDealingDetailsAgainstTheClaim: updatedFormData.step2?.mutualDetails || "",
+          bankAccountDetails: {
+            bankAccountNumber: updatedFormData.step2?.accountNumber || "",
+            bankIfscCode: updatedFormData.step2?.ifscCode || "",
+            bankName: updatedFormData.step2?.bankName || "",
+            bankBranchName: updatedFormData.step2?.branchName || "",
+            branchAddress: updatedFormData.step2?.branchAddress || "",
+            city: updatedFormData.step2?.city || "",
+            state: updatedFormData.step2?.state || "",
+            district: updatedFormData.step2?.district || ""
+          },
+          auditDetails: payload.applicationDetails.claimDetails?.auditDetails || null,
+          empty: false
+        };
+      } else if (currentStep === 3) {
+        // Update signatoryDetails
+        payload.applicationDetails.signatoryDetails = {
+          uuid: formData.signatoryDetailsUuid || payload.applicationDetails.signatoryDetails?.uuid || "",
+          creditorBasicDetailsUuid: formData.creditorBasicDetailsUuid || payload.applicationDetails.creditorBasicDetails?.uuid || "",
+          financialCreditorName: updatedFormData.step3?.creditorName || "",
+          positionOfCreditor: updatedFormData.step3?.creditorPosition || "",
+          signatureFinancialCreditor: updatedFormData.step3?.creditorSignatureText || "",
+          addressOfSigningPerson: updatedFormData.step3?.creditorAddress || "",
+          isSignatureToUpload: updatedFormData.step3?.hasSignature === "Yes",
+          document: updatedFormData.step3?.signatureFile ? {
+            uuid: updatedFormData.step3.signatureFile.uuid || "",
+            supportingDocumentUuid: "",
+            docId: updatedFormData.step3.signatureFile.fileId || "",
+            docType: "signature",
+            docSource: "Signature",
+            docName: updatedFormData.step3.signatureFile.fileName || ""
+          } : null,
+          auditDetails: payload.applicationDetails.signatoryDetails?.auditDetails || null,
+          empty: false
+        };
+      } else if (currentStep === 4) {
+        // Update supportingDocument
+        payload.applicationDetails.supportingDocument = {
+          uuid: payload.applicationDetails.supportingDocument?.uuid || "",
+          creditorBasicDetailsUuid: formData.creditorBasicDetailsUuid || payload.applicationDetails.creditorBasicDetails?.uuid || "",
+          documents: [
+            ...(updatedFormData.step4?.identityProofFile ? [{
+              uuid: updatedFormData.step4.identityProofFile.uuid || "",
+              supportingDocumentUuid: "",
+              docId: updatedFormData.step4.identityProofFile.fileId || "",
+              docType: updatedFormData.step4.identityProofType || "",
+              docSource: "identity_proof",
+              docName: updatedFormData.step4.identityProofFile.fileName || ""
+            }] : []),
+            ...(updatedFormData.step4?.addressProofFile ? [{
+              uuid: updatedFormData.step4.addressProofFile.uuid || "",
+              supportingDocumentUuid: "",
+              docId: updatedFormData.step4.addressProofFile.fileId || "",
+              docType: updatedFormData.step4.addressProofType || "",
+              docSource: "address_proof",
+              docName: updatedFormData.step4.addressProofFile.fileName || ""
+            }] : [])
+          ],
+          auditDetails: payload.applicationDetails.supportingDocument?.auditDetails || null,
+          empty: false
         };
       }
-      return null;
-    }).filter(Boolean); // Remove null entries
-
-    setValue("entityData", entities, { shouldValidate: true });
-    return entities;
-  }, [claimType, entityFields, getValues, setValue]);
-
-  const addEntityField = useCallback(() => {
-    const newIndex = (entityFields.length > 0 ? Math.max(...entityFields) : 0) + 1;
-    setEntityFields([...entityFields, newIndex]);
-    
-    // Focus the new field after a small delay
-    setTimeout(() => {
-      document.getElementById(`${claimType}Name${newIndex}`)?.focus();
-    }, 100);
-  }, [entityFields, claimType]);
-
-  const removeEntityField = useCallback(async (index) => {
-    if (entityFields.length <= 1) return;
-
-    const entityNumToRemove = entityFields[index];
-    const newFields = entityFields.filter((_, i) => i !== index);
-    setEntityFields(newFields);
-
-    // Clear the form values for the removed entity
-    setValue(`${claimType}Name${entityNumToRemove}`, undefined, { shouldValidate: false });
-    setValue(`${claimType}Address${entityNumToRemove}`, undefined, { shouldValidate: false });
-
-    // Get current entityData and filter out the removed entity
-    const currentEntityData = getValues("entityData") || [];
-    const updatedEntityData = currentEntityData.filter(entity => 
-      entity.id !== entityNumToRemove
-    );
-
-    // Update the entityData array in form state
-    setValue("entityData", updatedEntityData, { shouldValidate: true });
-
-    await trigger();
-  }, [entityFields, setValue, getValues, trigger, claimType]);
-
-  // Watch for changes and update entityData
-  useEffect(() => {
-    const subscription = watch((value, { name }) => {
-      if (name && (name.includes('Name') || name.includes('Address'))) {
-        collectEntityData();
+    } else {
+      // If no previous API response, build a new payload
+      payload = buildStepPayload(updatedFormData, currentStep);
+    }
+  
+    try {
+      const endpoint = `${process.env.REACT_APP_APPLICATION_SERVICE}${URLS_ENDPOINT.APP_SERVICES.APPLICATION_FORMSUBMIT}`;
+      const response = await postData(endpoint, payload);
+      
+      if (response.data?.status?.code === "200") {
+        // Store the complete API response
+        setApiResponse(response.data);
+        
+        // Update form data with any IDs returned from the server
+        const serverUpdatedFormData = { ...updatedFormData };
+        
+        if (response.data.applicationDetails.creditorBasicDetails?.uuid) {
+          serverUpdatedFormData.creditorBasicDetailsUuid = response.data.applicationDetails.creditorBasicDetails.uuid || formData.creditorBasicDetailsUuid;
+        }
+        if (response.data.applicationDetails.claimDetails?.uuid) {
+          serverUpdatedFormData.claimDetailsUuid = response.data.applicationDetails.claimDetails.uuid || formData.claimDetailsUuid;
+        }
+        if (response.data.applicationDetails.signatoryDetails?.uuid) {
+          serverUpdatedFormData.signatoryDetailsUuid = response.data.applicationDetails.signatoryDetails.uuid || formData.signatoryDetailsUuid;
+        }
+  
+        // Store application number and UUID if available
+        if (response.data.applicationDetails.applicationNumber) {
+          serverUpdatedFormData.applicationNumber = response.data.applicationDetails.applicationNumber;
+        }
+        if (response.data.applicationDetails.uuid) {
+          serverUpdatedFormData.uuid = response.data.applicationDetails.uuid;
+        }
+  
+        setFormData(serverUpdatedFormData);
+        localStorage.setItem('formData', JSON.stringify(serverUpdatedFormData));
+  
+        // Store application number if it's new
+        if (response.data.applicationDetails.applicationNumber) {
+          localStorage.setItem('applicationdatawithId', response.data.applicationDetails.applicationNumber);
+        }
+  
+        console.log('Application saved successfully', response.data);
+        toast.success(`Step ${currentStep} saved successfully`);
+  
+        // Move to next step
+        setCurrentStep((prevStep) => prevStep + 1);
+      } else {
+        throw new Error(response.data?.status?.message || 'Failed to save step');
       }
-    });
-    return () => subscription.unsubscribe();
-  }, [watch, collectEntityData]);
-
-  // Render method remains the same
-  // ...
-};
+    } catch (error) {
+      console.error('Error saving step:', error);
+      toast.error(`Failed to save step ${currentStep}: ${error.message}`);
+    }
+  };
+  
+{
+    "errorCode": "ERR_TECHNICAL",
+    "errorMessage": "Internal server error occurred.",
+    "errorDetails": [
+        "JSON parse error: Cannot deserialize value of type `org.claim.app.model.enums.ClaimType` from String \"principalBorrower\": not one of the values accepted for Enum class: [PRINCIPAL_BORROWER, BENEFICIARY, GUARANTOR]"
+    ],
+    "timestamp": 1746642140147
+}
