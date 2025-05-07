@@ -755,3 +755,78 @@ const Stepper = ({ stepsConfig = [], formAllData }) => {
 };
 
 export default Stepper;
+
+const handleNext = async () => {
+  if (!currentSubmitHandler) {
+    console.error("No submit handler available.");
+    return;
+  }
+
+  const currentStepData = await currentSubmitHandler();
+  if (!currentStepData) {
+    console.error("Form validation failed.");
+    return;
+  }
+
+  if (!validateStepData(currentStep, currentStepData)) {
+    return;
+  }
+
+  // Process any files uploaded in this step
+  const processedStepData = await processFileUploads(currentStepData, currentStep);
+
+  // Update local formData with latest step data
+  const updatedFormData = {
+    ...formData,
+    [`step${currentStep}`]: { ...formData[`step${currentStep}`], ...processedStepData },
+  };
+
+  setFormData(updatedFormData);
+  localStorage.setItem('formData', JSON.stringify(updatedFormData));
+
+  // Build payload for API
+  const payload = buildStepPayload(updatedFormData, currentStep, applicationDetails);
+
+  try {
+    const endpoint = `${process.env.REACT_APP_APPLICATION_SERVICE}${URLS_ENDPOINT.APP_SERVICES.APPLICATION_FORMSUBMIT}`;
+    const response = await postData(endpoint, payload);
+
+    if (response.data?.status?.code === "200") {
+      const serverResponse = response.data.applicationDetails;
+
+      // Update application details with response from server
+      const updatedApplicationDetails = {
+        ...applicationDetails,
+        ...serverResponse,
+        uuid: serverResponse.uuid || applicationDetails.uuid,
+        applicationNumber: serverResponse.applicationNumber || applicationDetails.applicationNumber,
+      };
+
+      updateRegistrationData('applicationDetails', updatedApplicationDetails);
+      localStorage.setItem('applicationDetails', JSON.stringify(updatedApplicationDetails));
+
+      // Update formData with server-generated UUIDs
+      const serverUpdatedFormData = { ...updatedFormData };
+      if (serverResponse.creditorBasicDetails?.uuid) {
+        serverUpdatedFormData.creditorBasicDetailsUuid = serverResponse.creditorBasicDetails.uuid;
+      }
+      if (serverResponse.claimDetails?.uuid) {
+        serverUpdatedFormData.claimDetailsUuid = serverResponse.claimDetails.uuid;
+      }
+      if (serverResponse.signatoryDetails?.uuid) {
+        serverUpdatedFormData.signatoryDetailsUuid = serverResponse.signatoryDetails.uuid;
+      }
+
+      setFormData(serverUpdatedFormData);
+      localStorage.setItem('formData', JSON.stringify(serverUpdatedFormData));
+
+      toast.success(`Step ${currentStep} saved successfully`);
+      setCurrentStep((prevStep) => prevStep + 1);
+    } else {
+      throw new Error(response.data?.status?.message || 'Failed to save step');
+    }
+  } catch (error) {
+    console.error('Error saving step:', error);
+    toast.error(`Failed to save step ${currentStep}: ${error.message}`);
+  }
+};
