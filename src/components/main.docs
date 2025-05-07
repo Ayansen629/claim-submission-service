@@ -1,328 +1,94 @@
-import React, { useState, useRef, useEffect, useCallback } from "react";
-import { useNavigate, useParams } from "react-router-dom";
-import { toast } from "react-toastify";
-import { Modal, Button, Form } from "react-bootstrap";
-import "./Stepper.css";
-import { useRegistration } from "../../context/ApplicationContext";
-import ReviewStep from "./ReviewStep";
-import { FormDataProvider } from "../../context/FormDataContext";
-import { postData } from "../../../services/http.service.ts";
-import { URLS_ENDPOINT } from "../../../utils/urlsConstants.ts";
-import axios from "axios";
-import { v4 as uuidv4 } from "uuid"; // Import UUID generator
-import DeclarationModal from "../DeclarationModal";
+const handleNext = async () => {
+  if (!currentSubmitHandler) {
+    console.error("No submit handler available.");
+    return;
+  }
 
-// Deep equality check
-const deepEqual = (obj1, obj2) => {
-  return JSON.stringify(obj1) === JSON.stringify(obj2);
-};
+  const currentStepData = await currentSubmitHandler();
+  if (!currentStepData) {
+    console.error("Form validation failed.");
+    return;
+  }
 
-// Generate unique fileId
-const generateFileId = (file) => {
-  return `file-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
-};
+  if (!validateStepData(currentStep, currentStepData)) {
+    return;
+  }
 
-// Extract single file details
-const extractFileDetails = (file, source, documentType) => {
-  if (!file) return null;
-  return {
-    docId: file.fileId || generateFileId(file),
-    docName: file.docName || file.fileName,
-    docType: documentType,
-    docSource: source,
+  const processedStepData = await processFileUploads(currentStepData, currentStep);
+
+  // Update form data with current step's data
+  const updatedFormData = {
+    ...formData,
+    [`step${currentStep}`]: { ...formData[`step${currentStep}`], ...processedStepData },
   };
-};
 
-// Extract multi-file details
-const extractMultiFileDetails = (files, source, documentType) => {
-  if (!Array.isArray(files)) return [];
-  return files.map(file => ({
-    identificationRecord: file.details,
-    proofOfIdentificationDocuments: extractFileDetails(file.proof, source, documentType)
-  }));
-};
-
-// Build incremental payload based on current step
-const buildIncrementalPayload = (formData, applicationDetails, currentStep, userFormData) => {
-  const creditorBasicUuid = formData.creditorBasicDetailsUuid || applicationDetails?.creditorBasicDetails?.uuid || "";
-  const claimDetailsUuid = formData.claimDetailsUuid || applicationDetails?.claimDetails?.uuid || "";
-  const signatoryDetailsUuid = formData.signatoryDetailsUuid || applicationDetails?.signatoryDetails?.uuid || "";
-
-  return {
-    userInfo: userFormData?.fullloginDetails || {},
-    applicationDetails: {
-      uuid: applicationDetails.uuid || "",
-      applicationNumber: applicationDetails.applicationNumber || "",
-      status: "Draft",
-      isActive: true,
-      isFinalSubmit: false,
-
-      // Step 1 - Creditor Basic Details
-      ...(currentStep >= 1 && {
-        creditorBasicDetails: {
-          uuid: creditorBasicUuid,
-          financialCreditorName: formData.step1?.financialCreditorName || "",
-          financialCreditorEmail: formData.step1?.financialCreditorEmail || "",
-          identificationTypeDetails: {
-            identificationType: formData.step1?.identificationType || "",
-            identifications: extractMultiFileDetails(formData.step1?.identificationtype_details, "identification", "identification")
-          },
-          addressDetails: {
-            addressLine1: formData.step1?.addressLine1 || "",
-            addressLine2: formData.step1?.addressLine2 || "",
-            city: formData.step1?.city || "",
-            state: formData.step1?.state || "",
-            pincode: formData.step1?.pincode || ""
-          }
-        }
-      }),
-
-      // Step 2 - Claim Details
-      ...(currentStep >= 2 && {
-        claimDetails: {
-          uuid: claimDetailsUuid,
-          claimType: formData.step2?.claimType || "",
-          claimAmount: parseFloat(formData.step2?.claimAmount) || null,
-          isAmountOfClaimCoverdBySecurityInterest: formData.step2?.hasSecurityInterest === 'Yes',
-          securityValue: parseFloat(formData.step2?.securityValue) || null,
-          securityDate: formData.step2?.securityDate || "",
-          isAmountOfClaimCoverdByGuarantee: formData.step2?.hasGuarantee === 'Yes',
-          guaranteeValue: parseFloat(formData.step2?.guaranteeValue) || null,
-          guaranteeDate: formData.step2?.guaranteeDate || "",
-          principalBorrowerDetails: [
-            {
-              name: formData.step2?.principalBorrowerName1 || "",
-              address: formData.step2?.principalBorrowerAddress1 || ""
-            }
-          ],
-          debtIncurredDetails: formData.step2?.debtDetails || "",
-          debtIncurredDate: formData.step2?.debtDate || "",
-          mutualDealingDetailsAgainstTheClaim: formData.step2?.mutualDetails || "",
-          bankAccountDetails: {
-            bankAccountNumber: formData.step2?.accountNumber || "",
-            bankIfscCode: formData.step2?.ifscCode || "",
-            bankName: formData.step2?.bankName || "",
-            bankBranchName: formData.step2?.branchName || "",
-            branchAddress: formData.step2?.branchAddress || "",
-            city: formData.step2?.city || "",
-            state: formData.step2?.state || "",
-            district: formData.step2?.district || ""
-          }
-        }
-      }),
-
-      // Step 3 - Signatory Details
-      ...(currentStep >= 3 && {
-        signatoryDetails: {
-          uuid: signatoryDetailsUuid,
-          financialCreditorName: formData.step3?.creditorName || "",
-          positionOfCreditor: formData.step3?.creditorPosition || "",
-          signatureFinancialCreditor: formData.step3?.creditorSignatureText || "",
-          addressOfSigningPerson: formData.step3?.creditorAddress || "",
-          isSignatureToUpload: formData.step3?.hasSignature === 'Yes',
-          document: extractFileDetails(formData.step3?.signatureFile, "signature", "signature")
-        }
-      }),
-
-      // Step 4 - Supporting Documents
-      ...(currentStep >= 4 && {
-        supportingDocument: {
-          documents: [
-            extractFileDetails(formData.step4?.identityProofFile, "identity_proof", formData.step4?.identityProofType),
-            extractFileDetails(formData.step4?.addressProofFile, "address_proof", formData.step4?.addressProofType)
-          ].filter(Boolean)
-        }
-      })
-    }
-  };
-};
-
-// Process file uploads
-const processFileUploads = async (stepData, stepNumber) => {
-  return stepData; // For now, we're mocking upload
-};
-
-// Main Component
-const Stepper = ({ stepsConfig = [], formAllData }) => {
-  const { registrationData, updateRegistrationData, applicationDetails, handleApplicatioNFormView } = useRegistration();
-  const { id } = useParams();
-  const isEditMode = !!id;
-
-  const [currentStep, setCurrentStep] = useState(1);
-  const [isConfirmed, setIsConfirmed] = useState(false);
-  const [showDeclarationModal, setShowDeclarationModal] = useState(false);
-  const [formData, setFormData] = useState(isEditMode ? registrationData : {});
-  const [isCRPUser] = useState(JSON.parse(localStorage.getItem("userFormData"))?.userType === "CRP");
-  const [currentSubmitHandler, setCurrentSubmitHandler] = useState(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-
-  const navigate = useNavigate();
-
-  // Load confirmation from localStorage
-  useEffect(() => {
-    const savedIsConfirmed = localStorage.getItem("isConfirmed");
-    if (savedIsConfirmed) setIsConfirmed(JSON.parse(savedIsConfirmed));
-  }, []);
-
-  // Save confirmation to localStorage
-  useEffect(() => {
-    localStorage.setItem("isConfirmed", JSON.stringify(isConfirmed));
-  }, [isConfirmed]);
-
-  // Set submit handler for current step
-  useEffect(() => {
-    const newSubmitHandler = stepsConfig[currentStep - 1]?.submitHandler;
-    if (newSubmitHandler) setCurrentSubmitHandler(() => newSubmitHandler);
-  }, [currentStep, stepsConfig]);
-
-  // Handle Next button click
-  const handleNext = async () => {
-    if (!currentSubmitHandler) return;
-
-    const currentStepData = await currentSubmitHandler();
-    if (!currentStepData) return;
-
-    // Update form data with current step data
-    const updatedFormData = {
-      ...formData,
-      [`step${currentStep}`]: currentStepData
-    };
-
+  if (!deepEqual(updatedFormData, formData)) {
     setFormData(updatedFormData);
+  }
 
-    // Build payload using both current step and existing data
-    const userFormData = JSON.parse(localStorage.getItem("userFormData"));
-    const payload = buildIncrementalPayload(updatedFormData, applicationDetails, currentStep, userFormData);
+  // Build the payload for the current step
+  const payload = buildIncrementalPayload(updatedFormData, currentStep, applicationDetails);
 
-    try {
-      setIsSubmitting(true);
+  try {
+    // Determine if this is an update or insert operation
+    const isUpdate = !!applicationDetails?.uuid;
+    const endpoint = isUpdate 
+      ? `${process.env.REACT_APP_APPLICATION_SERVICE}${URLS_ENDPOINT.APP_SERVICES.APPLICATION_UPDATE}`
+      : `${process.env.REACT_APP_APPLICATION_SERVICE}${URLS_ENDPOINT.APP_SERVICES.APPLICATION_CREATE}`;
 
-      console.log(`Sending Step ${currentStep} Payload:`, JSON.stringify(payload, null, 2));
+    // Make the API call
+    const response = await postData(endpoint, payload);
+    
+    if (response.data?.status?.code === "200") {
+      // Update application details in state with the response data
+      const updatedApplicationDetails = {
+        ...applicationDetails,
+        ...response.data.applicationDetails,
+        // Preserve existing UUID if this is an update
+        uuid: isUpdate ? applicationDetails.uuid : response.data.applicationDetails.uuid
+      };
 
-      // Replace with actual endpoint
-      const URL = `${process.env.REACT_APP_APPLICATION_SERVICE}${URLS_ENDPOINT.APP_SERVICES.APPLICATION_FORMSAVE}`;
-      const response = await axios.post(URL, payload);
+      // Update the context with the latest application details
+      updateRegistrationData('applicationDetails', updatedApplicationDetails);
 
-      console.log(`API Response - Step ${currentStep}:`, response.data);
+      // Update the form data with any IDs returned from the server
+      const serverUpdatedFormData = { ...updatedFormData };
+      
+      // Update step-specific UUIDs if they exist in the response
+      if (response.data.applicationDetails.creditorBasicDetails?.uuid) {
+        serverUpdatedFormData.creditorBasicDetailsUuid = response.data.applicationDetails.creditorBasicDetails.uuid;
+      }
+      if (response.data.applicationDetails.claimDetails?.uuid) {
+        serverUpdatedFormData.claimDetailsUuid = response.data.applicationDetails.claimDetails.uuid;
+      }
+      if (response.data.applicationDetails.signatoryDetails?.uuid) {
+        serverUpdatedFormData.signatoryDetailsUuid = response.data.applicationDetails.signatoryDetails.uuid;
+      }
 
-      // Update context with new UUIDs and data from response
-      const apiResponse = response.data;
+      setFormData(serverUpdatedFormData);
+      
+      // Store the application number in local storage if it's new
+      if (!isUpdate && response.data.applicationDetails.applicationNumber) {
+        localStorage.setItem('applicationdatawithId', JSON.stringify(response.data.applicationDetails.applicationNumber));
+      }
 
-      updateRegistrationData({
-        ...updatedFormData,
-        applicationUuid: apiResponse.applicationDetails.uuid,
-        creditorBasicDetailsUuid: apiResponse.applicationDetails.creditorBasicDetails.uuid,
-        claimDetailsUuid: apiResponse.applicationDetails.claimDetails.uuid,
-        signatoryDetailsUuid: apiResponse.applicationDetails.signatoryDetails?.uuid
-      });
+      // Log the successful operation
+      console.log(`${isUpdate ? 'Updated' : 'Created'} application successfully`, response.data);
+      toast.success(`Step ${currentStep} saved successfully`);
 
       // Move to next step
-      setCurrentStep(prev => prev + 1);
-
-    } catch (error) {
-      console.error('Error saving step:', error);
-      toast.error(`Failed to save Step ${currentStep}`);
-    } finally {
-      setIsSubmitting(false);
+      setCurrentStep((prevStep) => prevStep + 1);
+    } else {
+      throw new Error(response.data?.status?.message || 'Failed to save step');
     }
-  };
-
-  // Final Submit
-  const handleFinalSubmit = async () => {
-    const userFormData = JSON.parse(localStorage.getItem("userFormData"));
-    const payload = buildIncrementalPayload(formData, applicationDetails, currentStep, userFormData);
-    payload.applicationDetails.isFinalSubmit = true;
-
-    try {
-      setIsSubmitting(true);
-      console.log("Final Submit Payload:", JSON.stringify(payload, null, 2));
-
-      // Replace with actual final submit endpoint
-      const URL = `${process.env.REACT_APP_APPLICATION_SERVICE}${URLS_ENDPOINT.APP_SERVICES.APPLICATION_FORMSUBMIT}`;
-      const response = await axios.post(URL, payload);
-
-      console.log("Final Submit Response:", response.data);
-
-      navigate("/submission-success", {
-        state: {
-          applicationNumber: response.data.applicationDetails.applicationNumber
-        }
-      });
-
-    } catch (error) {
-      console.error("Error submitting form:", error);
-      toast.error("Failed to submit form.");
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const handlePrevious = () => {
-    setCurrentStep(prev => Math.max(1, prev - 1));
-  };
-
-  const handleCancel = () => {
-    navigate("/dashboard");
-  };
-
-  const filteredStepsConfig = isCRPUser
-    ? stepsConfig.filter(step => step.name !== "Review & Submit")
-    : stepsConfig;
-
-  return (
-    <FormDataProvider formData={formData}>
-      {/* Your UI components */}
-      {/* This part remains unchanged from your code */}
-
-      <div className="stepper-buttons">
-        {currentStep > 1 && (
-          <button className="buttonplus previous-button" onClick={handlePrevious}>
-            Previous
-          </button>
-        )}
-        {currentStep === 1 && (
-          <button className="buttonplus cancel-button" onClick={handleCancel}>
-            Cancel
-          </button>
-        )}
-        {currentStep !== filteredStepsConfig.length && (
-          <button
-            className="buttonplus next-button"
-            onClick={handleNext}
-            disabled={isSubmitting}
-          >
-            {isSubmitting ? "Saving..." : "Save & Next"}
-          </button>
-        )}
-        {currentStep === filteredStepsConfig.length && !isCRPUser && (
-          <button
-            className="buttonplus next-button"
-            onClick={handleFinalSubmit}
-            disabled={!isConfirmed || isSubmitting}
-          >
-            {isSubmitting ? "Submitting..." : "Submit"}
-          </button>
-        )}
-      </div>
-
-      <DeclarationModal
-        show={showDeclarationModal}
-        onHide={() => setShowDeclarationModal(false)}
-        agreed={isConfirmed}
-        onAgree={() => setIsConfirmed(!isConfirmed)}
-        formData={formData}
-      />
-    </FormDataProvider>
-  );
+  } catch (error) {
+    console.error('Error saving step:', error);
+    toast.error(`Failed to save step ${currentStep}: ${error.message}`);
+  }
 };
 
-export default Stepper;
-
-
-
-/////////////////////
-
 const buildIncrementalPayload = (formData, currentStep, applicationDetails = {}) => {
+  // Start with the basic payload structure
   const payload = {
     status: {
       code: "200",
@@ -330,30 +96,42 @@ const buildIncrementalPayload = (formData, currentStep, applicationDetails = {})
     },
     userInfo: userFormData?.fullloginDetails || {},
     applicationDetails: {
+      // Preserve existing application details
       ...applicationDetails,
+      // Ensure we have a UUID (either existing or new)
       uuid: applicationDetails?.uuid || uuidv4(),
-      applicationNumber: applicationDetails?.applicationNumber || "",
-      status: "Draft",
-      isActive: false,
-      isFinalSubmit: false
+      // Set status based on whether this is the final step
+      status: currentStep === filteredStepsConfig.length ? "Submitted" : "Draft",
+      isActive: currentStep === filteredStepsConfig.length,
+      isFinalSubmit: currentStep === filteredStepsConfig.length
     }
   };
+
+  // Helper function to create audit details
+  const createAuditDetails = () => ({
+    createdBy: userFormData?.fullloginDetails?.users?.[0]?.claimant?.uuid || "",
+    lastModifiedBy: userFormData?.fullloginDetails?.users?.[0]?.claimant?.uuid || "",
+    createdTime: new Date().toISOString(),
+    lastModifiedTime: new Date().toISOString()
+  });
 
   // Step 1 data
   if (currentStep >= 1) {
     payload.applicationDetails.creditorBasicDetails = {
+      // Preserve existing UUID if available
       uuid: formData.creditorBasicDetailsUuid || uuidv4(),
       financialCreditorName: formData.step1?.financialCreditorName || "",
       financialCreditorEmail: formData.step1?.financialCreditorEmail || "",
-      financialDebtorName: formData.step1?.financialDebtorName || "Jal Power", // Default value from example
+      financialDebtorName: formData.step1?.financialDebtorName || "Jal Power",
       identificationTypeDetails: {
         identificationType: formData.step1?.identificationType || "",
         identifications: formData.step1?.identificationtype_details?.map(item => ({
-          uuid: uuidv4(),
+          // Preserve existing UUIDs for identification records if available
+          uuid: item.uuid || uuidv4(),
           creditorsBasicUuid: formData.creditorBasicDetailsUuid || uuidv4(),
           identificationRecord: item.details || "",
           proofOfIdentificationDocuments: {
-            uuid: uuidv4(),
+            uuid: item.proof?.uuid || uuidv4(),
             supportingDocumentUuid: "",
             docId: item.proof?.fileId || "",
             docType: "identification",
@@ -369,12 +147,7 @@ const buildIncrementalPayload = (formData, currentStep, applicationDetails = {})
         state: formData.step1?.state || "",
         pincode: formData.step1?.pincode || ""
       },
-      auditDetails: {
-        createdBy: userFormData?.fullloginDetails?.users?.[0]?.claimant?.uuid || "",
-        lastModifiedBy: userFormData?.fullloginDetails?.users?.[0]?.claimant?.uuid || "",
-        createdTime: new Date().toISOString(),
-        lastModifiedTime: new Date().toISOString()
-      },
+      auditDetails: createAuditDetails(),
       empty: false
     };
   }
@@ -417,12 +190,7 @@ const buildIncrementalPayload = (formData, currentStep, applicationDetails = {})
         state: formData.step2?.state || "",
         district: formData.step2?.district || ""
       },
-      auditDetails: {
-        createdBy: userFormData?.fullloginDetails?.users?.[0]?.claimant?.uuid || "",
-        lastModifiedBy: userFormData?.fullloginDetails?.users?.[0]?.claimant?.uuid || "",
-        createdTime: new Date().toISOString(),
-        lastModifiedTime: new Date().toISOString()
-      },
+      auditDetails: createAuditDetails(),
       empty: false
     };
   }
@@ -438,19 +206,14 @@ const buildIncrementalPayload = (formData, currentStep, applicationDetails = {})
       addressOfSigningPerson: formData.step3?.creditorAddress || "",
       isSignatureToUpload: formData.step3?.hasSignature === "Yes",
       document: formData.step3?.signatureFile ? {
-        uuid: uuidv4(),
+        uuid: formData.step3.signatureFile.uuid || uuidv4(),
         supportingDocumentUuid: "",
         docId: formData.step3.signatureFile.fileId || "",
         docType: "signature",
         docSource: "Signature",
         docName: formData.step3.signatureFile.fileName || ""
       } : null,
-      auditDetails: {
-        createdBy: userFormData?.fullloginDetails?.users?.[0]?.claimant?.uuid || "",
-        lastModifiedBy: userFormData?.fullloginDetails?.users?.[0]?.claimant?.uuid || "",
-        createdTime: new Date().toISOString(),
-        lastModifiedTime: new Date().toISOString()
-      },
+      auditDetails: createAuditDetails(),
       empty: false
     };
   }
@@ -462,7 +225,7 @@ const buildIncrementalPayload = (formData, currentStep, applicationDetails = {})
       creditorBasicDetailsUuid: formData.creditorBasicDetailsUuid || "",
       documents: [
         ...(formData.step4?.identityProofFile ? [{
-          uuid: uuidv4(),
+          uuid: formData.step4.identityProofFile.uuid || uuidv4(),
           supportingDocumentUuid: "",
           docId: formData.step4.identityProofFile.fileId || "",
           docType: formData.step4.identityProofType || "",
@@ -470,7 +233,7 @@ const buildIncrementalPayload = (formData, currentStep, applicationDetails = {})
           docName: formData.step4.identityProofFile.fileName || ""
         }] : []),
         ...(formData.step4?.addressProofFile ? [{
-          uuid: uuidv4(),
+          uuid: formData.step4.addressProofFile.uuid || uuidv4(),
           supportingDocumentUuid: "",
           docId: formData.step4.addressProofFile.fileId || "",
           docType: formData.step4.addressProofType || "",
@@ -478,145 +241,10 @@ const buildIncrementalPayload = (formData, currentStep, applicationDetails = {})
           docName: formData.step4.addressProofFile.fileName || ""
         }] : [])
       ],
-      auditDetails: {
-        createdBy: userFormData?.fullloginDetails?.users?.[0]?.claimant?.uuid || "",
-        lastModifiedBy: userFormData?.fullloginDetails?.users?.[0]?.claimant?.uuid || "",
-        createdTime: new Date().toISOString(),
-        lastModifiedTime: new Date().toISOString()
-      },
+      auditDetails: createAuditDetails(),
       empty: false
     };
   }
 
   return payload;
-};
-
-const handleNext = async () => {
-  if (!currentSubmitHandler) {
-    console.error("No submit handler available.");
-    return;
-  }
-
-  const currentStepData = await currentSubmitHandler();
-  if (!currentStepData) {
-    console.error("Form validation failed.");
-    return;
-  }
-
-  if (!validateStepData(currentStep, currentStepData)) {
-    return;
-  }
-
-  const processedStepData = await processFileUploads(currentStepData, currentStep);
-
-  // Update form data with current step's data
-  const updatedFormData = {
-    ...formData,
-    [`step${currentStep}`]: { ...formData[`step${currentStep}`], ...processedStepData },
-  };
-
-  if (!deepEqual(updatedFormData, formData)) {
-    setFormData(updatedFormData);
-  }
-
-  // Build the payload for the current step
-  const payload = buildIncrementalPayload(updatedFormData, currentStep, applicationDetails);
-
-  try {
-    // For demo purposes, we'll just log the payload
-    console.log(`Step ${currentStep} Payload:`, JSON.stringify(payload, null, 2));
-    
-    // In a real app, you would make the API call here:
-    // const response = await axios.post('/api/form/save-step', payload);
-    
-    // For now, we'll simulate a successful response
-    const simulatedResponse = {
-      status: {
-        code: "200",
-        message: "Data Created Successfully"
-      },
-      applicationDetails: {
-        ...payload.applicationDetails,
-        uuid: payload.applicationDetails.uuid || uuidv4(),
-        applicationNumber: payload.applicationDetails.applicationNumber || `CLAIM/CIRP/${new Date().toISOString().slice(0, 10).replace(/-/g, '')}/000001`
-      }
-    };
-
-    console.log('API Response:', simulatedResponse);
-    
-    // Update application details in state if this is the first step
-    if (currentStep === 1) {
-      updateRegistrationData('applicationDetails', simulatedResponse.applicationDetails);
-    }
-
-    // Move to next step
-    setCurrentStep((prevStep) => prevStep + 1);
-  } catch (error) {
-    console.error('Error saving step:', error);
-    toast.error(`Failed to save step ${currentStep}`);
-  }
-};
-
-const handleFinalSubmit = async () => {
-  try {
-    setIsSubmitting(true);
-    
-    const currentStepData = await currentSubmitHandler();
-    if (!currentStepData) {
-      console.error("Form validation failed.");
-      return;
-    }
-
-    const processedStepData = await processFileUploads(currentStepData, currentStep);
-
-    const updatedFormData = {
-      ...formData,
-      [`step${currentStep}`]: { ...formData[`step${currentStep}`], ...processedStepData },
-    };
-
-    // Build the final payload with all steps
-    const payload = buildIncrementalPayload(
-      updatedFormData, 
-      filteredStepsConfig.length, // Include all steps
-      applicationDetails
-    );
-
-    // Update for final submission
-    payload.applicationDetails.status = "Submitted";
-    payload.applicationDetails.isActive = true;
-    payload.applicationDetails.isFinalSubmit = true;
-
-    console.log("Final Submit Payload:", JSON.stringify(payload, null, 2));
-
-    // For demo purposes, we'll just log the payload
-    // In a real app, you would make the API call here:
-    // const response = await axios.post('/api/form/final-submit', payload);
-    
-    // Simulate successful submission
-    const simulatedResponse = {
-      status: {
-        code: "200",
-        message: "Form submitted successfully"
-      },
-      applicationDetails: {
-        ...payload.applicationDetails,
-        applicationNumber: payload.applicationDetails.applicationNumber || `CLAIM/CIRP/${new Date().toISOString().slice(0, 10).replace(/-/g, '')}/000001`
-      }
-    };
-
-    console.log('Final Submit Response:', simulatedResponse);
-    
-    // Navigate to success page
-    navigate("/submission-success", {
-      state: {
-        applicationNumber: simulatedResponse.applicationDetails.applicationNumber,
-        formData: updatedFormData
-      }
-    });
-  } catch (error) {
-    console.error("Error submitting form:", error);
-    toast.error(error.message || "Failed to submit form");
-  } finally {
-    setIsSubmitting(false);
-  }
 };
