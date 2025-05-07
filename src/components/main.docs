@@ -1,9 +1,212 @@
-// Updated Stepper component with proper UUID and application number handling
+import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { useNavigate, useParams } from "react-router-dom";
+import { toast } from "react-toastify";
+import { Modal, Button, Form } from "react-bootstrap";
+import "./Stepper.css";
+import { useRegistration } from "../../context/ApplicationContext";
+import ReviewStep from "./ReviewStep";
+import { FormDataProvider } from "../../context/FormDataContext";
+import { postData } from "../../../services/http.service.ts";
+import { URLS_ENDPOINT } from "../../../utils/urlsConstants.ts";
+import axios from "axios";
+import { v4 as uuidv4 } from "uuid"; // Import UUID generator
+import { FaSmile } from "react-icons/fa";
+import DeclarationModal from "../DeclarationModal";
+
+
+const deepEqual = (obj1, obj2) => {
+  return JSON.stringify(obj1) === JSON.stringify(obj2);
+};
+
+const generateFileId = (file) => {
+  return `file-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+};
+
+const extractFileDetails = (file, source, documentType) => {
+  console.log("extractFileDetails", file, source);
+  if (!file) return null;
+
+  return {
+    docId: file.fileId,
+    docName: file.docName || file.fileName,
+    docType: documentType, 
+    docSource: source,
+  };
+};
+const extractMultiFileDetails = (files, source, documentType) => {
+  if (!Array.isArray(files) || files.length === 0) return [];
+
+  return files.map(file => ({
+    docNumber: file.details,
+    docId: file.proof?.fileId || null,
+    docName: file.proof?.fileName || null,
+    docType: documentType,
+    docSource: source,
+  }));
+};
+
+const createFormPayload = (formData, isFinalSubmit, userFormData, applicationNumber = "", isActive, applicationUuid = "") => {
+  console.log("createFormPayload", formData);
+  
+  // Extract UUIDs from existing data or generate new ones
+  const creditorBasicDetailsUuid = formData.creditorBasicDetailsUuid || uuidv4();
+  const claimDetailsUuid = formData.claimDetailsUuid || uuidv4();
+  const signatoryDetailsUuid = formData.signatoryDetailsUuid || uuidv4();
+
+  // Extract entity data if available
+  const entityData = formData.step2?.entityData || [];
+
+  return {
+    userInfo: userFormData?.fullloginDetails || {},
+    uuid: applicationUuid || uuidv4(),
+    applicationNumber: applicationNumber || "",
+    creditorBasicDetails: {
+      uuid: creditorBasicDetailsUuid,
+      financialCreditorName: formData.step1?.financialCreditorName || "",
+      financialCreditorEmail: formData.step1?.financialCreditorEmail || "",
+      identificationType: formData.step1?.identificationType || "",
+      // identificationNumber: formData.step1?.incorporatedIdentificationNumber || "",
+      document: extractMultiFileDetails(formData.step1?.identificationtype_details, "identification", "identification"),
+    },
+    addressDetails:{
+      addressLine1: formData.step1?.addressLine1 || "",
+      addressLine2: formData.step1?.addressLine2 || "",
+      city: formData.step1?.city || "",
+      state: formData.step1?.state || "",
+      pincode: formData.step1?.pincode || "",
+    },
+    claimDetails: {
+      uuid: claimDetailsUuid,
+      claimType: formData.step2?.claimType || "",
+      hasSecurityInterest: formData.step2?.hasSecurityInterest || "",
+      hasGuarantee: formData.step2?.hasGuarantee || "",
+      claimAmount: parseFloat(formData.step2?.claimAmount) || "",
+      principalBorrowerName: formData.step2?.principalBorrowerName1 || "",
+      principalBorrowerAddress: formData.step2?.principalBorrowerAddress1 || "",
+      debtDetails: formData.step2?.debtDetails || "",
+      debtDate: formData.step2?.debtDate || "",
+      mutualDetails: formData.step2?.mutualDetails || "",
+      securityValue: parseFloat(formData.step2?.securityValue) || "",
+      securityDate: formData.step2?.securityDate || "",
+      guaranteeValue: parseFloat(formData.step2?.guaranteeValue) || "",
+      guaranteeDate: formData.step2?.guaranteeDate || "",
+      entityData: entityData,
+    },
+    bankAccountDetails: {
+      bankAccountNumber: formData.step2?.accountNumber || "",
+      bankIfscCode: formData.step2?.ifscCode || "",
+      bankName: formData.step2?.bankName || "",
+      bankBranchName: formData.step2?.branchName || "",
+      branchAddress: formData.step2?.branchAddress || "",
+      city: formData.step2?.city || "",
+      state: formData.step2?.state || "",
+      district: formData.step2?.district || "",
+    },
+    signatoryDetails: {
+      uuid: signatoryDetailsUuid,
+      creditorName: formData.step3?.creditorName || "",
+      creditorPosition: formData.step3?.creditorPosition || "",
+      creditorSignature: formData.step3?.creditorSignatureText || "",
+      hasSignature: formData.step3?.hasSignature || "",
+      creditorAddress: formData.step3?.creditorAddress || "",
+      document: extractFileDetails(formData.step3?.signatureFile, "signature", "signature"),
+    },
+    uploadDocumentDetails: {
+      identityProofType: formData.step4?.identityProofType || "",
+      addressProofType: formData.step4?.addressProofType || "",
+      identityProofFile: extractFileDetails(formData.step4?.identityProofFile, "identity_proof", formData.step4?.identityProofType),
+        addressProofFile: extractFileDetails(formData.step4?.addressProofFile, "address_proof", formData.step4?.addressProofType),
+    },
+    status: "",
+    isActive: isActive,
+    isFinalSubmit: isFinalSubmit
+  };
+};
+
+const getFileFieldsForStep = (stepNumber) => {
+  switch (stepNumber) {
+    case 1:
+      return ["identificationDocument"];
+    case 2:
+      return ["addressProof"];
+    case 3:
+      return ["signatoryDocument"];
+    default:
+      return [];
+  }
+};
+
+const processFileUploads = async (stepData, stepNumber) => {
+  const fileFields = getFileFieldsForStep(stepNumber);
+  const processedData = { ...stepData };
+
+  for (const field of fileFields) {
+    if (stepData[field] && stepData[field] instanceof File) {
+      // In a real application, you would upload the file here
+      // and get a server-side ID or URL.
+      processedData[field] = {
+        id: generateFileId(stepData[field]),
+        name: stepData[field].name,
+        size: stepData[field].size,
+        type: stepData[field].type,
+        uploadedAt: new Date().toISOString(),
+      };
+    } else if (stepData[field] && typeof stepData[field] === 'object' && stepData[field].name) {
+      // Keep existing file details if not a new file
+      processedData[field] = { ...stepData[field] };
+    }
+  }
+
+  return processedData;
+};
 
 const Stepper = ({ stepsConfig = [], formAllData }) => {
-  // ... (keep all existing state declarations and hooks)
+  const {
+    registrationData,
+    handleStepDataFetch,
+    updateRegistrationData,
+    handleApplicatioNFormView,
+    isDataLoaded,
+    applicationDetails
+  } = useRegistration();
+  const { id } = useParams();
+  const isEditMode = !!id;
+  const [currentStep, setCurrentStep] = useState(1);
+  const [isConfirmed, setIsConfirmed] = useState(false);
+  const [showDeclarationModal, setShowDeclarationModal] = useState(false);
+  const [isComplete, setIsComplete] = useState(false);
+  const [isViewModalOpen, setIsViewModalOpen] = useState(false);
+  const [hasPreviewed, setHasPreviewed] = useState(false);
+  const [formData, setFormData] = useState(isEditMode ? registrationData || {} : {});
+  const [margins, setMargins] = useState({ marginLeft: 0, marginRight: 0 });
+  const stepRef = useRef([]);
+  const navigate = useNavigate();
+  const [currentSubmitHandler, setCurrentSubmitHandler] = useState(null);
+  const [showModal, setShowModal] = useState(false);
+  const [comments, setComments] = useState("");
+  const [actionType, setActionType] = useState("");
+  const [isSavingDraft, setIsSavingDraft] = useState(false);
+  const[draftResponse, setDraftResponse] = useState(null);
+  const [isSubmittingAction, setIsSubmittingAction] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Enhanced useEffect for initial data loading
+  console.log("Registration Data:update", applicationDetails);
+
+  const userFormData = JSON.parse(localStorage.getItem("userFormData"));
+  const isCRPUser = userFormData?.userType === "CRP";
+
+  const filteredStepsConfig = useMemo(() => {
+    if (isCRPUser) {
+      return stepsConfig.filter((step) => step.name !== "Review & Submit");
+    }
+    return stepsConfig;
+  }, [stepsConfig, isCRPUser]);
+
+  // useEffect(() => {
+  //   if (id) {
+  //     handleApplicatioNFormView({ uuid: id });
+  //   }
+  // }, [id]);
   useEffect(() => {
     const loadInitialData = async () => {
       if (id) {
@@ -27,8 +230,275 @@ const Stepper = ({ stepsConfig = [], formAllData }) => {
     
     loadInitialData();
   }, [id]);
+  useEffect(() => {
+    if (isEditMode && registrationData && !deepEqual(formData, registrationData)) {
+      // Check if registrationData is not empty or null
+      if (registrationData && Object.keys(registrationData).length > 0) {
+        setFormData(registrationData);
+      } else {
+        setFormData({});  // Set to empty if the response is blank or invalid
+      }
+    }
+  }, [isEditMode, registrationData]);
 
-  // Enhanced handleNext function
+  useEffect(() => {
+    const savedIsConfirmed = localStorage.getItem("isConfirmed");
+    if (savedIsConfirmed) {
+      setIsConfirmed(JSON.parse(savedIsConfirmed));
+    }
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem("isConfirmed", JSON.stringify(isConfirmed));
+  }, [isConfirmed]);
+  
+
+  useEffect(() => {
+    const newSubmitHandler = filteredStepsConfig[currentStep - 1]?.submitHandler;
+    if (newSubmitHandler && newSubmitHandler !== currentSubmitHandler) {
+      setCurrentSubmitHandler(() => newSubmitHandler);
+    }
+  }, [currentStep, filteredStepsConfig]);
+
+  const updateSubmitHandler = useCallback((submitHandler) => {
+    setCurrentSubmitHandler(() => submitHandler);
+  }, []);
+
+  useEffect(() => {
+    if (stepRef.current.length > 0) {
+      const firstStep = stepRef.current[0]?.offsetWidth || 0;
+      const lastStep = stepRef.current[filteredStepsConfig.length - 1]?.offsetWidth || 0;
+      setMargins({
+        marginLeft: firstStep / 2,
+        marginRight: lastStep / 2,
+      });
+    }
+  }, [filteredStepsConfig.length]);
+
+  const validateStepData = (step, data) => {
+    const requiredFields = filteredStepsConfig[step - 1]?.requiredFields || [];
+    for (let field of requiredFields) {
+      if (!data[field]) {
+        toast.error(`${field} is required.`);
+        return false;
+      }
+    }
+    return true;
+  };
+ 
+ 
+  const buildStepPayload = (formData, currentStep, applicationDetails = {}) => {
+    const storedDetails= JSON.parse(localStorage.getItem("applicationDetails")) || {};
+    console.log(storedDetails,"storedDetails")
+    // const userFormData = formData?.userFormData || {};
+    const userFormDataLogin = JSON.parse(localStorage.getItem("userFormData")) || {}
+    // Base payload structure
+    const payload = {
+      status: {
+        code: "200",
+        message: "Data Created Successfully"
+      },
+      userInfo: userFormDataLogin?.fullloginDetails || {},
+      applicationDetails: {
+        ...storedDetails,
+        ...applicationDetails,
+        uuid: storedDetails.uuid || applicationDetails.uuid || "", // Prefer stored UUID
+        applicationNumber: storedDetails.applicationNumber || applicationDetails.applicationNumber || "",
+        status: "Draft",
+        isActive: false,
+        isFinalSubmit: false,
+        // auditDetails: {
+        //   createdBy: userFormData?.fullloginDetails?.users?.[0]?.claimant?.uuid || "",
+        //   lastModifiedBy: userFormData?.fullloginDetails?.users?.[0]?.claimant?.uuid || "",
+        //   createdTime: new Date().toISOString(),
+        //   lastModifiedTime: new Date().toISOString()
+        // }
+      }
+    };
+  
+    // Helper to create empty objects for other steps
+    const createEmptyStep = (stepName) => {
+      switch(stepName) {
+        case 'claimDetails':
+        case 'signatoryDetails':
+          return {};
+        case 'supportingDocument':
+          return {  };
+        default:
+          return {};
+      }
+    };
+  
+    // Step 1 - Creditor Basic Details
+    if (currentStep >= 1) {
+      payload.applicationDetails.creditorBasicDetails = {
+        uuid: formData.creditorBasicDetailsUuid || storedDetails.creditorBasicDetails?.uuid || "",
+        financialCreditorName: formData.step1?.financialCreditorName || "",
+        financialCreditorEmail: formData.step1?.financialCreditorEmail || "",
+        financialDebtorName: formData.step1?.corporateDebtorName || "",
+        identificationTypeDetails: {
+          identificationType: formData.step1?.identificationType || "",
+          identifications: formData.step1?.identificationtype_details?.map(item => ({
+            uuid: item.uuid || "",
+            creditorsBasicUuid: formData.creditorBasicDetailsUuid || "",
+            identificationRecord: item.details || "",
+            proofOfIdentificationDocuments: {
+              uuid: item.proof?.uuid || "",
+              supportingDocumentUuid: "",
+              docId: item.proof?.fileId || "",
+              docType: "identification",
+              docSource: "identification_type",
+              docName: item.proof?.fileName || ""
+            }
+          })) || []
+        },
+        addressDetails: {
+          addressLine1: formData.step1?.addressLine1 || "",
+          addressLine2: formData.step1?.addressLine2 || "",
+          city: formData.step1?.city || "",
+          state: formData.step1?.state || "",
+          pincode: formData.step1?.pincode || ""
+        },
+        // auditDetails: {
+        //   createdBy: userFormData?.fullloginDetails?.users?.[0]?.claimant?.uuid || "",
+        //   lastModifiedBy: userFormData?.fullloginDetails?.users?.[0]?.claimant?.uuid || "",
+        //   createdTime: new Date().toISOString(),
+        //   lastModifiedTime: new Date().toISOString()
+        // },
+        // empty: false
+      };
+  
+      // For step 1, include empty objects for other steps
+      if (currentStep === 1) {
+        payload.applicationDetails.claimDetails = createEmptyStep('claimDetails');
+        payload.applicationDetails.signatoryDetails = createEmptyStep('signatoryDetails');
+        payload.applicationDetails.supportingDocument = createEmptyStep('supportingDocument');
+      }
+    }
+  
+    // Step 2 - Claim Details
+    if (currentStep >= 2) {
+      payload.applicationDetails.claimDetails = {
+        uuid: formData.claimDetailsUuid || storedDetails.claimDetails?.uuid || "",
+        creditorBasicDetailsUuid: formData.creditorBasicDetailsUuid || storedDetails.creditorBasicDetails?.uuid || "",
+        claimType: formData.step2?.claimType || "",
+        claimAmount: parseFloat(formData.step2?.claimAmount) || 0,
+        isAmountOfClaimCoverdBySecurityInterest: formData.step2?.hasSecurityInterest === "Yes",
+        securityValue: parseFloat(formData.step2?.securityValue) || 0,
+        securityDate: formData.step2?.securityDate || "",
+        isAmountOfClaimCoverdByGuarantee: formData.step2?.hasGuarantee === "Yes",
+        guaranteeValue: parseFloat(formData.step2?.guaranteeValue) || 0,
+        guaranteeDate: formData.step2?.guaranteeDate || "",
+        principalBorrowerDetails: formData.step2?.entityData?.filter(e => e.type === "PRINCIPAL_BORROWER")?.map(e => ({
+          name: e.name,
+          address: e.address
+        })) || [],
+        beneficiaryDetails: formData.step2?.entityData?.filter(e => e.type === "BENEFICIARY")?.map(e => ({
+          name: e.name,
+          address: e.address
+        })) || [],
+        guarantorDetails: formData.step2?.entityData?.filter(e => e.type === "GUARANTOR")?.map(e => ({
+          name: e.name,
+          address: e.address
+        })) || [],
+        debtIncurredDetails: formData.step2?.debtDetails || "",
+        debtIncurredDate: formData.step2?.debtDate || "",
+        mutualDealingDetailsAgainstTheClaim: formData.step2?.mutualDetails || "",
+        bankAccountDetails: {
+          bankAccountNumber: formData.step2?.accountNumber || "",
+          bankIfscCode: formData.step2?.ifscCode || "",
+          bankName: formData.step2?.bankName || "",
+          bankBranchName: formData.step2?.branchName || "",
+          branchAddress: formData.step2?.branchAddress || "",
+          city: formData.step2?.city || "",
+          state: formData.step2?.state || "",
+          district: formData.step2?.district || ""
+        },
+        // auditDetails: {
+        //   createdBy: userFormData?.fullloginDetails?.users?.[0]?.claimant?.uuid || "",
+        //   lastModifiedBy: userFormData?.fullloginDetails?.users?.[0]?.claimant?.uuid || "",
+        //   createdTime: new Date().toISOString(),
+        //   lastModifiedTime: new Date().toISOString()
+        // },
+        // empty: false
+      };
+  
+      // For step 2, include empty object for signatory details
+      if (currentStep === 2) {
+        payload.applicationDetails.signatoryDetails = createEmptyStep('signatoryDetails');
+        payload.applicationDetails.supportingDocument = createEmptyStep('supportingDocument');
+      }
+    }
+  
+    // Step 3 - Signatory Details
+    if (currentStep >= 3) {
+      payload.applicationDetails.signatoryDetails = {
+        uuid: formData.signatoryDetailsUuid || storedDetails.signatoryDetails?.uuid || "",
+        creditorBasicDetailsUuid: formData.creditorBasicDetailsUuid || storedDetails.creditorBasicDetails?.uuid || "",
+        financialCreditorName: formData.step3?.creditorName || "",
+        positionOfCreditor: formData.step3?.creditorPosition || "",
+        signatureFinancialCreditor: formData.step3?.creditorSignatureText || "",
+        addressOfSigningPerson: formData.step3?.creditorAddress || "",
+        isSignatureToUpload: formData.step3?.hasSignature === "Yes",
+        document: formData.step3?.signatureFile ? {
+          uuid: formData.step3.signatureFile.uuid || "",
+          supportingDocumentUuid: "",
+          docId: formData.step3.signatureFile.fileId || "",
+          docType: "signature",
+          docSource: "Signature",
+          docName: formData.step3.signatureFile.fileName || ""
+        } : null,
+        // auditDetails: {
+        //   createdBy: userFormData?.fullloginDetails?.users?.[0]?.claimant?.uuid || "",
+        //   lastModifiedBy: userFormData?.fullloginDetails?.users?.[0]?.claimant?.uuid || "",
+        //   createdTime: new Date().toISOString(),
+        //   lastModifiedTime: new Date().toISOString()
+        // },
+        // empty: false
+      };
+  
+      // For step 3, include empty object for supporting documents
+      if (currentStep === 3) {
+        payload.applicationDetails.supportingDocument = createEmptyStep('supportingDocument');
+      }
+    }
+  
+    // Step 4 - Supporting Documents
+    if (currentStep >= 4) {
+      payload.applicationDetails.supportingDocument = {
+        uuid: storedDetails.supportingDocument?.uuid || "",
+        creditorBasicDetailsUuid: formData.creditorBasicDetailsUuid || storedDetails.creditorBasicDetails?.uuid || "",
+        documents: [
+          ...(formData.step4?.identityProofFile ? [{
+            uuid: formData.step4.identityProofFile.uuid || "",
+            supportingDocumentUuid: "",
+            docId: formData.step4.identityProofFile.fileId || "",
+            docType: formData.step4.identityProofType || "",
+            docSource: "identity_proof",
+            docName: formData.step4.identityProofFile.fileName || ""
+          }] : []),
+          ...(formData.step4?.addressProofFile ? [{
+            uuid: formData.step4.addressProofFile.uuid || "",
+            supportingDocumentUuid: "",
+            docId: formData.step4.addressProofFile.fileId || "",
+            docType: formData.step4.addressProofType || "",
+            docSource: "address_proof",
+            docName: formData.step4.addressProofFile.fileName || ""
+          }] : [])
+        ],
+        // auditDetails: {
+        //   createdBy: userFormData?.fullloginDetails?.users?.[0]?.claimant?.uuid || "",
+        //   lastModifiedBy: userFormData?.fullloginDetails?.users?.[0]?.claimant?.uuid || "",
+        //   createdTime: new Date().toISOString(),
+        //   lastModifiedTime: new Date().toISOString()
+        // },
+        // empty: false
+      };
+    }
+  
+    return payload;
+  };
+
   const handleNext = async () => {
     if (!currentSubmitHandler) {
       console.error("No submit handler available.");
@@ -111,121 +581,55 @@ const Stepper = ({ stepsConfig = [], formAllData }) => {
       toast.error(`Failed to save step ${currentStep}: ${error.message}`);
     }
   };
+  
 
-  // Enhanced buildStepPayload function
-  const buildStepPayload = (formData, currentStep, applicationDetails = {}) => {
-    // Get stored application details if not provided
-    const storedDetails = JSON.parse(localStorage.getItem('applicationDetails')) || {};
-    const userFormDataLogin = JSON.parse(localStorage.getItem('userFormData')) || {};
-
-    // Base payload structure
-    const payload = {
-      status: {
-        code: "200",
-        message: "Data Created Successfully"
-      },
-      userInfo: userFormDataLogin?.fullloginDetails || {},
-      applicationDetails: {
-        ...storedDetails, // Include all stored details first
-        ...applicationDetails, // Then override with any passed details
-        uuid: storedDetails.uuid || applicationDetails.uuid || "", // Prefer stored UUID
-        applicationNumber: storedDetails.applicationNumber || applicationDetails.applicationNumber || "",
-        status: "Draft",
-        isActive: false,
-        isFinalSubmit: false,
-      }
-    };
-
-    // Step 1 - Creditor Basic Details
-    if (currentStep >= 1) {
-      payload.applicationDetails.creditorBasicDetails = {
-        uuid: formData.creditorBasicDetailsUuid || storedDetails.creditorBasicDetails?.uuid || "",
-        // ... rest of step 1 data
-      };
-    }
-
-    // Step 2 - Claim Details
-    if (currentStep >= 2) {
-      payload.applicationDetails.claimDetails = {
-        uuid: formData.claimDetailsUuid || storedDetails.claimDetails?.uuid || "",
-        creditorBasicDetailsUuid: formData.creditorBasicDetailsUuid || storedDetails.creditorBasicDetails?.uuid || "",
-        // ... rest of step 2 data
-      };
-    }
-
-    // Step 3 - Signatory Details
-    if (currentStep >= 3) {
-      payload.applicationDetails.signatoryDetails = {
-        uuid: formData.signatoryDetailsUuid || storedDetails.signatoryDetails?.uuid || "",
-        creditorBasicDetailsUuid: formData.creditorBasicDetailsUuid || storedDetails.creditorBasicDetails?.uuid || "",
-        // ... rest of step 3 data
-      };
-    }
-
-    // Step 4 - Supporting Documents
-    if (currentStep >= 4) {
-      payload.applicationDetails.supportingDocument = {
-        uuid: storedDetails.supportingDocument?.uuid || "",
-        creditorBasicDetailsUuid: formData.creditorBasicDetailsUuid || storedDetails.creditorBasicDetails?.uuid || "",
-        // ... rest of step 4 data
-      };
-    }
-
-    return payload;
-  };
-
-  // Enhanced handleCancel to clear storage
-  const handleCancel = () => {
-    localStorage.removeItem('applicationDetails');
-    localStorage.removeItem('formData');
-    navigate("/dashboard");
-  };
-
-  // Enhanced handleFinalSubmit to clear storage
   const handleFinalSubmit = async () => {
     try {
       setIsSubmitting(true);
       
       const currentStepData = await currentSubmitHandler();
-      if (!currentStepData) return;
-
+      if (!currentStepData) {
+        console.error("Form validation failed.");
+        return;
+      }
+  
       const processedStepData = await processFileUploads(currentStepData, currentStep);
+  
       const updatedFormData = {
         ...formData,
         [`step${currentStep}`]: { ...formData[`step${currentStep}`], ...processedStepData },
       };
-
-      // Get stored application details
-      const storedDetails = JSON.parse(localStorage.getItem('applicationDetails')) || {};
-
-      const payload = {
-        ...createFormPayload(
-          updatedFormData, 
-          true,
-          userFormData,
-          storedDetails.applicationNumber || "",
-          true,
-          storedDetails.uuid || ""
-        ),
-        // Ensure we're using the stored UUID and application number
-        uuid: storedDetails.uuid || "",
-        applicationNumber: storedDetails.applicationNumber || ""
-      };
-
-      // Make final submit API call
-      // const response = await postData(endpoint, payload);
-      
-      // On success:
-      localStorage.removeItem('applicationDetails');
-      localStorage.removeItem('formData');
-      
-      navigate("/submission-success", {
-        state: {
-          applicationNumber: storedDetails.applicationNumber || "CLAIM/CIRP/XXXXXX/XXXXXX",
-          formData: updatedFormData
-        }
-      });
-
+  
+      const payload = createFormPayload(
+        updatedFormData, 
+        true, // isFinalSubmit
+        userFormData,
+        applicationDetails?.applicationNumber || "",
+        true, // isActive
+        applicationDetails?.uuid || ""
+      );
+  
+      console.log("Final Submit Payload:", payload);
+  
+      // Replace with your actual API endpoint
+      // const REQUEST = `${process.env.REACT_APP_APPLICATION_SERVICE}${URLS_ENDPOINT.APP_SERVICES.APPLICATION_FORMSUBMIT}`;
+      // const response = await postData(REQUEST, {
+      //   status: { code: "", message: "" },
+      //   userInfo: userFormData?.fullloginDetails || {},
+      //   applicationDetails: payload
+      // });
+  
+      // if (response.data.status.code === "200") {
+        // Navigate to success page with the application data
+        navigate("/submission-success", {
+          state: {
+            applicationNumber: "CLAIM/CIRP/20250425/0093993",
+            formData: updatedFormData
+          }
+        });
+      // } else {
+      //   toast.error(`Failed to submit form: ${response.data.status.message}`);
+      // }
     } catch (error) {
       console.error("Error submitting form:", error);
       toast.error(error.message || "Failed to submit form");
@@ -234,5 +638,808 @@ const Stepper = ({ stepsConfig = [], formAllData }) => {
     }
   };
 
-  // ... (keep the rest of the component code)
+  const handlePreview = async () => {
+    if (!currentSubmitHandler) {
+      console.error("No submit handler available.");
+      return;
+    }
+
+    const currentStepData = await currentSubmitHandler();
+    if (!currentStepData) {
+      console.error("Form validation failed.");
+      return;
+    }
+
+    if (!validateStepData(currentStep, currentStepData)) {
+      return;
+    }
+
+    const processedStepData = await processFileUploads(currentStepData, currentStep);
+
+    const updatedFormData = {
+      ...formData,
+      [`step${currentStep}`]: { ...formData[`step${currentStep}`], ...processedStepData },
+    };
+
+    if (!deepEqual(updatedFormData, formData)) {
+      setFormData(updatedFormData);
+      updateRegistrationData(`step${currentStep}`, updatedFormData[`step${currentStep}`], id);
+    }
+    console.log("Updated Form Data:", updatedFormData);
+    const previewPayload = createFormPayload(updatedFormData, false, userFormData, id); // isFinalSubmit: false, use ID if editing
+    console.log("Preview Payload:", JSON.stringify(previewPayload, null, 2));
+    
+    setCurrentStep(filteredStepsConfig.length);
+    setHasPreviewed(true); 
+  };
+
+  const handleSaveDraft = async () => {
+    console.log("handleSaveDraft", formData);
+  };
+
+  const handleWorkflowAction = async (action, comments) => {
+    try {
+      const userFormData = JSON.parse(localStorage.getItem("userFormData"));
+      const applicationNumber = JSON.parse(localStorage.getItem("applicationdatawithId"));
+      console.log("handleWorkflowAction", action, comments);
+      console.log("userFormData", userFormData);
+      console.log("applicationDataxxxxxxxxxxxxxx", applicationNumber);
+    
+      const payload = {
+        userInfo: userFormData.fullloginDetails,
+        applicationNumber: applicationNumber,
+        comments: comments,
+        action: action
+      };
+      console.log("Workflow action payload:", payload);
+         const URL =
+            process.env.REACT_APP_APPLICATION_SERVICE +
+            URLS_ENDPOINT.APP_SERVICES.CORPORATE_APPLICATION_SUBMIT;
+
+        const response = await postData(URL, payload);
+
+      return response.data;
+    } catch (error) {
+      console.error("Error in workflow action:", error);
+      throw error;
+    }
+  };
+  
+  const handleActionSubmit = async () => {
+    setIsSubmittingAction(true);
+    try {
+      // Skip the actual API call and just show success message
+      toast.success(`${actionType} successfully`);
+      
+      // Navigate to dashboard after a short delay
+      setTimeout(() => {
+        navigate("/dashboard");
+      }, 1500);
+    } catch (error) {
+      console.error("Error submitting action:", error);
+      toast.error("Failed to perform action");
+    } finally {
+      setIsSubmittingAction(false);
+      handleModalClose();
+    }
+  };
+
+  const handleActionClick = (action) => {
+    setActionType(action);
+    setShowModal(true);
+  };
+
+  const handleModalClose = () => {
+    setShowModal(false);
+    setComments("");
+  };
+
+  const handlePrevious = () => {
+    setCurrentStep((prevStep) => Math.max(1, prevStep - 1));
+  };
+
+  const handleCancel = () => {
+    localStorage.removeItem('applicationDetails');
+    localStorage.removeItem('formData');
+    navigate("/dashboard");
+  };
+
+  const calculateProgressBarWidth = () => {
+    return ((currentStep - 1) / (filteredStepsConfig.length - 1)) * 100;
+  };
+
+  const ActiveComponent = filteredStepsConfig[currentStep - 1]?.Component;
+  const shouldRenderReviewStep = currentStep === filteredStepsConfig.length && isDataLoaded;
+
+  useEffect(() => {
+    if (currentStep === 3) {
+      setHasPreviewed(false);
+    }
+  }, [currentStep]);
+ 
+  return (
+    <FormDataProvider formData={formData}>
+      <div className="stepper">
+        {filteredStepsConfig.map((step, index) => (
+          <div
+            key={step.name}
+            ref={(el) => (stepRef.current[index] = el)}
+            className={`step ${
+              currentStep > index + 1 || isComplete ? "complete" : ""
+            } ${currentStep === index + 1 ? "active" : ""}`}
+          >
+            <div className="step-number">
+              {currentStep > index + 1 || isComplete ? (
+                <span>✓</span>
+              ) : (
+                index + 1
+              )}
+            </div>
+            <div className="step-name">{step.name}</div>
+          </div>
+        ))}
+
+        <div
+          className="progress-bar"
+          style={{
+            marginLeft: margins.marginLeft,
+            marginRight: margins.marginRight,
+          }}
+        >
+          <div
+            className="progress"
+            style={{ width: `${calculateProgressBarWidth()}%` }}
+          ></div>
+        </div>
+      </div>
+
+      {ActiveComponent && (
+        <ActiveComponent
+          formData={formData[`step${currentStep}`] || {}}
+          provideSubmitHandler={updateSubmitHandler}
+          setFormData={(newStepData) => {
+            setFormData(prev => ({
+              ...prev,
+              [`step${currentStep}`]: newStepData
+            }));
+          }}
+          isEditMode={isEditMode}
+        />
+      )}
+
+      {shouldRenderReviewStep && !isCRPUser && (
+        <ReviewStep />
+      )}
+
+      {currentStep === filteredStepsConfig.length && !isCRPUser && (
+        <div className="confirmation-container">
+          <Form.Group controlId="formConfirmation" className="mt-3 confirmation-checkbox">
+          <Form.Check
+  type="checkbox"
+  label="I confirm that the information provided is correct."
+  checked={isConfirmed}
+  onChange={() => setShowDeclarationModal(true)}
+/>
+
+          </Form.Group>
+        </div>
+      )}
+      
+      {/* Declaration Modal */}
+      {/* <DeclarationModal
+        show={showDeclarationModal}
+        onHide={() => setShowDeclarationModal(false)}
+        agreed={isConfirmed}
+        onAgree={() => setIsConfirmed(!isConfirmed)}
+      /> */}
+
+<DeclarationModal
+  show={showDeclarationModal}
+  onHide={() => setShowDeclarationModal(false)}
+  agreed={isConfirmed}
+  onAgree={() => setIsConfirmed(!isConfirmed)}
+  formData={formData}
+/>
+
+
+      <div className="stepper-buttons">
+        {currentStep > 1 && (
+          <button className="buttonplus previous-button" onClick={handlePrevious}>
+            Previous
+          </button>
+        )}
+        {currentStep === 1 && (
+          <button className="buttonplus cancel-button" onClick={handleCancel}>
+            Cancel
+          </button>
+        )}
+
+        {currentStep === 4 && !isCRPUser && (
+          <div className="last-step-buttons">
+            <button
+              className="buttonplus preview-button"
+              onClick={handlePreview}
+            >
+              Preview
+            </button>
+          </div>
+        )}
+
+        {currentStep !== 4 && currentStep !== filteredStepsConfig.length && (
+          <button
+            className="buttonplus next-button"
+            onClick={handleNext}
+            disabled={isComplete}
+          >
+            Save & Next
+          </button>
+        )}
+
+        {currentStep === filteredStepsConfig.length && isCRPUser ? (
+          <>
+            <button
+              className="buttonplus sendback-button"
+              onClick={() => handleActionClick("Sendback To Claimants")}
+            >
+              Sendback To Claimants
+            </button>
+            <button
+              className="buttonplus accept-contingent-button"
+              onClick={() => handleActionClick("Accept as Contingent")}
+            >
+              Accept as Contingent
+            </button>
+            <button
+              className="buttonplus accept-button"
+              onClick={() => handleActionClick("Accept")}
+            >
+              Accept
+            </button>
+            <button
+              className="buttonplus reject-button"
+              onClick={() => handleActionClick("Reject")}
+            >
+              Reject
+            </button>
+          </>
+        ) : currentStep === filteredStepsConfig.length ? (
+          <button
+            className="buttonplus next-button"
+            onClick={handleFinalSubmit}
+            disabled={!isConfirmed || isSubmitting}
+          >
+            {isSubmitting ? "Submitting..." : "Submit"}
+          </button>
+        ) : null}
+      </div>
+
+      <Modal show={showModal} onHide={handleModalClose} centered>
+        <Modal.Header closeButton>
+          <Modal.Title>{actionType} Form</Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          <Form>
+            <Form.Group controlId="comments">
+              <Form.Label>Comments</Form.Label>
+              <Form.Control
+                as="textarea"
+                rows={3}
+                value={comments}
+                onChange={(e) => setComments(e.target.value)}
+                placeholder="Enter your comments..."
+              />
+            </Form.Group>
+          </Form>
+        </Modal.Body>
+        <Modal.Footer>
+          <Button className="modal-close-button" onClick={handleModalClose}>
+            Close
+          </Button>
+          <Button
+            className="modal-submit-button"
+            onClick={handleActionSubmit}
+            disabled={!comments.trim()}
+          >
+            Submit
+          </Button>
+        </Modal.Footer>
+      </Modal>
+    </FormDataProvider>
+  );
 };
+
+export default Stepper;
+2nd step payload - 
+{
+    "status": {
+        "code": "200",
+        "message": "Data Created Successfully"
+    },
+    "userInfo": {
+        "status": {
+            "code": "200",
+            "message": "Successful"
+        },
+        "token": null,
+        "otp": "123456",
+        "processTypes": {
+            "auditDetails": null,
+            "uuid": "bb9683f5-0506-45be-99a7-477c5318219r",
+            "processTypeName": "Corporate Insolvency Resolution Process (CIRP)",
+            "processTypeCode": "50001",
+            "isActive": null,
+            "processTypeValue": "CIRP"
+        },
+        "corporateDebtorDetails": {
+            "uuid": "7c249b25-7e75-4e0f-9177-5988ccbda43a",
+            "nameOfCorporateDebtor": "Jalpower Corporation Limited",
+            "cinOrLlpinNumber": "U40109TG2004PLC043985",
+            "ipDetailsId": "2b44f7f3-9983-4f4b-be75-46056292c7a9",
+            "appointedAs": "4",
+            "nameOfIp": "Mr. Amit Jain",
+            "registrationNo": "IBBI/IPA-001/IP-P01447/2018-2019/12196",
+            "ipUuid": "2b44f7f3-9983-4f4b-be75-46056292c7a9",
+            "roleName": "RP",
+            "roleCode": "RP",
+            "roleUuid": "4"
+        },
+        "claimantTypes": {
+            "uuid": "1001",
+            "claimantName": "Financial Creditors",
+            "claimantCode": "1001"
+        },
+        "claimantCategories": {
+            "uuid": "20001",
+            "claimantCategoryName": "Secured Financial Creditors (Banks/ARCs/NBFCs/FIs)",
+            "claimantCategoryCode": "20001",
+            "isActive": true,
+            "cirpFormId": "40002",
+            "claimantTypeCode": "1001",
+            "liquidationId": "a6928a25-1d51-4e6b-aa6c-a9c1a4ab62f8"
+        },
+        "formDetails": {
+            "uuid": "40002",
+            "formName": "Form C",
+            "formCode": "40002",
+            "isActive": true
+        },
+        "userType": "CLAIMANT",
+        "users": [
+            {
+                "claimant": {
+                    "uuid": "e6f398bf-eacc-42cc-a49c-fd3caa9d6b75",
+                    "claimantName": "sassa",
+                    "corporateName": null,
+                    "emailId": "ayan@gmail.com",
+                    "claimantEntityType": "INDV",
+                    "mobileNumber": "8481881868",
+                    "aadharNumber": "213367555151",
+                    "panNumber": "GZVPS5431E",
+                    "cinOrTaNumber": null,
+                    "roleCode": "CLAIMANT",
+                    "auditDetails": {
+                        "createdBy": "e6f398bf-eacc-42cc-a49c-fd3caa9d6b75",
+                        "lastModifiedBy": "e6f398bf-eacc-42cc-a49c-fd3caa9d6b75",
+                        "createdTime": "2025-04-09 17:05:42.898305",
+                        "lastModifiedTime": "2025-04-09 17:05:42.898316"
+                    },
+                    "active": true
+                },
+                "corporateDebtor": null
+            }
+        ]
+    },
+    "applicationDetails": {
+        "uuid": "3eea9c02-5d8e-4b30-9fb9-880ead377268",
+        "applicationNumber": "CLAIM/CIRP/20250507/000241",
+        "creditorBasicDetails": {
+            "uuid": "e6f3396a-ddbf-4a81-af61-edcfef70b139",
+            "financialCreditorName": "fdfd",
+            "financialCreditorEmail": "fddffd@gmail.com",
+            "financialDebtorName": "fdfdf",
+            "identificationTypeDetails": {
+                "identificationType": "INCORPORATED",
+                "identifications": [
+                    {
+                        "uuid": "c59af4fb-98c0-4341-af2a-6cf1157ebfca",
+                        "creditorsBasicUuid": "e6f3396a-ddbf-4a81-af61-edcfef70b139",
+                        "identificationRecord": "INCORPORATED",
+                        "proofOfIdentificationDocuments": {
+                            "uuid": "",
+                            "supportingDocumentUuid": "",
+                            "docId": "cd56b004-ac6b-4a7f-9055-ba9004f46915",
+                            "docType": "identification",
+                            "docSource": "identification_type",
+                            "docName": "pan (1).pdf"
+                        }
+                    }
+                ]
+            },
+            "addressDetails": {
+                "addressLine1": "vcvc",
+                "addressLine2": "vcvc",
+                "city": "vcvc",
+                "state": "vcvc",
+                "pincode": "700155"
+            },
+            "auditDetails": {
+                "createdBy": "e6f398bf-eacc-42cc-a49c-fd3caa9d6b75",
+                "lastModifiedBy": "e6f398bf-eacc-42cc-a49c-fd3caa9d6b75",
+                "createdTime": "2025-05-07T17:22:53.863183550",
+                "lastModifiedTime": "2025-05-07T17:22:53.863213801"
+            },
+            "empty": false
+        },
+        "claimDetails": {
+           "uuid": "",
+            "creditorBasicDetailsUuid": "",
+            "claimType": "PRINCIPAL_BORROWER",
+            "claimAmount": 32323.0,
+            "isAmountOfClaimCoverdBySecurityInterest": true,
+            "securityValue": 323232.0,
+            "securityDate": "2025-04-28",
+            "isAmountOfClaimCoverdByGuarantee": true,
+            "guaranteeValue": 32333.0,
+            "guaranteeDate": "2025-04-28",
+            "guarantorDetails": [],
+            "principalBorrowerDetails": [
+                {
+                    "name": "PQR",
+                    "address": "pqr"
+                }
+            ],
+            "beneficiaryDetails": [],
+            "debtIncurredDetails": null,
+            "debtIncurredDate": "2025-04-28",
+            "mutualDealingDetailsAgainstTheClaim": "Mutual",
+            "bankAccountDetails": {
+                "bankAccountNumber": "323232323",
+                "bankIfscCode": "BARB0AHMEDN",
+                "bankName": "Bank of Baroda",
+                "bankBranchName": "AHMEDNAGAR BRANCH",
+                "branchAddress": "AHMEDNAGAR BRANCH,TULSI- VIHAR MANIK CHOWK, AHEMDNAGAR,AHMEDNAGAR,414001, AHMADNAGAR, MAHARASHTRA",
+                "city": "AHMADNAGAR",
+                "state": "MAHARASHTRA",
+                "district": "AHMADNAGAR"
+            }
+        },
+        "signatoryDetails": {
+            "uuid": null,
+            "creditorBasicDetailsUuid": null,
+            "financialCreditorName": null,
+            "positionOfCreditor": null,
+            "signatureFinancialCreditor": null,
+            "addressOfSigningPerson": null,
+            "isSignatureToUpload": null,
+            "document": null,
+            "auditDetails": null,
+            "empty": true
+        },
+        "supportingDocument": {
+            "uuid": null,
+            "creditorBasicDetailsUuid": null,
+            "documents": null,
+            "auditDetails": null,
+            "empty": true
+        },
+        "status": "Draft",
+        "isActive": false,
+        "isFinalSubmit": false,
+        "auditDetails": {
+            "createdBy": "e6f398bf-eacc-42cc-a49c-fd3caa9d6b75",
+            "lastModifiedBy": "e6f398bf-eacc-42cc-a49c-fd3caa9d6b75",
+            "createdTime": "2025-05-07T17:22:53.866200840",
+            "lastModifiedTime": "2025-05-07T17:22:53.866208970"
+        }
+    }
+}
+when 1st step click send this payload
+1st step payload - 
+{
+    "status": {
+        "code": "200",
+        "message": "Data Created Successfully"
+    },
+    "userInfo": {
+        "status": {
+            "code": null,
+            "message": null
+        },
+        "token": null,
+        "otp": "123456",
+        "processTypes": {
+            "auditDetails": null,
+            "uuid": "bb9683f5-0506-45be-99a7-477c5318219r",
+            "processTypeName": "Corporate Insolvency Resolution Process (CIRP)",
+            "processTypeCode": "50001",
+            "isActive": null,
+            "processTypeValue": "CIRP"
+        },
+        "corporateDebtorDetails": {
+            "uuid": "7c249b25-7e75-4e0f-9177-5988ccbda43a",
+            "nameOfCorporateDebtor": "Jalpower Corporation Limited",
+            "cinOrLlpinNumber": "U40109TG2004PLC043985",
+            "ipDetailsId": "2b44f7f3-9983-4f4b-be75-46056292c7a9",
+            "appointedAs": "4",
+            "nameOfIp": "Mr. Amit Jain",
+            "registrationNo": "IBBI/IPA-001/IP-P01447/2018-2019/12196",
+            "ipUuid": "2b44f7f3-9983-4f4b-be75-46056292c7a9",
+            "roleName": "RP",
+            "roleCode": "RP",
+            "roleUuid": "4"
+        },
+        "claimantTypes": {
+            "uuid": "1001",
+            "claimantName": "Financial Creditors",
+            "claimantCode": "1001"
+        },
+        "claimantCategories": {
+            "uuid": "20001",
+            "claimantCategoryName": "Secured Financial Creditors (Banks/ARCs/NBFCs/FIs)",
+            "claimantCategoryCode": "20001",
+            "isActive": true,
+            "cirpFormId": "40002",
+            "claimantTypeCode": "1001",
+            "liquidationId": "a6928a25-1d51-4e6b-aa6c-a9c1a4ab62f8"
+        },
+        "formDetails": {
+            "uuid": "40002",
+            "formName": "Form C",
+            "formCode": "40002",
+            "isActive": true
+        },
+        "userType": "CLAIMANT",
+        "users": [
+            {
+                "claimant": {
+                    "uuid": "e6f398bf-eacc-42cc-a49c-fd3caa9d6b75",
+                    "claimantName": "sassa",
+                    "corporateName": null,
+                    "emailId": "ayan@gmail.com",
+                    "claimantEntityType": "INDV",
+                    "mobileNumber": "8481881868",
+                    "aadharNumber": "213367555151",
+                    "panNumber": "GZVPS5431E",
+                    "cinOrTaNumber": null,
+                    "roleCode": "CLAIMANT",
+                    "auditDetails": {
+                        "createdBy": "e6f398bf-eacc-42cc-a49c-fd3caa9d6b75",
+                        "lastModifiedBy": "e6f398bf-eacc-42cc-a49c-fd3caa9d6b75",
+                        "createdTime": "2025-04-09 17:05:42.898",
+                        "lastModifiedTime": "2025-04-09 17:05:42.898"
+                    },
+                    "active": true
+                },
+                "corporateDebtor": null
+            }
+        ]
+    },
+    "applicationDetails": {
+        "uuid": "",
+        "applicationNumber": "",
+        "creditorBasicDetails": {
+            "uuid": "",
+            "financialCreditorName": "DSSD",
+            "financialCreditorEmail": "saasas@gmail.com",
+            "financialDebtorName": "Jal Power",
+            "identificationTypeDetails": {
+                "identificationType": "INCORPORATED",
+                "identifications": [
+                    {
+                        "uuid": "",
+                        "creditorsBasicUuid": "",
+                        "identificationRecord": "INCORPORATED",
+                        "proofOfIdentificationDocuments": {
+                            "uuid": "",
+                            "supportingDocumentUuid": "",
+                            "docId": "d841bb18-66da-4191-9294-7949c59d306a",
+                            "docType": "identification",
+                            "docSource": "identification_type",
+                            "docName": "father_adhaar.pdf"
+                        }
+                    }
+                ]
+            },
+            "addressDetails": {
+                "addressLine1": "dssdsd",
+                "addressLine2": "sddssd",
+                "city": "dsdsds",
+                "state": "dsds",
+                "pincode": "700155"
+            },
+            "auditDetails": {
+                "createdBy": "e6f398bf-eacc-42cc-a49c-fd3caa9d6b75",
+                "lastModifiedBy": "e6f398bf-eacc-42cc-a49c-fd3caa9d6b75",
+                "createdTime": "2025-05-06T19:04:12.095853800",
+                "lastModifiedTime": "2025-05-06T19:10:32.592745300"
+            },
+            "empty": false
+        },
+        "claimDetails": {},
+        "signatoryDetails": {},
+        "supportingDocument": {},
+        "status": "Draft",
+        "isActive": false,
+        "isFinalSubmit": false,
+        "auditDetails": {
+            "createdBy": "e6f398bf-eacc-42cc-a49c-fd3caa9d6b75",
+            "lastModifiedBy": "e6f398bf-eacc-42cc-a49c-fd3caa9d6b75",
+            "createdTime": "2025-05-06T19:10:32.694684800",
+            "lastModifiedTime": "2025-05-06T19:10:32.700220700"
+        }
+    }
+}
+after got this response in 2nd step please send with this response & updated data for 2nd step i am declaring 2nd step payload in top
+that way implement next button click functionality & api call
+1st step response - 
+{
+    "status": {
+        "code": "200",
+        "message": "Data Created Successfully"
+    },
+    "userInfo": {
+        "status": {
+            "code": null,
+            "message": null
+        },
+        "token": null,
+        "otp": "123456",
+        "processTypes": {
+            "auditDetails": null,
+            "uuid": "bb9683f5-0506-45be-99a7-477c5318219r",
+            "processTypeName": "Corporate Insolvency Resolution Process (CIRP)",
+            "processTypeCode": "50001",
+            "isActive": null,
+            "processTypeValue": "CIRP"
+        },
+        "corporateDebtorDetails": {
+            "uuid": "7c249b25-7e75-4e0f-9177-5988ccbda43a",
+            "nameOfCorporateDebtor": "Jalpower Corporation Limited",
+            "cinOrLlpinNumber": "U40109TG2004PLC043985",
+            "ipDetailsId": "2b44f7f3-9983-4f4b-be75-46056292c7a9",
+            "appointedAs": "4",
+            "nameOfIp": "Mr. Amit Jain",
+            "registrationNo": "IBBI/IPA-001/IP-P01447/2018-2019/12196",
+            "ipUuid": "2b44f7f3-9983-4f4b-be75-46056292c7a9",
+            "roleName": "RP",
+            "roleCode": "RP",
+            "roleUuid": "4"
+        },
+        "claimantTypes": {
+            "uuid": "1001",
+            "claimantName": "Financial Creditors",
+            "claimantCode": "1001"
+        },
+        "claimantCategories": {
+            "uuid": "20001",
+            "claimantCategoryName": "Secured Financial Creditors (Banks/ARCs/NBFCs/FIs)",
+            "claimantCategoryCode": "20001",
+            "isActive": true,
+            "cirpFormId": "40002",
+            "claimantTypeCode": "1001",
+            "liquidationId": "a6928a25-1d51-4e6b-aa6c-a9c1a4ab62f8"
+        },
+        "formDetails": {
+            "uuid": "40002",
+            "formName": "Form C",
+            "formCode": "40002",
+            "isActive": true
+        },
+        "userType": "CLAIMANT",
+        "users": [
+            {
+                "claimant": {
+                    "uuid": "e6f398bf-eacc-42cc-a49c-fd3caa9d6b75",
+                    "claimantName": "sassa",
+                    "corporateName": null,
+                    "emailId": "ayan@gmail.com",
+                    "claimantEntityType": "INDV",
+                    "mobileNumber": "8481881868",
+                    "aadharNumber": "213367555151",
+                    "panNumber": "GZVPS5431E",
+                    "cinOrTaNumber": null,
+                    "roleCode": "CLAIMANT",
+                    "auditDetails": {
+                        "createdBy": "e6f398bf-eacc-42cc-a49c-fd3caa9d6b75",
+                        "lastModifiedBy": "e6f398bf-eacc-42cc-a49c-fd3caa9d6b75",
+                        "createdTime": "2025-04-09 17:05:42.898",
+                        "lastModifiedTime": "2025-04-09 17:05:42.898"
+                    },
+                    "active": true
+                },
+                "corporateDebtor": null
+            }
+        ]
+    },
+    "applicationDetails": {
+        "uuid": "078dc487-02c8-4cfe-b3f0-bdcd6f2455ec",
+        "applicationNumber": "CLAIM/CIRP/20250507/000242",
+        "creditorBasicDetails": {
+            "uuid": "b0a8f931-7511-447d-a838-90c418c0c57d",
+            "financialCreditorName": "DSSD",
+            "financialCreditorEmail": "saasas@gmail.com",
+            "financialDebtorName": "Jal Power",
+            "identificationTypeDetails": {
+                "identificationType": "INCORPORATED",
+                "identifications": [
+                    {
+                        "uuid": "d0621a3c-a788-4b96-96b1-231b8c631d2f",
+                        "creditorsBasicUuid": "b0a8f931-7511-447d-a838-90c418c0c57d",
+                        "identificationRecord": "INCORPORATED",
+                        "proofOfIdentificationDocuments": {
+                            "uuid": "",
+                            "supportingDocumentUuid": "",
+                            "docId": "d841bb18-66da-4191-9294-7949c59d306a",
+                            "docType": "identification",
+                            "docSource": "identification_type",
+                            "docName": "father_adhaar.pdf"
+                        }
+                    }
+                ]
+            },
+            "addressDetails": {
+                "addressLine1": "dssdsd",
+                "addressLine2": "sddssd",
+                "city": "dsdsds",
+                "state": "dsds",
+                "pincode": "700155"
+            },
+            "auditDetails": {
+                "createdBy": "e6f398bf-eacc-42cc-a49c-fd3caa9d6b75",
+                "lastModifiedBy": "e6f398bf-eacc-42cc-a49c-fd3caa9d6b75",
+                "createdTime": "2025-05-07T17:51:12.785623966",
+                "lastModifiedTime": "2025-05-07T17:51:12.785664248"
+            },
+            "empty": false
+        },
+        "claimDetails": {
+            "uuid": null,
+            "creditorBasicDetailsUuid": null,
+            "claimType": null,
+            "claimAmount": null,
+            "isAmountOfClaimCoverdBySecurityInterest": null,
+            "securityValue": null,
+            "securityDate": null,
+            "isAmountOfClaimCoverdByGuarantee": null,
+            "guaranteeValue": null,
+            "guaranteeDate": null,
+            "guarantorDetails": null,
+            "principalBorrowerDetails": null,
+            "beneficiaryDetails": null,
+            "debtIncurredDetails": null,
+            "debtIncurredDate": null,
+            "mutualDealingDetailsAgainstTheClaim": null,
+            "bankAccountDetails": null,
+            "auditDetails": null,
+            "empty": true
+        },
+        "signatoryDetails": {
+            "uuid": null,
+            "creditorBasicDetailsUuid": null,
+            "financialCreditorName": null,
+            "positionOfCreditor": null,
+            "signatureFinancialCreditor": null,
+            "addressOfSigningPerson": null,
+            "isSignatureToUpload": null,
+            "document": null,
+            "auditDetails": null,
+            "empty": true
+        },
+        "supportingDocument": {
+            "uuid": null,
+            "creditorBasicDetailsUuid": null,
+            "documents": null,
+            "auditDetails": null,
+            "empty": true
+        },
+        "status": "Draft",
+        "isActive": false,
+        "isFinalSubmit": false,
+        "auditDetails": {
+            "createdBy": "e6f398bf-eacc-42cc-a49c-fd3caa9d6b75",
+            "lastModifiedBy": "e6f398bf-eacc-42cc-a49c-fd3caa9d6b75",
+            "createdTime": "2025-05-07T17:51:12.789567530",
+            "lastModifiedTime": "2025-05-07T17:51:12.789580330"
+        }
+    }
+}
