@@ -1,129 +1,504 @@
-import React, { useState, useEffect } from "react";
-import { useForm } from "react-hook-form";
-import { FaPlus, FaMinus } from "react-icons/fa";
+import React, { useCallback, useEffect, useState } from "react";
+import { useForm, FormProvider } from "react-hook-form";
+import DynamicField from "./formCommon/DynamicField";
+import Collapsible from "./formCommon/Collapsible";
+import { uploadDocument } from "../../../services/documentUploadService";
+import "./StepFirst.css";
+import 'bootstrap/dist/css/bootstrap.min.css';
+import { FaPlus, FaTimes, FaDownload, FaBuilding, FaUser, FaHome, FaIdCard } from "react-icons/fa";
 
-const ClaimTypeFields = ({ claimType, control, setValue, getValues }) => {
-  // Initialize with existing entityData or empty array
-  const [entityData, setEntityData] = useState(getValues("entityData") || []);
+const StepFirst = ({ provideSubmitHandler, formData, onValidationComplete, onNext }) => {
+  const [uploadError, setUploadError] = useState(null);
+  const [incorporatedRecords, setIncorporatedRecords] = useState([
+    { id: 1, details: "", proof: null }
+  ]);
+  const [partnershipRecords, setPartnershipRecords] = useState([
+    { id: 1, details: "", proof: null }
+  ]);
+  const [uploadingRecordId, setUploadingRecordId] = useState(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Add new entity
-  const addEntity = () => {
-    const newId = entityData.length > 0 ? Math.max(...entityData.map(e => e.id)) + 1 : 1;
-    const entityType = claimType === "PRINCIPAL_BORROWER" ? "GUARANTOR" :
-                     claimType === "GUARANTOR" ? "PRINCIPAL_BORROWER" :
-                     "BENEFICIARY";
-    
-    setEntityData([
-      ...entityData,
-      {
-        id: newId,
-        name: "",
-        address: "",
-        type: entityType
-      }
-    ]);
-  };
+  const methods = useForm({
+    mode: "onChange",
+    reValidateMode: "onChange",
+    defaultValues: {
+      corporateDebtorName: "",
+      identificationType: "INCORPORATED",
+      financialCreditorName: "",
+      financialCreditorEmail: "",
+      addressLine1: "",
+      addressLine2: "",
+      city: "",
+      state: "",
+      pincode: "",
+      identificationtype_details: [{ id: 1, details: "", proof: null }]
+    }
+  });
 
-  // Remove entity
-  const removeEntity = (id) => {
-    if (entityData.length <= 1) return;
-    setEntityData(entityData.filter(entity => entity.id !== id));
-  };
+  const {
+    register,
+    handleSubmit,
+    formState: { errors, isValid },
+    trigger,
+    setValue,
+    control,
+    getValues,
+    watch,
+    resetField
+  } = methods;
 
-  // Update entity field
-  const updateEntity = (id, field, value) => {
-    setEntityData(entityData.map(entity => 
-      entity.id === id ? { ...entity, [field]: value } : entity
-    ));
-  };
+  const watchIdentificationType = watch("identificationType", "INCORPORATED");
 
-  // Save to form data whenever entityData changes
+  // Initialize form data
   useEffect(() => {
-    setValue("entityData", entityData);
-  }, [entityData, setValue]);
+    if (formData) {
+      Object.keys(formData).forEach((key) => {
+        setValue(key, formData[key]);
+      });
 
-  // Get field labels based on claim type
-  const { nameLabel, addressLabel } = 
-    claimType === "PRINCIPAL_BORROWER" ? {
-      nameLabel: "Name of the guarantor",
-      addressLabel: "Address of the guarantor"
-    } : claimType === "GUARANTOR" ? {
-      nameLabel: "Name of the Principal Borrower",
-      addressLabel: "Address of the Principal Borrower"
-    } : {
-      nameLabel: "Name of the Beneficiary",
-      addressLabel: "Address of the Beneficiary"
-    };
+      if (formData.identificationtype_details && formData.identificationtype_details.length > 0) {
+        if (formData.identificationType === "INCORPORATED") {
+          setIncorporatedRecords(formData.identificationtype_details);
+        } else {
+          setPartnershipRecords(formData.identificationtype_details);
+        }
+        setValue("identificationtype_details", formData.identificationtype_details);
+      }
+    }
+  }, [formData, setValue]);
 
-  return (
-    <div>
-      {/* Other claim fields... */}
+  // Update identificationtype_details value when records change
+  useEffect(() => {
+    if (watchIdentificationType === "INCORPORATED") {
+      setValue("identificationtype_details", incorporatedRecords);
+    } else {
+      setValue("identificationtype_details", partnershipRecords);
+    }
+  }, [incorporatedRecords, partnershipRecords, watchIdentificationType, setValue]);
 
-      {entityData.map((entity) => (
-        <div key={entity.id} className="entity-field-group">
-          <div className="entity-field-row">
-            <div className="form-group">
-              <label>{nameLabel} *</label>
-              <input
-                value={entity.name}
-                onChange={(e) => updateEntity(entity.id, "name", e.target.value)}
-                placeholder={`Enter ${nameLabel.toLowerCase()}`}
-                required
-              />
-            </div>
-            
-            {entity.id !== 1 && (
-              <button 
-                type="button" 
-                onClick={() => removeEntity(entity.id)}
-                title={`Remove ${nameLabel}`}
-              >
-                <FaMinus />
-              </button>
-            )}
-          </div>
-
-          <div className="form-group">
-            <label>{addressLabel} *</label>
-            <input
-              value={entity.address}
-              onChange={(e) => updateEntity(entity.id, "address", e.target.value)}
-              placeholder={`Enter ${addressLabel.toLowerCase()}`}
-              required
-            />
-          </div>
-        </div>
-      ))}
-
-      <button 
-        type="button" 
-        onClick={addEntity}
-      >
-        <FaPlus /> Add {claimType === "GUARANTOR" ? "Principal Borrower" : 
-                      claimType === "PRINCIPAL_BORROWER" ? "Guarantor" : "Beneficiary"}
-      </button>
-    </div>
-  );
-};
-
-// Usage in your form component
-const MyForm = () => {
-  const { control, handleSubmit, setValue, getValues } = useForm();
-
-  const onSubmit = (data) => {
-    // data will contain the entityData array exactly as shown
-    console.log(data);
+  const handleFileUpload = async (file, recordId) => {
+    try {
+      setUploadingRecordId(recordId);
+      setUploadError(null);
+      const result = await uploadDocument(file, 'identification');
+      return {
+        fileId: result.fileId,
+        fileName: file.name,
+        fileType: file.type
+      };
+    } catch (error) {
+      setUploadError(error.message || "Upload failed");
+      throw error;
+    } finally {
+      setUploadingRecordId(null);
+    }
   };
 
+  const addIdentificationRecord = () => {
+    const records = watchIdentificationType === "INCORPORATED" ? incorporatedRecords : partnershipRecords;
+    const setRecords = watchIdentificationType === "INCORPORATED" ? setIncorporatedRecords : setPartnershipRecords;
+    
+    const newId = records.length > 0
+      ? Math.max(...records.map(r => r.id)) + 1
+      : 1;
+    const newRecord = { id: newId, details: "", proof: null };
+    const updatedRecords = [...records, newRecord];
+    setRecords(updatedRecords);
+  };
+
+  const removeIdentificationRecord = (id) => {
+    const records = watchIdentificationType === "INCORPORATED" ? incorporatedRecords : partnershipRecords;
+    const setRecords = watchIdentificationType === "INCORPORATED" ? setIncorporatedRecords : setPartnershipRecords;
+    
+    if (records.length > 1) {
+      const updatedRecords = records.filter(r => r.id !== id);
+      setRecords(updatedRecords);
+    }
+  };
+
+  const updateRecordDetails = (id, value) => {
+    const records = watchIdentificationType === "INCORPORATED" ? incorporatedRecords : partnershipRecords;
+    const setRecords = watchIdentificationType === "INCORPORATED" ? setIncorporatedRecords : setPartnershipRecords;
+    
+    const updatedRecords = records.map(record =>
+      record.id === id ? { ...record, details: value } : record
+    );
+    setRecords(updatedRecords);
+  };
+
+  const updateRecordProof = async (e, id) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      const doc = await handleFileUpload(file, id);
+      
+      const records = watchIdentificationType === "INCORPORATED" ? incorporatedRecords : partnershipRecords;
+      const setRecords = watchIdentificationType === "INCORPORATED" ? setIncorporatedRecords : setPartnershipRecords;
+      
+      const updatedRecords = records.map(record =>
+        record.id === id ? { ...record, proof: doc } : record
+      );
+      setRecords(updatedRecords);
+    } catch (err) {
+      console.error("Upload failed:", err);
+    }
+  };
+
+  const handleRemoveProof = (id) => {
+    const records = watchIdentificationType === "INCORPORATED" ? incorporatedRecords : partnershipRecords;
+    const setRecords = watchIdentificationType === "INCORPORATED" ? setIncorporatedRecords : setPartnershipRecords;
+    
+    const updatedRecords = records.map(record =>
+      record.id === id ? { ...record, proof: null } : record
+    );
+    setRecords(updatedRecords);
+  };
+
+  const corporateDebtorSchema = [
+    {
+      name: "corporateDebtorName",
+      label: <>Corporate Debtor Name <span className="required-asterisk">*</span></>,
+      type: "text",
+      rules: { required: "Corporate debtor name is required" },
+      icon: <FaBuilding className="me-2" />,
+      placeholder: "Enter corporate debtor name"
+
+    }
+  ];
+
+  const basicDetailsSchema = [
+    {
+      name: "financialCreditorName",
+      label: <>Name of the financial creditor <span className="required-asterisk">*</span></>,
+      type: "text",
+      rules: { required: "Financial creditor name is required" },
+      icon: <FaUser className="me-2" />,
+      placeholder: "Enter financial creditor name"
+
+    },
+    {
+      name: "financialCreditorEmail",
+      label: <>Email address of the financial creditor <span className="required-asterisk">*</span></>,
+      type: "email",
+      rules: {
+        required: "Email is required",
+        pattern: {
+          value: /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i,
+          message: "Invalid email address"
+        }
+      },
+      icon: <FaUser className="me-2" />,
+      placeholder: "Enter financial creditor email"
+    },
+    {
+      name: "identificationType",
+      label: <>Identification type <span className="required-asterisk">*</span></>,
+      type: "radio",
+      options: [
+        { value: "INCORPORATED", label: "Incorporated body" },
+        { value: "INDIVIDUAL_PARTNERSHIP", label: "Partnership or individual" }
+      ],
+      rules: { required: "Select an identification type" },
+      icon: <FaIdCard className="me-2" />
+    }
+  ];
+
+  const addressDetailsSchema = [
+    { 
+      name: "addressLine1", 
+      label: <>Address line 1 <span className="required-asterisk">*</span></>, 
+      type: "text", 
+      rules: { required: "Address line 1 is required" },
+      icon: <FaHome className="me-2" />,
+      placeholder: "Enter address line 1"
+    },
+    { 
+      name: "addressLine2", 
+      label: "Address line 2", 
+      type: "text",
+      icon: <FaHome className="me-2" />,
+      placeholder: "Enter address line 2"
+    },
+    { 
+      name: "city", 
+      label: <>City <span className="required-asterisk">*</span></>, 
+      type: "text", 
+      rules: { required: "City is required" },
+      icon: <FaHome className="me-2" />,
+      placeholder: "Enter city name"
+    },
+    { 
+      name: "state", 
+      label: <>State <span className="required-asterisk">*</span></>, 
+      type: "text", 
+      rules: { required: "State is required" },
+      icon: <FaHome className="me-2" />,
+      placeholder: "Enter state name"
+    },
+    { 
+      name: "pincode", 
+      label: <>Pincode <span className="required-asterisk">*</span></>, 
+      type: "text", 
+      rules: { required: "Pincode is required" },
+      icon: <FaHome className="me-2" />,
+       placeholder: "Enter pincode number"
+    }
+  ];
+
+  const onSubmit = useCallback(async () => {
+    setIsSubmitting(true);
+    try {
+      const isValid = await trigger();
+      if (!isValid) {
+        console.error("Validation failed");
+        return false;
+      }
+      
+      const formValues = getValues();
+      if (onNext) {
+        onNext(formValues);
+      }
+      return formValues;
+    } finally {
+      setIsSubmitting(false);
+    }
+  }, [trigger, getValues, onNext]);
+
+  useEffect(() => {
+    if (onValidationComplete) {
+      onValidationComplete(isValid);
+    }
+  }, [isValid, onValidationComplete]);
+
+  useEffect(() => {
+    if (provideSubmitHandler) {
+      provideSubmitHandler(onSubmit);
+    }
+  }, [provideSubmitHandler, onSubmit]);
+
+  const currentRecords = watchIdentificationType === "INCORPORATED" ? incorporatedRecords : partnershipRecords;
+
   return (
-    <form onSubmit={handleSubmit(onSubmit)}>
-      <ClaimTypeFields 
-        claimType="PRINCIPAL_BORROWER" 
-        control={control}
-        setValue={setValue}
-        getValues={getValues}
-      />
-      <button type="submit">Submit</button>
-    </form>
+    <FormProvider {...methods}>
+      <form className="form-stepper">
+        <div className="mb-4 bg-white p-4 rounded-3 shadow-sm">
+          {/* Corporate Debtor Section */}
+          <Collapsible 
+            title={
+              <div className="d-flex align-items-center">
+                <FaBuilding className="me-2" />
+                Corporate Debtor Details
+              </div>
+            } 
+            defaultOpen
+            iconColor="#269ccc"
+          >
+            <div className="container-fluid">
+              <div className="row g-3">
+                {corporateDebtorSchema.map((f) => (
+                  <div key={f.name} className="col-md-6">
+                    <DynamicField
+                      fieldConfig={f}
+                      control={control}
+                      register={register}
+                      errors={errors}
+                      setValue={setValue}
+                      trigger={trigger}
+                      getValues={getValues}
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+          </Collapsible>
+        </div>
+
+        <div className="mb-4 bg-white p-4 rounded-3 shadow-sm">
+          <Collapsible 
+            title={
+              <div className="d-flex align-items-center">
+                <FaUser className="me-2" />
+                Financial Creditor Details
+              </div>
+            } 
+            defaultOpen
+            iconColor="#269ccc"
+          >
+            <div className="container-fluid">
+              <div className="row g-3">
+                {basicDetailsSchema.map((f) => (
+                  <div key={f.name} className="col-md-6">
+                    <DynamicField
+                      fieldConfig={f}
+                      control={control}
+                      register={register}
+                      errors={errors}
+                      setValue={setValue}
+                      trigger={trigger}
+                      getValues={getValues}
+                    />
+                  </div>
+                ))}
+              </div>
+
+              <div className="mt-4">
+                <h5 className="d-flex align-items-center">
+                  <FaIdCard className="me-2" />
+                  {watchIdentificationType === "INCORPORATED"
+                    ? "Incorporation Details"
+                    : "Partnership or Individual Records"}
+                </h5>
+                {currentRecords.map((record, index) => (
+                  <div key={record.id} className="mb-4 p-3 border rounded bg-light">
+                    {watchIdentificationType === "INDIVIDUAL_PARTNERSHIP" && (
+                      <div className="d-flex justify-content-between align-items-center mb-3">
+                        <h6 className="mb-0">Record {index + 1}</h6>
+                        {currentRecords.length > 1 && (
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-danger"
+                            onClick={() => removeIdentificationRecord(record.id)}
+                            disabled={uploadingRecordId !== null || isSubmitting}
+                          >
+                            <FaTimes className="me-1" /> Remove
+                          </button>
+                        )}
+                      </div>
+                    )}
+                    <div className="row g-3">
+                      <div className="col-12">
+                        <label className="form-label">
+                          <FaIdCard className="me-2" />
+                          {watchIdentificationType === "INCORPORATED"
+                            ? "Identification Number"
+                            : "Identification Records"} <span className="required-asterisk">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          className={`form-control ${errors.identificationtype_details?.[index]?.details ? 'is-invalid' : ''}`}
+                          value={record.details}
+                          onChange={(e) => updateRecordDetails(record.id, e.target.value)}
+                          placeholder={
+                            watchIdentificationType === "INCORPORATED"
+                              ? "Enter Identification number"
+                              : "Enter identification records"
+                          }
+                          disabled={uploadingRecordId !== null || isSubmitting}
+                        />
+                        {errors.identificationtype_details?.[index]?.details && (
+                          <div className="invalid-feedback d-block">
+                            {errors.identificationtype_details[index].details.message}
+                          </div>
+                        )}
+                      </div>
+                      <div className="col-12">
+                        <label className="form-label">
+                          <FaDownload className="me-2" />
+                          {watchIdentificationType === "INCORPORATED"
+                            ? "Proof of Identification"
+                            : "Proof of Identification"} <span className="required-asterisk">*</span>
+                        </label>
+                        {record.proof ? (
+                          <div className="d-flex align-items-center mt-2">
+                            <span className="me-2">{record.proof.fileName}</span>
+                            <a
+                              href={`${process.env.REACT_APP_FILE_SERVICE}v1/files/id?fileStoreId=${record.proof.fileId}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="btn btn-sm btn-outline-primary me-2"
+                            >
+                              <FaDownload className="me-1" /> Download
+                            </a>
+                            <button
+                              type="button"
+                              className="btn btn-sm btn-outline-danger"
+                              onClick={() => handleRemoveProof(record.id)}
+                              disabled={uploadingRecordId !== null || isSubmitting}
+                            >
+                              <FaTimes className="me-1" /> Remove
+                            </button>
+                          </div>
+                        ) : null}
+                        <input
+                          type="file"
+                          id={`proof_${record.id}`}
+                          onChange={(e) => updateRecordProof(e, record.id)}
+                          className="d-none"
+                          disabled={uploadingRecordId !== null || isSubmitting}
+                        />
+                        <label htmlFor={`proof_${record.id}`} className="btn btn-outline-primary w-100 mt-2">
+                          {uploadingRecordId === record.id ? (
+                            <>
+                              <span className="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+                              Uploading...
+                            </>
+                          ) : (
+                            <>
+                              <FaDownload className="me-2" />
+                              Choose File
+                            </>
+                          )}
+                        </label>
+                        {errors.identificationtype_details?.[index]?.proof && (
+                          <div className="invalid-feedback d-block">
+                            {errors.identificationtype_details[index].proof.message}
+                          </div>
+                        )}
+                        <small className="form-text text-muted mt-1">Max file size: 5MB (PDF, JPEG, PNG)</small>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+                {watchIdentificationType === "INDIVIDUAL_PARTNERSHIP" && (
+                  <button
+                    type="button"
+                    className="btn btn-outline-primary mt-2"
+                    onClick={addIdentificationRecord}
+                    disabled={uploadingRecordId !== null || isSubmitting}
+                  >
+                    <FaPlus className="me-2" /> Add Another Identification Record
+                  </button>
+                )}
+              </div>
+            </div>
+          </Collapsible>
+        </div>
+
+        {/* Address Section */}
+        <div className="mb-4 bg-white p-4 rounded-3 shadow-sm">
+          <Collapsible 
+            title={
+              <div className="d-flex align-items-center">
+                <FaHome className="me-2" />
+                Address Details
+              </div>
+            } 
+            defaultOpen
+            iconColor="#269ccc"
+          >
+            <div className="container-fluid">
+              <div className="row g-3">
+                {addressDetailsSchema.map((f) => (
+                  <div key={f.name} className="col-md-6">
+                    <DynamicField
+                      fieldConfig={f}
+                      control={control}
+                      register={register}
+                      errors={errors}
+                      setValue={setValue}
+                      trigger={trigger}
+                      getValues={getValues}
+                      disabled={uploadingRecordId !== null || isSubmitting}
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+          </Collapsible>
+        </div>
+      </form>
+    </FormProvider>
   );
 };
+
+export default StepFirst;
