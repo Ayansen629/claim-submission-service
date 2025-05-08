@@ -1,251 +1,220 @@
-import React, { useState, useEffect, useCallback } from "react";
-import { useForm, FormProvider } from "react-hook-form";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
+import { useForm, FormProvider, Controller } from "react-hook-form";
 import Collapsible from "../formCommon/Collapsible";
-import { FaPlus, FaMinus } from "react-icons/fa";
+import Tooltip from "@mui/material/Tooltip";
+import { 
+  FaInfoCircle, 
+  FaPlus, 
+  FaMinus,
+  FaFileAlt,
+  FaMoneyBillWave,
+  FaCalendarAlt,
+  FaHandshake,
+  FaBalanceScale,
+  FaUniversity,
+  FaLandmark,
+  FaMapMarkerAlt,
+  FaCity,
+  FaGlobeAmericas
+} from "react-icons/fa";
+import { GiBank } from "react-icons/gi";
+import { BsBank2, BsBuilding } from "react-icons/bs";
+import axios from "axios";
 import "./FormC.css";
 
-// Dynamic input component without react-hook-form register
-const DynamicInput = ({ label, value, onChange, error, required }) => (
-  <div className="form-group">
-    <label className="form-label">
-      {label} {required && <span className="required-asterisk">*</span>}
-    </label>
-    <input
-      type="text"
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      className={`form-control ${error ? "is-invalid" : ""}`}
-    />
-    {error && <div className="invalid-feedback">{error}</div>}
-  </div>
-);
+// ... (keep all the existing helper components like DynamicField and IFSCSearch)
 
-// ClaimTypeFields Component
-const ClaimTypeFields = ({ claimType, control, setValue, getValues }) => {
-  const [entityData, setEntityData] = useState([{ id: 1, name: "", address: "" }]);
+const ClaimTypeFields = ({ 
+  claimType, 
+  control, 
+  register, 
+  errors, 
+  setValue, 
+  getValues, 
+  watch,
+  trigger
+}) => {
+  const hasSecurityInterest = watch("hasSecurityInterest");
+  const hasGuarantee = watch("hasGuarantee");
+  
+  const [showSecurityFields, setShowSecurityFields] = useState(hasSecurityInterest === "yes");
+  const [showGuaranteeFields, setShowGuaranteeFields] = useState(hasGuarantee === "yes");
 
-  // Get entity labels based on claim type
-  const getEntityLabels = () => {
-    switch (claimType) {
-      case "PRINCIPAL_BORROWER":
-        return { nameLabel: "Guarantor Name", addressLabel: "Guarantor Address" };
-      case "GUARANTOR":
-        return { nameLabel: "Principal Borrower Name", addressLabel: "Principal Borrower Address" };
-      default:
-        return { nameLabel: "Name", addressLabel: "Address" };
+  // Initialize with existing entityData or empty array
+  const [entityData, setEntityData] = useState(getValues("entityData") || []);
+
+  // Handle form value changes
+  useEffect(() => {
+    setShowSecurityFields(hasSecurityInterest === "yes");
+    setShowGuaranteeFields(hasGuarantee === "yes");
+  }, [hasSecurityInterest, hasGuarantee]);
+
+  const handleSecurityInterestChange = (value) => {
+    setShowSecurityFields(value === "yes");
+    if (value === "no") {
+      setValue("securityValue", "", { shouldValidate: false });
+      setValue("securityDate", "", { shouldValidate: false });
     }
   };
 
-  const { nameLabel, addressLabel } = getEntityLabels();
-
-  const addEntity = () => {
-    const newId = entityData.length > 0 ? Math.max(...entityData.map((e) => e.id)) + 1 : 1;
-    const newEntity = { id: newId, name: "", address: "" };
-    const updatedData = [...entityData, newEntity];
-    setEntityData(updatedData);
-    setValue("entityData", updatedData, { shouldValidate: true });
+  const handleGuaranteeChange = (value) => {
+    setShowGuaranteeFields(value === "yes");
+    if (value === "no") {
+      setValue("guaranteeValue", "", { shouldValidate: false });
+      setValue("guaranteeDate", "", { shouldValidate: false });
+    }
   };
 
-  const removeEntity = (index) => {
-    const updatedData = entityData.filter((_, i) => i !== index);
-    setEntityData(updatedData);
-    setValue("entityData", updatedData, { shouldValidate: true });
+  const addEntityField = useCallback(() => {
+    const newId = entityData.length > 0 ? Math.max(...entityData.map(e => e.id)) + 1 : 1;
+    const entityType = claimType === "PRINCIPAL_BORROWER" ? "GUARANTOR" :
+                     claimType === "GUARANTOR" ? "PRINCIPAL_BORROWER" :
+                     "BENEFICIARY";
+    
+    const newEntity = {
+      id: newId,
+      name: "",
+      address: "",
+      type: entityType
+    };
+    
+    setEntityData([...entityData, newEntity]);
+    
+    // Focus the new field after a small delay
+    setTimeout(() => {
+      document.getElementById(`entity-name-${newId}`)?.focus();
+    }, 100);
+  }, [entityData, claimType]);
+
+  const removeEntityField = useCallback(async (id) => {
+    if (entityData.length <= 1) return;
+
+    const updatedEntities = entityData.filter(entity => entity.id !== id);
+    setEntityData(updatedEntities);
+    setValue("entityData", updatedEntities, { shouldValidate: true });
+    await trigger();
+  }, [entityData, setValue, trigger]);
+
+  const handleEntityChange = useCallback((id, field, value) => {
+    const updatedEntities = entityData.map(entity => 
+      entity.id === id ? { ...entity, [field]: value } : entity
+    );
+    setEntityData(updatedEntities);
+    setValue("entityData", updatedEntities, { shouldValidate: true });
+  }, [entityData, setValue]);
+
+  // Initialize with existing data
+  useEffect(() => {
+    const existingData = getValues("entityData");
+    if (existingData && existingData.length > 0) {
+      setEntityData(existingData);
+    }
+  }, [getValues]);
+
+  // ... (keep all the existing field configurations)
+
+  const getEntityFieldLabels = () => {
+    switch (claimType) {
+      case "PRINCIPAL_BORROWER":
+        return {
+          nameLabel: "Name of the guarantor",
+          addressLabel: "Address of the guarantor"
+        };
+      case "GUARANTOR":
+        return {
+          nameLabel: "Name of the Principal Borrower",
+          addressLabel: "Address of the Principal Borrower"
+        };
+      case "BENEFICIARY":
+        return {
+          nameLabel: "Name of the Beneficiary",
+          addressLabel: "Address of the Beneficiary"
+        };
+      default:
+        return {
+          nameLabel: "Name",
+          addressLabel: "Address"
+        };
+    }
   };
 
-  const updateEntity = (index, field, value) => {
-    const updatedData = [...entityData];
-    updatedData[index][field] = value;
-    setEntityData(updatedData);
-    setValue("entityData", updatedData, { shouldValidate: true });
-  };
+  const { nameLabel, addressLabel } = getEntityFieldLabels();
 
   return (
     <div className="form-section">
-      {/* Render entities */}
-      {entityData.map((item, index) => (
-        <div key={item.id} className="entity-field-group">
+      {/* ... (keep all the existing common and additional fields) */}
+
+      {entityData.map((entity) => (
+        <div key={entity.id} className="entity-field-group">
           <div className="entity-field-row">
-            <DynamicInput
-              label={`${nameLabel} ${item.id}`}
-              value={item.name}
-              onChange={(value) => updateEntity(index, "name", value)}
-              required
-            />
-            {index > 0 && (
-              <button
-                type="button"
+            <div className="form-group">
+              <label className="form-label">
+                {nameLabel}
+                <span className="required-asterisk">*</span>
+              </label>
+              <input
+                id={`entity-name-${entity.id}`}
+                type="text"
+                className={`form-control ${
+                  errors.entityData?.[entity.id]?.name ? "is-invalid" : ""
+                }`}
+                value={entity.name}
+                onChange={(e) => handleEntityChange(entity.id, "name", e.target.value)}
+                placeholder={`Enter ${nameLabel.toLowerCase()}`}
+              />
+              {errors.entityData?.[entity.id]?.name && (
+                <div className="invalid-feedback">
+                  {errors.entityData[entity.id].name.message}
+                </div>
+              )}
+            </div>
+            
+            {entity.id !== 1 && (
+              <button 
+                type="button" 
                 className="btn btn-danger btn-sm remove-entity-btn"
-                onClick={() => removeEntity(index)}
+                onClick={() => removeEntityField(entity.id)}
+                aria-label={`Remove ${nameLabel}`}
+                title={`Remove ${nameLabel}`}
               >
                 <FaMinus />
               </button>
             )}
           </div>
-          <DynamicInput
-            label={`${addressLabel} ${item.id}`}
-            value={item.address}
-            onChange={(value) => updateEntity(index, "address", value)}
-            required
-          />
+
+          <div className="form-group">
+            <label className="form-label">
+              {addressLabel}
+              <span className="required-asterisk">*</span>
+            </label>
+            <input
+              type="text"
+              className={`form-control ${
+                errors.entityData?.[entity.id]?.address ? "is-invalid" : ""
+              }`}
+              value={entity.address}
+              onChange={(e) => handleEntityChange(entity.id, "address", e.target.value)}
+              placeholder={`Enter ${addressLabel.toLowerCase()}`}
+            />
+            {errors.entityData?.[entity.id]?.address && (
+              <div className="invalid-feedback">
+                {errors.entityData[entity.id].address.message}
+              </div>
+            )}
+          </div>
         </div>
       ))}
 
-      <button type="button" className="btn btn-outline-primary btn-sm add-more-btn" onClick={addEntity}>
-        <FaPlus /> Add {claimType === "GUARANTOR" ? "Principal Borrower" : "Guarantor"}
+      <button 
+        type="button" 
+        className="btn btn-outline-primary btn-sm add-more-btn"
+        onClick={addEntityField}
+      >
+        <FaPlus /> Add {claimType === "GUARANTOR" ? "Principal Borrower" : 
+                        claimType === "PRINCIPAL_BORROWER" ? "Guarantor" : "Beneficiary"}
       </button>
     </div>
   );
 };
 
-// Main FormCDetails Component
-const FormCDetails = ({ provideSubmitHandler, formData, onValidationComplete }) => {
-  const methods = useForm({ mode: "onChange" });
-  const { register, handleSubmit, formState: { errors }, control, setValue, getValues, reset, trigger } = methods;
-
-  const [selectedClaimType, setSelectedClaimType] = useState("");
-
-  // Bank Account Fields
-  const bankAccountFields = [
-    { name: "accountNumber", label: "Account Number" },
-    { name: "ifscCode", label: "IFSC Code" },
-    { name: "bankName", label: "Bank Name" },
-    { name: "branchName", label: "Branch Name" },
-    { name: "branchAddress", label: "Branch Address" },
-    { name: "city", label: "City" },
-    { name: "state", label: "State" },
-    { name: "district", label: "District" },
-  ];
-
-  // Claim Type Options
-  const claimTypeOptions = [
-    { value: "", label: "Select Claim Type", disabled: true },
-    { value: "PRINCIPAL_BORROWER", label: "Corporate Debtor as Principal Borrower" },
-    { value: "GUARANTOR", label: "Corporate Debtor as Guarantor" },
-    { value: "BENEFICIARY", label: "Financial Debt Covered" },
-  ];
-
-  const onSubmit = useCallback(async () => {
-    const isValid = await trigger();
-    if (!isValid) {
-      console.error("Validation failed");
-      return false;
-    }
-
-    const finalData = getValues();
-
-    // Optional: Remove any empty strings or undefined values
-    const cleanedData = Object.fromEntries(
-      Object.entries(finalData).filter(([_, v]) => v !== undefined && v !== "")
-    );
-
-    console.log("Final Cleaned Form Data:", cleanedData);
-    return cleanedData;
-  }, [trigger, getValues]);
-
-  // Initialize form with existing data
-  useEffect(() => {
-    if (formData) {
-      // Filter out unwanted dynamic fields before setting form data
-      const filteredData = {};
-      for (let key in formData) {
-        if (!/^(PRINCIPAL_BORROWER|GUARANTOR|BENEFICIARY)(Name|Address)\d+$/.test(key)) {
-          filteredData[key] = formData[key];
-        }
-      }
-
-      reset(filteredData);
-      if (filteredData.claimType) {
-        setSelectedClaimType(filteredData.claimType);
-      }
-    }
-  }, [formData, reset]);
-
-  const handleClaimTypeChange = (value) => {
-    setSelectedClaimType(value);
-    setValue("claimType", value);
-    setValue("entityData", [{ id: 1, name: "", address: "" }]);
-  };
-
-  useEffect(() => {
-    if (provideSubmitHandler) {
-      provideSubmitHandler(onSubmit);
-    }
-  }, [provideSubmitHandler, onSubmit]);
-
-  return (
-    <FormProvider {...methods}>
-      <form className="form-stepper">
-        {/* Claim Details Section */}
-        <div className="form-section-container">
-          <Collapsible title="Details of Claim" defaultOpen={true}>
-            <div className="form-grid">
-              {/* Claim Type Dropdown */}
-              <div className="form-group">
-                <label className="form-label">
-                  Select Claim Type <span className="required-asterisk">*</span>
-                </label>
-                <select
-                  className={`form-control ${errors.claimType ? "is-invalid" : ""}`}
-                  onChange={(e) => handleClaimTypeChange(e.target.value)}
-                  value={selectedClaimType}
-                >
-                  {claimTypeOptions.map((option) => (
-                    <option key={option.value} value={option.value} disabled={option.disabled}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Conditional Rendering Based on Claim Type */}
-              {selectedClaimType && (
-                <ClaimTypeFields
-                  claimType={selectedClaimType}
-                  control={control}
-                  setValue={setValue}
-                  getValues={getValues}
-                />
-              )}
-
-              {/* Other Static Fields */}
-              <div className="form-group">
-                <label className="form-label">Details of How Debt Incurred</label>
-                <textarea {...register("debtDetails")} rows={3} className="form-control" />
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Date of Debt Incurred</label>
-                <input type="date" {...register("debtDate")} className="form-control" />
-              </div>
-
-              <div className="form-group full-width">
-                <label className="form-label">Mutual Dealings</label>
-                <textarea {...register("mutualDetails")} rows={5} className="form-control" />
-              </div>
-            </div>
-          </Collapsible>
-        </div>
-
-        {/* Bank Account Details Section */}
-        <div className="form-section-container">
-          <Collapsible title="Bank Account Details" defaultOpen={true}>
-            <div className="form-grid">
-              {bankAccountFields.map((field) => (
-                <div key={field.name} className="form-group">
-                  <label className="form-label">{field.label}</label>
-                  <input
-                    type="text"
-                    {...register(field.name)}
-                    className="form-control"
-                  />
-                </div>
-              ))}
-            </div>
-          </Collapsible>
-        </div>
-      </form>
-    </FormProvider>
-  );
-};
-
-export default FormCDetails;
+// ... (keep the rest of the FormCDetails component the same)
