@@ -1,82 +1,199 @@
-// Update the stepper buttons section in your Stepper component
-<div className="stepper-buttons">
-  {currentStep > 1 && (
-    <button className="buttonplus previous-button" onClick={handlePrevious}>
-      Previous
-    </button>
-  )}
-  {currentStep === 1 && (
-    <button className="buttonplus cancel-button" onClick={handleCancel}>
-      Cancel
-    </button>
-  )}
+import React, { createContext, useContext, useState } from "react";
+import { toast } from "react-toastify";
+import { APP_MESSAGES } from "../../utils/constants.ts";
+import { postData } from "../../services/http.service.ts";
+import { URLS_ENDPOINT } from "../../utils/urlsConstants.ts";
 
-  {/* For CRP users, show simple Next button that only navigates */}
-  {isCRPUser && currentStep < filteredStepsConfig.length && (
-    <button
-      className="buttonplus next-button"
-      onClick={() => setCurrentStep(prev => prev + 1)}
+const RegistrationContext = createContext();
+
+export const useRegistration = () => {
+  return useContext(RegistrationContext);
+};
+
+const formatFileInfo = (fileData) => {
+  if (!fileData) return "";
+  if (typeof fileData === "string") return fileData;
+  return fileData.name || fileData.fileName || "";
+};
+
+const formatRawData = (rawData) => {
+  if (!rawData) return null;
+
+  // Format identification type details
+  const identificationDetails = rawData.creditorBasicDetails?.identificationTypeDetails?.identifications?.map((item, index) => ({
+    id: index + 1,
+    details: item.identificationRecord || "",
+    proof: {
+      fileId: item.proofOfIdentificationDocuments?.docId || "",
+      fileName: item.proofOfIdentificationDocuments?.docName || "",
+      fileType: "application/pdf" // Default, adjust if needed
+    }
+  }));
+
+  // Format entity data (principal borrowers)
+  const entityData = rawData.claimDetails?.principalBorrowerDetails?.map((item, index) => ({
+    id: index + 1,
+    name: item.name || "",
+    address: item.address || "",
+    type: "PRINCIPAL_BORROWER"
+  }));
+
+  return {
+    step1: {
+      corporateDebtorName: rawData.creditorBasicDetails?.financialDebtorName || "",
+      identificationType: rawData.creditorBasicDetails?.identificationTypeDetails?.identificationType || "",
+      financialCreditorName: rawData.creditorBasicDetails?.financialCreditorName || "",
+      financialCreditorEmail: rawData.creditorBasicDetails?.financialCreditorEmail || "",
+      addressLine1: rawData.creditorBasicDetails?.addressDetails?.addressLine1 || "",
+      addressLine2: rawData.creditorBasicDetails?.addressDetails?.addressLine2 || "",
+      city: rawData.creditorBasicDetails?.addressDetails?.city || "",
+      state: rawData.creditorBasicDetails?.addressDetails?.state || "",
+      pincode: rawData.creditorBasicDetails?.addressDetails?.pincode || "",
+      identificationtype_details: identificationDetails || []
+    },
+    step2: {
+      claimType: rawData.claimDetails?.claimType || "",
+      claimAmount: rawData.claimDetails?.claimAmount?.toString() || "",
+      hasSecurityInterest: rawData.claimDetails?.isAmountOfClaimCoverdBySecurityInterest ? "yes" : "no",
+      hasGuarantee: rawData.claimDetails?.isAmountOfClaimCoverdByGuarantee ? "yes" : "no",
+      securityValue: rawData.claimDetails?.securityValue?.toString() || "",
+      securityDate: rawData.claimDetails?.securityDate || "",
+      guaranteeValue: rawData.claimDetails?.guaranteeValue?.toString() || "",
+      guaranteeDate: rawData.claimDetails?.guaranteeDate || "",
+      debtDetails: rawData.claimDetails?.debtIncurredDetails || "",
+      debtDate: rawData.claimDetails?.debtIncurredDate || "",
+      mutualDetails: rawData.claimDetails?.mutualDealingDetailsAgainstTheClaim || "",
+      accountNumber: rawData.claimDetails?.bankAccountDetails?.bankAccountNumber || "",
+      bankName: rawData.claimDetails?.bankAccountDetails?.bankName || "",
+      branchName: rawData.claimDetails?.bankAccountDetails?.bankBranchName || "",
+      branchAddress: rawData.claimDetails?.bankAccountDetails?.branchAddress || "",
+      city: rawData.claimDetails?.bankAccountDetails?.city || "",
+      state: rawData.claimDetails?.bankAccountDetails?.state || "",
+      district: rawData.claimDetails?.bankAccountDetails?.district || "",
+      ifscCode: rawData.claimDetails?.bankAccountDetails?.bankIfscCode || "",
+      PRINCIPAL_BORROWERName1: entityData?.[0]?.name || "",
+      PRINCIPAL_BORROWERAddress1: entityData?.[0]?.address || "",
+      entityData: entityData || []
+    },
+    step3: {
+      creditorName: rawData.signatoryDetails?.financialCreditorName || "",
+      creditorPosition: rawData.signatoryDetails?.positionOfCreditor || "",
+      creditorSignatureText: rawData.signatoryDetails?.signatureFinancialCreditor || "",
+      creditorAddress: rawData.signatoryDetails?.addressOfSigningPerson || "",
+      hasSignature: rawData.signatoryDetails?.isSignatureToUpload ? "yes" : "no",
+      signatureFile: {
+        fileId: rawData.signatoryDetails?.document?.docId || "",
+        docName: rawData.signatoryDetails?.document?.docName || "",
+        docType: "signature",
+        docSource: "Signature"
+      }
+    },
+    step4: {
+      identityProofType: rawData.supportingDocument?.documents?.find(d => d.docSource === "identity_proof")?.docType || "",
+      addressProofType: rawData.supportingDocument?.documents?.find(d => d.docSource === "address_proof")?.docType || "",
+      identityProofFile: {
+        fileId: rawData.supportingDocument?.documents?.find(d => d.docSource === "identity_proof")?.docId || "",
+        fileName: rawData.supportingDocument?.documents?.find(d => d.docSource === "identity_proof")?.docName || "",
+        fileType: "application/pdf"
+      },
+      addressProofFile: {
+        fileId: rawData.supportingDocument?.documents?.find(d => d.docSource === "address_proof")?.docId || "",
+        fileName: rawData.supportingDocument?.documents?.find(d => d.docSource === "address_proof")?.docName || "",
+        fileType: "application/pdf"
+      }
+    },
+    creditorBasicDetailsUuid: rawData.creditorBasicDetails?.uuid || "",
+    applicationNumber: rawData.applicationNumber || "",
+    uuid: rawData.uuid || "",
+    claimDetailsUuid: rawData.claimDetails?.uuid || "",
+    signatoryDetailsUuid: rawData.signatoryDetails?.uuid || ""
+  };
+};
+
+export const ApplicationContextProvider = ({ children }) => {
+  const [registrationData, setRegistrationData] = useState({});
+  const [applicationDetails, setApplicationDetails] = useState({});
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  const handleApplicatioNFormView = async (row) => {
+    if (!row?.uuid) {
+      console.warn("Row UUID is missing");
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const userFormData = JSON.parse(localStorage.getItem("userFormData"));
+      const fullloginDetails = userFormData?.fullloginDetails;
+      const URL =
+        process.env.REACT_APP_APPLICATION_SERVICE +
+        URLS_ENDPOINT.APP_SERVICES.APPLICATION_VIEW_ID;
+     
+      const request = {
+        userInfo: fullloginDetails || {},
+        uuids: [row.uuid],
+        applicationNumbers: [],
+        claimantUUIDs: []
+      };
+
+      const response = await postData(URL, request);
+
+      if (response?.data && response?.data?.applicationDetails?.length > 0) {
+        const rawData = response.data.applicationDetails[0];
+        setApplicationDetails(rawData);
+        
+        const formattedData = formatRawData(rawData);
+        setRegistrationData(formattedData);
+        localStorage.setItem("applicationdatawithId", JSON.stringify(rawData.applicationNumber));
+        localStorage.setItem("applicationdatastatus", JSON.stringify(rawData.status));
+      } else {
+        toast.error(APP_MESSAGES.NO_DATA_FOUND, { position: "top-right" });
+        setRegistrationData({});
+        localStorage.setItem("applicationdatawithId", JSON.stringify({}));
+        localStorage.setItem("applicationdatastatus", JSON.stringify({}));
+      }
+    } catch (err) {
+      toast.error(APP_MESSAGES.API_ERR, { position: "top-right" });
+      setError(err.message || "Error fetching application data");
+      setRegistrationData({});
+      localStorage.setItem("applicationdatawithId", JSON.stringify({}));
+      localStorage.setItem("applicationdatastatus", JSON.stringify({}));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const updateRegistrationData = (step, updatedData) => {
+    setRegistrationData((prev) => ({
+      ...prev,
+      [step]: {
+        ...prev[step],
+        ...updatedData
+      }
+    }));
+  };
+
+  const resetRegistrationData = () => {
+    setRegistrationData({});
+    setApplicationDetails({});
+  };
+
+  return (
+    <RegistrationContext.Provider
+      value={{
+        registrationData,
+        loading,
+        error,
+        handleApplicatioNFormView,
+        updateRegistrationData,
+        resetRegistrationData,
+        setRegistrationData,
+        applicationDetails,
+        setApplicationDetails
+      }}
     >
-      Next
-    </button>
-  )}
-
-  {/* For non-CRP users, show Save & Next button */}
-  {!isCRPUser && currentStep < filteredStepsConfig.length && (
-    <button
-      className="buttonplus next-button"
-      onClick={handleNext}
-      disabled={isComplete}
-    >
-      Save & Next
-    </button>
-  )}
-
-  {currentStep === 4 && !isCRPUser && (
-    <div className="last-step-buttons">
-      <button
-        className="buttonplus preview-button"
-        onClick={handlePreview}
-      >
-        Preview
-      </button>
-    </div>
-  )}
-
-  {currentStep === filteredStepsConfig.length && isCRPUser ? (
-    <>
-      <button
-        className="buttonplus sendback-button"
-        onClick={() => handleActionClick("Sendback To Claimants")}
-      >
-        Sendback To Claimants
-      </button>
-      <button
-        className="buttonplus accept-contingent-button"
-        onClick={() => handleActionClick("Accept as Contingent")}
-      >
-        Accept as Contingent
-      </button>
-      <button
-        className="buttonplus accept-button"
-        onClick={() => handleActionClick("Accept")}
-      >
-        Accept
-      </button>
-      <button
-        className="buttonplus reject-button"
-        onClick={() => handleActionClick("Reject")}
-      >
-        Reject
-      </button>
-    </>
-  ) : currentStep === filteredStepsConfig.length ? (
-    <button
-      className="buttonplus next-button"
-      onClick={handleFinalSubmit}
-      disabled={!isConfirmed || isSubmitting}
-    >
-      {isSubmitting ? "Submitting..." : "Submit"}
-    </button>
-  ) : null}
-</div>
+      {children}
+    </RegistrationContext.Provider>
+  );
+};
