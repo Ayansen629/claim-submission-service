@@ -1,311 +1,3 @@
-import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
-import { useNavigate, useParams } from "react-router-dom";
-import { toast } from "react-toastify";
-import { Modal, Button, Form } from "react-bootstrap";
-import "./Stepper.css";
-import { useRegistration } from "../../context/ApplicationContext";
-import ReviewStep from "./ReviewStep";
-import { FormDataProvider } from "../../context/FormDataContext";
-import { postData } from "../../../services/http.service.ts";
-import { URLS_ENDPOINT } from "../../../utils/urlsConstants.ts";
-import axios from "axios";
-import { v4 as uuidv4 } from "uuid"; // Import UUID generator
-import { FaSmile } from "react-icons/fa";
-import DeclarationModal from "../DeclarationModal";
-
-const deepEqual = (obj1, obj2) => {
-  return JSON.stringify(obj1) === JSON.stringify(obj2);
-};
-
-const generateFileId = (file) => {
-  return `file-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
-};
-
-const extractFileDetails = (file, source, documentType) => {
-  console.log("extractFileDetails", file, source);
-  if (!file) return null;
-
-  return {
-    docId: file.fileId,
-    docName: file.docName || file.fileName,
-    docType: documentType, 
-    docSource: source,
-  };
-};
-
-const extractMultiFileDetails = (files, source, documentType) => {
-  if (!Array.isArray(files) || files.length === 0) return [];
-
-  return files.map(file => ({
-    docNumber: file.details,
-    docId: file.proof?.fileId || null,
-    docName: file.proof?.fileName || null,
-    docType: documentType,
-    docSource: source,
-  }));
-};
-
-
-const createFormPayload = (formData, isFinalSubmit, userFormData, applicationNumber = "", isActive, applicationUuid = "") => {
-  console.log("createFormPayload", formData);
-  
-  // Extract UUIDs from existing data or generate new ones
-  const creditorBasicDetailsUuid = formData.creditorBasicDetailsUuid || "";
-  const claimDetailsUuid = formData.claimDetailsUuid || "";
-  const signatoryDetailsUuid = formData.signatoryDetailsUuid || "";
-
-  // Extract entity data if available
-  const entityData = formData.step2?.entityData || [];
-
-  return {
-    userInfo: userFormData?.fullloginDetails || {},
-    uuid: applicationUuid || "",
-    applicationNumber: applicationNumber || "",
-    creditorBasicDetails: {
-      uuid: creditorBasicDetailsUuid,
-      financialCreditorName: formData.step1?.financialCreditorName || "",
-      financialCreditorEmail: formData.step1?.financialCreditorEmail || "",
-      identificationType: formData.step1?.identificationType || "",
-      document: extractMultiFileDetails(formData.step1?.identificationtype_details, "identification", "identification"),
-    },
-    addressDetails:{
-      addressLine1: formData.step1?.addressLine1 || "",
-      addressLine2: formData.step1?.addressLine2 || "",
-      city: formData.step1?.city || "",
-      state: formData.step1?.state || "",
-      pincode: formData.step1?.pincode || "",
-    },
-    claimDetails: {
-      uuid: claimDetailsUuid,
-      claimType: formData.step2?.claimType || "",
-      hasSecurityInterest: formData.step2?.hasSecurityInterest || "",
-      hasGuarantee: formData.step2?.hasGuarantee || "",
-      claimAmount: parseFloat(formData.step2?.claimAmount) || "",
-      principalBorrowerName: formData.step2?.principalBorrowerName1 || "",
-      principalBorrowerAddress: formData.step2?.principalBorrowerAddress1 || "",
-      debtDetails: formData.step2?.debtDetails || "",
-      debtDate: formData.step2?.debtDate || "",
-      mutualDetails: formData.step2?.mutualDetails || "",
-      securityValue: parseFloat(formData.step2?.securityValue) || "",
-      securityDate: formData.step2?.securityDate || "",
-      guaranteeValue: parseFloat(formData.step2?.guaranteeValue) || "",
-      guaranteeDate: formData.step2?.guaranteeDate || "",
-      entityData: entityData,
-    },
-    bankAccountDetails: {
-      bankAccountNumber: formData.step2?.accountNumber || "",
-      bankIfscCode: formData.step2?.ifscCode || "",
-      bankName: formData.step2?.bankName || "",
-      bankBranchName: formData.step2?.branchName || "",
-      branchAddress: formData.step2?.branchAddress || "",
-      city: formData.step2?.city || "",
-      state: formData.step2?.state || "",
-      district: formData.step2?.district || "",
-    },
-    signatoryDetails: {
-      uuid: signatoryDetailsUuid,
-      creditorName: formData.step3?.creditorName || "",
-      creditorPosition: formData.step3?.creditorPosition || "",
-      creditorSignature: formData.step3?.creditorSignatureText || "",
-      hasSignature: formData.step3?.hasSignature || "",
-      creditorAddress: formData.step3?.creditorAddress || "",
-      document: extractFileDetails(formData.step3?.signatureFile, "signature", "signature"),
-    },
-    uploadDocumentDetails: {
-      identityProofType: formData.step4?.identityProofType || "",
-      addressProofType: formData.step4?.addressProofType || "",
-      identityProofFile: extractFileDetails(formData.step4?.identityProofFile, "identity_proof", formData.step4?.identityProofType),
-      addressProofFile: extractFileDetails(formData.step4?.addressProofFile, "address_proof", formData.step4?.addressProofType),
-    },
-    status: "",
-    isActive: isActive,
-    isFinalSubmit: isFinalSubmit
-  };
-};
-
-const getFileFieldsForStep = (stepNumber) => {
-  switch (stepNumber) {
-    case 1:
-      return ["identificationDocument"];
-    case 2:
-      return ["addressProof"];
-    case 3:
-      return ["signatoryDocument"];
-    default:
-      return [];
-  }
-};
-
-const processFileUploads = async (stepData, stepNumber) => {
-  const fileFields = getFileFieldsForStep(stepNumber);
-  const processedData = { ...stepData };
-
-  for (const field of fileFields) {
-    if (stepData[field] && stepData[field] instanceof File) {
-      // In a real application, you would upload the file here
-      // and get a server-side ID or URL.
-      processedData[field] = {
-        id: generateFileId(stepData[field]),
-        name: stepData[field].name,
-        size: stepData[field].size,
-        type: stepData[field].type,
-        uploadedAt: new Date().toISOString(),
-      };
-    } else if (stepData[field] && typeof stepData[field] === 'object' && stepData[field].name) {
-      // Keep existing file details if not a new file
-      processedData[field] = { ...stepData[field] };
-    }
-  }
-
-  return processedData;
-};
-
-
-const Stepper = ({ stepsConfig = [], formAllData }) => {
-  const {
-    registrationData,
-    handleStepDataFetch,
-    updateRegistrationData,
-    handleApplicatioNFormView,
-    isDataLoaded,
-    applicationDetails
-  } = useRegistration();
-  const { id } = useParams();
-  const isEditMode = !!id;
-  const [currentStep, setCurrentStep] = useState(1);
-  const [isConfirmed, setIsConfirmed] = useState(false);
-  const [showDeclarationModal, setShowDeclarationModal] = useState(false);
-  const [isComplete, setIsComplete] = useState(false);
-  const [isViewModalOpen, setIsViewModalOpen] = useState(false);
-  const [hasPreviewed, setHasPreviewed] = useState(false);
-  const [formData, setFormData] = useState(isEditMode ? registrationData || {} : {});
-  const [margins, setMargins] = useState({ marginLeft: 0, marginRight: 0 });
-  const stepRef = useRef([]);
-  const navigate = useNavigate();
-  const [currentSubmitHandler, setCurrentSubmitHandler] = useState(null);
-  const [showModal, setShowModal] = useState(false);
-  const [comments, setComments] = useState("");
-  const [actionType, setActionType] = useState("");
-  const [isSavingDraft, setIsSavingDraft] = useState(false);
-  const [draftResponse, setDraftResponse] = useState(null);
-  const [isSubmittingAction, setIsSubmittingAction] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [apiResponse, setApiResponse] = useState(null);
-
-  console.log("Registration Data:update", applicationDetails);
-  console.log("Registration Data:formAllData", registrationData);
-
-  const userFormData = JSON.parse(localStorage.getItem("userFormData"));
-  const isCRPUser = userFormData?.userType === "CRP";
-
-  const filteredStepsConfig = useMemo(() => {
-    if (isCRPUser) {
-      return stepsConfig.filter((step) => step.name !== "Review & Submit");
-    }
-    return stepsConfig;
-  }, [stepsConfig, isCRPUser]);
-
-
-  useEffect(() => {
-    if (id) {
-      handleApplicatioNFormView({ uuid: id });
-    }
-  }, [id]);
- 
-  useEffect(() => {
-    if (isEditMode && registrationData && !deepEqual(formData, registrationData)) {
-      // Check if registrationData is not empty or null
-      if (registrationData && Object.keys(registrationData).length > 0) {
-        // For edit mode, ensure we have all the UUIDs from applicationDetails
-        const updatedFormData = { ...registrationData };
-        if (applicationDetails) {
-          updatedFormData.uuid = applicationDetails.uuid;
-          updatedFormData.applicationNumber = applicationDetails.applicationNumber;
-          updatedFormData.creditorBasicDetailsUuid = applicationDetails.creditorBasicDetails?.uuid;
-          updatedFormData.claimDetailsUuid = applicationDetails.claimDetails?.uuid;
-          updatedFormData.signatoryDetailsUuid = applicationDetails.signatoryDetails?.uuid;
-          updatedFormData.supportingDocumentUuid = applicationDetails.supportingDocument?.uuid;
-        }
-        setFormData(updatedFormData);
-      } else {
-        setFormData({});  // Set to empty if the response is blank or invalid
-      }
-    }
-  }, [isEditMode, registrationData, applicationDetails]);
-
-  useEffect(() => {
-    const savedIsConfirmed = localStorage.getItem("isConfirmed");
-    if (savedIsConfirmed) {
-      setIsConfirmed(JSON.parse(savedIsConfirmed));
-    }
-  }, []);
-
-  useEffect(() => {
-    localStorage.setItem("isConfirmed", JSON.stringify(isConfirmed));
-  }, [isConfirmed]);
-  
-  // Load saved API response from localStorage if available
-  useEffect(() => {
-    const savedApiResponse = localStorage.getItem('apiResponse');
-    if (savedApiResponse) {
-      try {
-        setApiResponse(JSON.parse(savedApiResponse));
-      } catch (error) {
-        console.error('Error parsing saved API response:', error);
-      }
-    }
-  }, []);
-
-  // Save API response to localStorage whenever it changes
-  useEffect(() => {
-    if (apiResponse) {
-      localStorage.setItem('apiResponse', JSON.stringify(apiResponse));
-    }
-  }, [apiResponse]);
-
-  useEffect(() => {
-    const newSubmitHandler = filteredStepsConfig[currentStep - 1]?.submitHandler;
-    if (newSubmitHandler && newSubmitHandler !== currentSubmitHandler) {
-      setCurrentSubmitHandler(() => newSubmitHandler);
-    }
-  }, [currentStep, filteredStepsConfig]);
-
-  useEffect(() => {
-    if (stepRef.current.length > 0) {
-      const firstStep = stepRef.current[0]?.offsetWidth || 0;
-      const lastStep = stepRef.current[filteredStepsConfig.length - 1]?.offsetWidth || 0;
-      setMargins({
-        marginLeft: firstStep / 2,
-        marginRight: lastStep / 2,
-      });
-    }
-  }, [filteredStepsConfig.length]);
-  
-  useEffect(() => {
-    if (currentStep === 3) {
-      setHasPreviewed(false);
-    }
-  }, [currentStep]);
-
-
-  const updateSubmitHandler = useCallback((submitHandler) => {
-    setCurrentSubmitHandler(() => submitHandler);
-  }, []);
-
-  const validateStepData = (step, data) => {
-    const requiredFields = filteredStepsConfig[step - 1]?.requiredFields || [];
-    for (let field of requiredFields) {
-      if (!data[field]) {
-        toast.error(`${field} is required.`);
-        return false;
-      }
-    }
-    return true;
-  };
-
-
-
-/////////////////
 const handleNext = async () => {
   if (!currentSubmitHandler) {
     console.error("No submit handler available.");
@@ -342,7 +34,12 @@ const handleNext = async () => {
   }
   
   console.log("updatedFormData", updatedFormData);
+  
+  // Update the form data state immediately to ensure latest data is available
   setFormData(updatedFormData);
+  
+  // Store in localStorage to persist between steps
+  localStorage.setItem('formData', JSON.stringify(updatedFormData));
 
   // Prepare payload for API call
   let payload;
@@ -359,9 +56,11 @@ const handleNext = async () => {
       applicationDetails: JSON.parse(JSON.stringify(applicationDetails))
     };
     
-    // Update only the current step's data in the payload
-    if (currentStep === 1) {
-      // Update creditorBasicDetails
+    // IMPORTANT: Always update ALL steps that have been completed so far
+    // This ensures we're always sending the most up-to-date data for all steps
+    
+    // Step 1 - Always update if we have step1 data
+    if (updatedFormData.step1) {
       payload.applicationDetails.creditorBasicDetails = {
         ...payload.applicationDetails.creditorBasicDetails, // Keep existing data like UUID and auditDetails
         financialCreditorName: updatedFormData.step1?.financialCreditorName || "",
@@ -392,8 +91,10 @@ const handleNext = async () => {
         },
         empty: false
       };
-    } else if (currentStep === 2) {
-      // Update claimDetails
+    }
+    
+    // Step 2 - Update if we're on step 2 or beyond
+    if (currentStep >= 2 && updatedFormData.step2) {
       const entityData = updatedFormData.step2?.entityData || [];
       const principalBorrowers = entityData.filter(e => e.type === "PRINCIPAL_BORROWER");
       const guarantors = entityData.filter(e => e.type === "GUARANTOR");
@@ -437,8 +138,10 @@ const handleNext = async () => {
         },
         empty: false
       };
-    } else if (currentStep === 3) {
-      // Update signatoryDetails
+    }
+    
+    // Step 3 - Update if we're on step 3 or beyond
+    if (currentStep >= 3 && updatedFormData.step3) {
       payload.applicationDetails.signatoryDetails = {
         ...payload.applicationDetails.signatoryDetails, // Keep existing data like UUID and auditDetails
         creditorBasicDetailsUuid: payload.applicationDetails.creditorBasicDetails.uuid,
@@ -457,15 +160,17 @@ const handleNext = async () => {
         } : null,
         empty: false
       };
-    } else if (currentStep === 4) {
-      // Update supportingDocument
+    }
+    
+    // Step 4 - Update if we're on step 4
+    if (currentStep >= 4 && updatedFormData.step4) {
       payload.applicationDetails.supportingDocument = {
         ...payload.applicationDetails.supportingDocument, // Keep existing data like UUID and auditDetails
         creditorBasicDetailsUuid: payload.applicationDetails.creditorBasicDetails.uuid,
         documents: [
           ...(updatedFormData.step4?.identityProofFile ? [{
             uuid: updatedFormData.step4.identityProofFile.uuid || "",
-            supportingDocumentUuid: payload.applicationDetails.supportingDocument.uuid,
+            supportingDocumentUuid: payload.applicationDetails.supportingDocument?.uuid || "",
             docId: updatedFormData.step4.identityProofFile.fileId || "",
             docType: updatedFormData.step4.identityProofType || "",
             docSource: "identity_proof",
@@ -473,7 +178,7 @@ const handleNext = async () => {
           }] : []),
           ...(updatedFormData.step4?.addressProofFile ? [{
             uuid: updatedFormData.step4.addressProofFile.uuid || "",
-            supportingDocumentUuid: payload.applicationDetails.supportingDocument.uuid,
+            supportingDocumentUuid: payload.applicationDetails.supportingDocument?.uuid || "",
             docId: updatedFormData.step4.addressProofFile.fileId || "",
             docType: updatedFormData.step4.addressProofType || "",
             docSource: "address_proof",
@@ -489,7 +194,7 @@ const handleNext = async () => {
     payload.applicationDetails.isActive = applicationDetails.isActive;
     payload.applicationDetails.isFinalSubmit = applicationDetails.isFinalSubmit;
   } else {
-    // For new applications, build a new payload
+    // For new applications, build a new payload with all steps completed so far
     payload = buildStepPayload(updatedFormData, currentStep);
   }
 
