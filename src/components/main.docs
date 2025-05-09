@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { toast } from "react-toastify";
@@ -10,7 +9,7 @@ import { FormDataProvider } from "../../context/FormDataContext";
 import { postData } from "../../../services/http.service.ts";
 import { URLS_ENDPOINT } from "../../../utils/urlsConstants.ts";
 import axios from "axios";
-import { v4 as uuidv4 } from "uuid"; // Import UUID generator
+import { v4 as uuidv4 } from "uuid";
 import { FaSmile } from "react-icons/fa";
 import DeclarationModal from "../DeclarationModal";
 
@@ -23,7 +22,6 @@ const generateFileId = (file) => {
 };
 
 const extractFileDetails = (file, source, documentType) => {
-  console.log("extractFileDetails", file, source);
   if (!file) return null;
 
   return {
@@ -47,8 +45,6 @@ const extractMultiFileDetails = (files, source, documentType) => {
 };
 
 const createFormPayload = (formData, isFinalSubmit, userFormData, applicationNumber = "", isActive, applicationUuid = "") => {
-  console.log("createFormPayload", formData);
-  
   // Extract UUIDs from existing data or generate new ones
   const creditorBasicDetailsUuid = formData.creditorBasicDetailsUuid || "";
   const claimDetailsUuid = formData.claimDetailsUuid || "";
@@ -66,7 +62,6 @@ const createFormPayload = (formData, isFinalSubmit, userFormData, applicationNum
       financialCreditorName: formData.step1?.financialCreditorName || "",
       financialCreditorEmail: formData.step1?.financialCreditorEmail || "",
       identificationType: formData.step1?.identificationType || "",
-      // identificationNumber: formData.step1?.incorporatedIdentificationNumber || "",
       document: extractMultiFileDetails(formData.step1?.identificationtype_details, "identification", "identification"),
     },
     addressDetails:{
@@ -143,8 +138,6 @@ const processFileUploads = async (stepData, stepNumber) => {
 
   for (const field of fileFields) {
     if (stepData[field] && stepData[field] instanceof File) {
-      // In a real application, you would upload the file here
-      // and get a server-side ID or URL.
       processedData[field] = {
         id: generateFileId(stepData[field]),
         name: stepData[field].name,
@@ -153,7 +146,6 @@ const processFileUploads = async (stepData, stepNumber) => {
         uploadedAt: new Date().toISOString(),
       };
     } else if (stepData[field] && typeof stepData[field] === 'object' && stepData[field].name) {
-      // Keep existing file details if not a new file
       processedData[field] = { ...stepData[field] };
     }
   }
@@ -170,6 +162,7 @@ const Stepper = ({ stepsConfig = [], formAllData }) => {
     isDataLoaded,
     applicationDetails
   } = useRegistration();
+  
   const { id } = useParams();
   const isEditMode = !!id;
   const [currentStep, setCurrentStep] = useState(1);
@@ -178,7 +171,7 @@ const Stepper = ({ stepsConfig = [], formAllData }) => {
   const [isComplete, setIsComplete] = useState(false);
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [hasPreviewed, setHasPreviewed] = useState(false);
-  const [formData, setFormData] = useState(isEditMode ? registrationData || {} : {});
+  const [formData, setFormData] = useState({});
   const [margins, setMargins] = useState({ marginLeft: 0, marginRight: 0 });
   const stepRef = useRef([]);
   const navigate = useNavigate();
@@ -191,8 +184,7 @@ const Stepper = ({ stepsConfig = [], formAllData }) => {
   const [isSubmittingAction, setIsSubmittingAction] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [apiResponse, setApiResponse] = useState(null);
-
-  console.log("Registration Data:update", applicationDetails);
+  const [isLoading, setIsLoading] = useState(isEditMode);
 
   const userFormData = JSON.parse(localStorage.getItem("userFormData"));
   const isCRPUser = userFormData?.userType === "CRP";
@@ -204,52 +196,141 @@ const Stepper = ({ stepsConfig = [], formAllData }) => {
     return stepsConfig;
   }, [stepsConfig, isCRPUser]);
 
+  // Initialize form data based on mode (create/edit)
   useEffect(() => {
-    if (id) {
-      handleApplicatioNFormView({ uuid: id });
-    }
-  }, [id]);
- 
-  useEffect(() => {
-    if (isEditMode && registrationData && !deepEqual(formData, registrationData)) {
-      // Check if registrationData is not empty or null
-      if (registrationData && Object.keys(registrationData).length > 0) {
-        setFormData(registrationData);
+    const initializeFormData = async () => {
+      if (isEditMode) {
+        setIsLoading(true);
+        try {
+          // Fetch existing application data for edit mode
+          await handleApplicatioNFormView({ uuid: id });
+          
+          if (registrationData) {
+            // Transform the API data to match our form structure
+            const transformedData = transformApiDataToFormData(registrationData);
+            setFormData(transformedData);
+            setApiResponse(registrationData);
+          }
+        } catch (error) {
+          console.error("Error fetching application data:", error);
+          toast.error("Failed to load application data");
+        } finally {
+          setIsLoading(false);
+        }
       } else {
-        setFormData({});  // Set to empty if the response is blank or invalid
+        // Initialize empty form for create mode
+        setFormData({
+          step1: {},
+          step2: {},
+          step3: {},
+          step4: {},
+        });
       }
-    }
-  }, [isEditMode, registrationData]);
+    };
 
-  useEffect(() => {
-    const savedIsConfirmed = localStorage.getItem("isConfirmed");
-    if (savedIsConfirmed) {
-      setIsConfirmed(JSON.parse(savedIsConfirmed));
-    }
-  }, []);
+    initializeFormData();
+  }, [isEditMode, id]);
 
-  useEffect(() => {
-    localStorage.setItem("isConfirmed", JSON.stringify(isConfirmed));
-  }, [isConfirmed]);
-  
-  // Load saved API response from localStorage if available
-  useEffect(() => {
-    const savedApiResponse = localStorage.getItem('apiResponse');
-    if (savedApiResponse) {
-      try {
-        setApiResponse(JSON.parse(savedApiResponse));
-      } catch (error) {
-        console.error('Error parsing saved API response:', error);
+  // Transform API response data to match our form structure
+  const transformApiDataToFormData = (apiData) => {
+    if (!apiData || !apiData.applicationDetails) return {};
+    
+    const appDetails = apiData.applicationDetails;
+    const transformedData = {
+      uuid: appDetails.uuid || "",
+      applicationNumber: appDetails.applicationNumber || "",
+      creditorBasicDetailsUuid: appDetails.creditorBasicDetails?.uuid || "",
+      claimDetailsUuid: appDetails.claimDetails?.uuid || "",
+      signatoryDetailsUuid: appDetails.signatoryDetails?.uuid || "",
+      step1: {
+        financialCreditorName: appDetails.creditorBasicDetails?.financialCreditorName || "",
+        financialCreditorEmail: appDetails.creditorBasicDetails?.financialCreditorEmail || "",
+        identificationType: appDetails.creditorBasicDetails?.identificationTypeDetails?.identificationType || "",
+        identificationtype_details: appDetails.creditorBasicDetails?.identificationTypeDetails?.identifications?.map(id => ({
+          details: id.identificationRecord || "",
+          proof: {
+            fileId: id.proofOfIdentificationDocuments?.docId || "",
+            fileName: id.proofOfIdentificationDocuments?.docName || "",
+            uuid: id.proofOfIdentificationDocuments?.uuid || ""
+          },
+          uuid: id.uuid || ""
+        })) || [],
+        addressLine1: appDetails.creditorBasicDetails?.addressDetails?.addressLine1 || "",
+        addressLine2: appDetails.creditorBasicDetails?.addressDetails?.addressLine2 || "",
+        city: appDetails.creditorBasicDetails?.addressDetails?.city || "",
+        state: appDetails.creditorBasicDetails?.addressDetails?.state || "",
+        pincode: appDetails.creditorBasicDetails?.addressDetails?.pincode || ""
+      },
+      step2: {
+        claimType: appDetails.claimDetails?.claimType || "",
+        hasSecurityInterest: appDetails.claimDetails?.isAmountOfClaimCoverdBySecurityInterest ? "Yes" : "No",
+        hasGuarantee: appDetails.claimDetails?.isAmountOfClaimCoverdByGuarantee ? "Yes" : "No",
+        claimAmount: appDetails.claimDetails?.claimAmount?.toString() || "",
+        principalBorrowerName1: appDetails.claimDetails?.principalBorrowerDetails?.[0]?.name || "",
+        principalBorrowerAddress1: appDetails.claimDetails?.principalBorrowerDetails?.[0]?.address || "",
+        debtDetails: appDetails.claimDetails?.debtIncurredDetails || "",
+        debtDate: appDetails.claimDetails?.debtIncurredDate || "",
+        mutualDetails: appDetails.claimDetails?.mutualDealingDetailsAgainstTheClaim || "",
+        securityValue: appDetails.claimDetails?.securityValue?.toString() || "",
+        securityDate: appDetails.claimDetails?.securityDate || "",
+        guaranteeValue: appDetails.claimDetails?.guaranteeValue?.toString() || "",
+        guaranteeDate: appDetails.claimDetails?.guaranteeDate || "",
+        entityData: [
+          ...(appDetails.claimDetails?.principalBorrowerDetails?.map(pb => ({
+            type: "PRINCIPAL_BORROWER",
+            name: pb.name,
+            address: pb.address
+          })) || []),
+          ...(appDetails.claimDetails?.guarantorDetails?.map(g => ({
+            type: "GUARANTOR",
+            name: g.name,
+            address: g.address
+          })) || []),
+          ...(appDetails.claimDetails?.beneficiaryDetails?.map(b => ({
+            type: "BENEFICIARY",
+            name: b.name,
+            address: b.address
+          })) || [])
+        ],
+        accountNumber: appDetails.claimDetails?.bankAccountDetails?.bankAccountNumber || "",
+        ifscCode: appDetails.claimDetails?.bankAccountDetails?.bankIfscCode || "",
+        bankName: appDetails.claimDetails?.bankAccountDetails?.bankName || "",
+        branchName: appDetails.claimDetails?.bankAccountDetails?.bankBranchName || "",
+        branchAddress: appDetails.claimDetails?.bankAccountDetails?.branchAddress || "",
+        city: appDetails.claimDetails?.bankAccountDetails?.city || "",
+        state: appDetails.claimDetails?.bankAccountDetails?.state || "",
+        district: appDetails.claimDetails?.bankAccountDetails?.district || ""
+      },
+      step3: {
+        creditorName: appDetails.signatoryDetails?.financialCreditorName || "",
+        creditorPosition: appDetails.signatoryDetails?.positionOfCreditor || "",
+        creditorSignatureText: appDetails.signatoryDetails?.signatureFinancialCreditor || "",
+        hasSignature: appDetails.signatoryDetails?.isSignatureToUpload ? "Yes" : "No",
+        creditorAddress: appDetails.signatoryDetails?.addressOfSigningPerson || "",
+        signatureFile: appDetails.signatoryDetails?.document ? {
+          fileId: appDetails.signatoryDetails.document.docId || "",
+          fileName: appDetails.signatoryDetails.document.docName || "",
+          uuid: appDetails.signatoryDetails.document.uuid || ""
+        } : null
+      },
+      step4: {
+        identityProofType: appDetails.supportingDocument?.documents?.find(d => d.docSource === "identity_proof")?.docType || "",
+        addressProofType: appDetails.supportingDocument?.documents?.find(d => d.docSource === "address_proof")?.docType || "",
+        identityProofFile: appDetails.supportingDocument?.documents?.find(d => d.docSource === "identity_proof") ? {
+          fileId: appDetails.supportingDocument.documents.find(d => d.docSource === "identity_proof").docId || "",
+          fileName: appDetails.supportingDocument.documents.find(d => d.docSource === "identity_proof").docName || "",
+          uuid: appDetails.supportingDocument.documents.find(d => d.docSource === "identity_proof").uuid || ""
+        } : null,
+        addressProofFile: appDetails.supportingDocument?.documents?.find(d => d.docSource === "address_proof") ? {
+          fileId: appDetails.supportingDocument.documents.find(d => d.docSource === "address_proof").docId || "",
+          fileName: appDetails.supportingDocument.documents.find(d => d.docSource === "address_proof").docName || "",
+          uuid: appDetails.supportingDocument.documents.find(d => d.docSource === "address_proof").uuid || ""
+        } : null
       }
-    }
-  }, []);
+    };
 
-  // Save API response to localStorage whenever it changes
-  useEffect(() => {
-    if (apiResponse) {
-      localStorage.setItem('apiResponse', JSON.stringify(apiResponse));
-    }
-  }, [apiResponse]);
+    return transformedData;
+  };
 
   useEffect(() => {
     const newSubmitHandler = filteredStepsConfig[currentStep - 1]?.submitHandler;
@@ -284,186 +365,6 @@ const Stepper = ({ stepsConfig = [], formAllData }) => {
     return true;
   };
 
-  const buildStepPayload = (formData, currentStep) => {
-    console.log(formData, "UPDATEDFORMDATA");
-   
-    // const userFormData = formData?.userFormData || {};
-    const userFormDataLogin = JSON.parse(localStorage.getItem("userFormData")) || {};
-    // Base payload structure
-    const payload = {
-      status: {
-        code: "200",
-        message: "Data Created Successfully"
-      },
-      userInfo: userFormDataLogin?.fullloginDetails || {},
-      applicationDetails: {
-        uuid: formData.uuid || "", // Prefer stored UUID
-        applicationNumber: formData?.applicationNumber || "",
-        status: "Draft",
-        isActive: false,
-        isFinalSubmit: false,
-      }
-    };
-  
-    // Helper to create empty objects for other steps
-    const createEmptyStep = (stepName) => {
-      switch(stepName) {
-        case 'claimDetails':
-        case 'signatoryDetails':
-          return {};
-        case 'supportingDocument':
-          return {};
-        default:
-          return {};
-      }
-    };
-  
-    // Step 1 - Creditor Basic Details
-    if (currentStep >= 1) {
-      payload.applicationDetails.creditorBasicDetails = {
-        uuid: formData.creditorBasicDetailsUuid || "",
-        financialCreditorName: formData.step1?.financialCreditorName || "",
-        financialCreditorEmail: formData.step1?.financialCreditorEmail || "",
-        financialDebtorName: formData.step1?.corporateDebtorName || "",
-        identificationTypeDetails: {
-          identificationType: formData.step1?.identificationType || "",
-          identifications: formData.step1?.identificationtype_details?.map(item => ({
-            uuid: item.uuid || "",
-            creditorsBasicUuid: formData.creditorBasicDetailsUuid || "",
-            identificationRecord: item.details || "",
-            proofOfIdentificationDocuments: {
-              uuid: item.proof?.uuid || "",
-              supportingDocumentUuid: "",
-              docId: item.proof?.fileId || "",
-              docType: "identification",
-              docSource: "identification_type",
-              docName: item.proof?.fileName || ""
-            }
-          })) || []
-        },
-        addressDetails: {
-          addressLine1: formData.step1?.addressLine1 || "",
-          addressLine2: formData.step1?.addressLine2 || "",
-          city: formData.step1?.city || "",
-          state: formData.step1?.state || "",
-          pincode: formData.step1?.pincode || ""
-        },
-        empty: false
-      };
-  
-      // For step 1, include empty objects for other steps
-      if (currentStep === 1) {
-        payload.applicationDetails.claimDetails = createEmptyStep('claimDetails');
-        payload.applicationDetails.signatoryDetails = createEmptyStep('signatoryDetails');
-        payload.applicationDetails.supportingDocument = createEmptyStep('supportingDocument');
-      }
-    }
-  
-    // Step 2 - Claim Details
-    if (currentStep >= 2) {
-      payload.applicationDetails.claimDetails = {
-        uuid: formData.claimDetailsUuid || "",
-        creditorBasicDetailsUuid: formData.creditorBasicDetailsUuid || "",
-        claimType: formData.step2?.claimType || "",
-        claimAmount: parseFloat(formData.step2?.claimAmount) || 0,
-        isAmountOfClaimCoverdBySecurityInterest: formData.step2?.hasSecurityInterest === "Yes",
-        securityValue: parseFloat(formData.step2?.securityValue) || 0,
-        securityDate: formData.step2?.securityDate || "",
-        isAmountOfClaimCoverdByGuarantee: formData.step2?.hasGuarantee === "Yes",
-        guaranteeValue: parseFloat(formData.step2?.guaranteeValue) || 0,
-        guaranteeDate: formData.step2?.guaranteeDate || "",
-        principalBorrowerDetails: formData.step2?.entityData?.filter(e => e.type === "PRINCIPAL_BORROWER")?.map(e => ({
-          name: e.name,
-          address: e.address
-        })) || [],
-        beneficiaryDetails: formData.step2?.entityData?.filter(e => e.type === "BENEFICIARY")?.map(e => ({
-          name: e.name,
-          address: e.address
-        })) || [],
-        guarantorDetails: formData.step2?.entityData?.filter(e => e.type === "GUARANTOR")?.map(e => ({
-          name: e.name,
-          address: e.address
-        })) || [],
-        debtIncurredDetails: formData.step2?.debtDetails || "",
-        debtIncurredDate: formData.step2?.debtDate || "",
-        mutualDealingDetailsAgainstTheClaim: formData.step2?.mutualDetails || "",
-        bankAccountDetails: {
-          bankAccountNumber: formData.step2?.accountNumber || "",
-          bankIfscCode: formData.step2?.ifscCode || "",
-          bankName: formData.step2?.bankName || "",
-          bankBranchName: formData.step2?.branchName || "",
-          branchAddress: formData.step2?.branchAddress || "",
-          city: formData.step2?.city || "",
-          state: formData.step2?.state || "",
-          district: formData.step2?.district || ""
-        },
-        empty: false
-      };
-  
-      // For step 2, include empty object for signatory details
-      if (currentStep === 2) {
-        payload.applicationDetails.signatoryDetails = createEmptyStep('signatoryDetails');
-        payload.applicationDetails.supportingDocument = createEmptyStep('supportingDocument');
-      }
-    }
-  
-    // Step 3 - Signatory Details
-    if (currentStep >= 3) {
-      payload.applicationDetails.signatoryDetails = {
-        uuid: formData.signatoryDetailsUuid || "",
-        creditorBasicDetailsUuid: formData.creditorBasicDetailsUuid || "",
-        financialCreditorName: formData.step3?.creditorName || "",
-        positionOfCreditor: formData.step3?.creditorPosition || "",
-        signatureFinancialCreditor: formData.step3?.creditorSignatureText || "",
-        addressOfSigningPerson: formData.step3?.creditorAddress || "",
-        isSignatureToUpload: formData.step3?.hasSignature === "Yes",
-        document: formData.step3?.signatureFile ? {
-          uuid: formData.step3.signatureFile.uuid || "",
-          supportingDocumentUuid: "",
-          docId: formData.step3.signatureFile.fileId || "",
-          docType: "signature",
-          docSource: "Signature",
-          docName: formData.step3.signatureFile.fileName || ""
-        } : null,
-        empty: false
-      };
-  
-      // For step 3, include empty object for supporting documents
-      if (currentStep === 3) {
-        payload.applicationDetails.supportingDocument = createEmptyStep('supportingDocument');
-      }
-    }
-  
-    // Step 4 - Supporting Documents
-    if (currentStep >= 4) {
-      payload.applicationDetails.supportingDocument = {
-        uuid: "",
-        creditorBasicDetailsUuid: formData.creditorBasicDetailsUuid || "",
-        documents: [
-          ...(formData.step4?.identityProofFile ? [{
-            uuid: formData.step4.identityProofFile.uuid || "",
-            supportingDocumentUuid: "",
-            docId: formData.step4.identityProofFile.fileId || "",
-            docType: formData.step4.identityProofType || "",
-            docSource: "identity_proof",
-            docName: formData.step4.identityProofFile.fileName || ""
-          }] : []),
-          ...(formData.step4?.addressProofFile ? [{
-            uuid: formData.step4.addressProofFile.uuid || "",
-            supportingDocumentUuid: "",
-            docId: formData.step4.addressProofFile.fileId || "",
-            docType: formData.step4.addressProofType || "",
-            docSource: "address_proof",
-            docName: formData.step4.addressProofFile.fileName || ""
-          }] : [])
-        ],
-        empty: false
-      };
-    }
-  
-    return payload;
-  };
-
   const handleNext = async () => {
     if (!currentSubmitHandler) {
       console.error("No submit handler available.");
@@ -482,33 +383,32 @@ const Stepper = ({ stepsConfig = [], formAllData }) => {
   
     const processedStepData = await processFileUploads(currentStepData, currentStep);
   
-    // Update form data with current step's data
+
+
+
+
     const updatedFormData = {
       ...formData,
       [`step${currentStep}`]: { ...formData[`step${currentStep}`], ...processedStepData },
     };
-    console.log("updatedFormData", updatedFormData);
-    setFormData(updatedFormData);
-  
-    // If we already have an API response with an application number, use that as the base for our payload
+
+    // Prepare payload based on whether we're in edit mode or create mode
     let payload;
-    if (apiResponse && apiResponse.applicationDetails && apiResponse.applicationDetails.applicationNumber) {
-      // Clone the existing API response
+    if (isEditMode && apiResponse) {
+      // Edit mode - update existing payload with new data
       payload = JSON.parse(JSON.stringify(apiResponse));
       
-      // Update only the current step's data in the payload
+      // Update the specific step data in the payload
       if (currentStep === 1) {
-        // Update creditorBasicDetails
         payload.applicationDetails.creditorBasicDetails = {
-          uuid: formData.creditorBasicDetailsUuid || payload.applicationDetails.creditorBasicDetails?.uuid || "",
+          ...payload.applicationDetails.creditorBasicDetails,
           financialCreditorName: updatedFormData.step1?.financialCreditorName || "",
           financialCreditorEmail: updatedFormData.step1?.financialCreditorEmail || "",
-          financialDebtorName: updatedFormData.step1?.corporateDebtorName || "",
           identificationTypeDetails: {
             identificationType: updatedFormData.step1?.identificationType || "",
             identifications: updatedFormData.step1?.identificationtype_details?.map(item => ({
               uuid: item.uuid || "",
-              creditorsBasicUuid: formData.creditorBasicDetailsUuid || payload.applicationDetails.creditorBasicDetails?.uuid || "",
+              creditorsBasicUuid: formData.creditorBasicDetailsUuid || "",
               identificationRecord: item.details || "",
               proofOfIdentificationDocuments: {
                 uuid: item.proof?.uuid || "",
@@ -526,57 +426,36 @@ const Stepper = ({ stepsConfig = [], formAllData }) => {
             city: updatedFormData.step1?.city || "",
             state: updatedFormData.step1?.state || "",
             pincode: updatedFormData.step1?.pincode || ""
-          },
-          auditDetails: payload.applicationDetails.creditorBasicDetails?.auditDetails || null,
-          empty: false
+          }
         };
       } else if (currentStep === 2) {
-        // Update claimDetails
         const entityData = updatedFormData.step2?.entityData || [];
-        // const claimTypeMapping={
-        //   principalBorrower:"PRINCIPAL_BORROWER",
-        //   guarantor:"GUARANTOR",
-        //   beneficiary:"BENEFICIARY",
-        // }
-        // const frontendClaimType = updatedFormData.step2?.claimType || "";
-        // const backendClaimType = claimTypeMapping[frontendClaimType] || "";
-        const principalBorrowers=entityData.filter(e => e.type === "PRINCIPAL_BORROWER");
-        const gurantors = entityData.filter(e => e.type === "GUARANTOR");
+        const principalBorrowers = entityData.filter(e => e.type === "PRINCIPAL_BORROWER");
+        const guarantors = entityData.filter(e => e.type === "GUARANTOR");
         const beneficiaries = entityData.filter(e => e.type === "BENEFICIARY");
         
-        
         payload.applicationDetails.claimDetails = {
-          // uuid: formData.claimDetailsUuid || payload.applicationDetails.claimDetails?.uuid || "",
-          uuid: payload.applicationDetails.claimDetails?.uuid || "",
-          
-          
-          creditorBasicDetailsUuid:  payload.applicationDetails.creditorBasicDetails?.uuid || "",
+          ...payload.applicationDetails.claimDetails,
           claimType: updatedFormData.step2?.claimType || "",
-          // claimType: backendClaimType,
           claimAmount: parseFloat(updatedFormData.step2?.claimAmount) || 0,
-          isAmountOfClaimCoverdBySecurityInterest: updatedFormData.step2?.hasSecurityInterest === "yes",
+          isAmountOfClaimCoverdBySecurityInterest: updatedFormData.step2?.hasSecurityInterest === "Yes",
           securityValue: parseFloat(updatedFormData.step2?.securityValue) || 0,
           securityDate: updatedFormData.step2?.securityDate || "",
-          isAmountOfClaimCoverdByGuarantee: updatedFormData.step2?.hasGuarantee === "yes",
+          isAmountOfClaimCoverdByGuarantee: updatedFormData.step2?.hasGuarantee === "Yes",
           guaranteeValue: parseFloat(updatedFormData.step2?.guaranteeValue) || 0,
           guaranteeDate: updatedFormData.step2?.guaranteeDate || "",
           principalBorrowerDetails: principalBorrowers.map(e => ({
             name: e.name || "",
             address: e.address || ""
-           
-          })) || [],
-          // creditorDetails: entityData.filter(e => e.type === "CREDITOR")?.map(e => ({
-          //   name: 
-          //   address: e.address
-          // })) || [],
-          beneficiaryDetails: beneficiaries?.map(e => ({
+          })),
+          beneficiaryDetails: beneficiaries.map(e => ({
             name: e.name || "",
             address: e.address || ""
-          })) || [],
-          guarantorDetails: gurantors?.map(e => ({
+          })),
+          guarantorDetails: guarantors.map(e => ({
             name: e.name || "",
             address: e.address || ""
-          })) || [],
+          })),
           debtIncurredDetails: updatedFormData.step2?.debtDetails || "",
           debtIncurredDate: updatedFormData.step2?.debtDate || "",
           mutualDealingDetailsAgainstTheClaim: updatedFormData.step2?.mutualDetails || "",
@@ -589,36 +468,28 @@ const Stepper = ({ stepsConfig = [], formAllData }) => {
             city: updatedFormData.step2?.city || "",
             state: updatedFormData.step2?.state || "",
             district: updatedFormData.step2?.district || ""
-          },
-          auditDetails: payload.applicationDetails.claimDetails?.auditDetails || null,
-          empty: false
+          }
         };
       } else if (currentStep === 3) {
-        // Update signatoryDetails
         payload.applicationDetails.signatoryDetails = {
-          uuid: formData.signatoryDetailsUuid || payload.applicationDetails.signatoryDetails?.uuid || "",
-          creditorBasicDetailsUuid: formData.creditorBasicDetailsUuid || payload.applicationDetails.creditorBasicDetails?.uuid || "",
+          ...payload.applicationDetails.signatoryDetails,
           financialCreditorName: updatedFormData.step3?.creditorName || "",
           positionOfCreditor: updatedFormData.step3?.creditorPosition || "",
           signatureFinancialCreditor: updatedFormData.step3?.creditorSignatureText || "",
           addressOfSigningPerson: updatedFormData.step3?.creditorAddress || "",
-          isSignatureToUpload: updatedFormData.step3?.hasSignature === "yes",
+          isSignatureToUpload: updatedFormData.step3?.hasSignature === "Yes",
           document: updatedFormData.step3?.signatureFile ? {
             uuid: updatedFormData.step3.signatureFile.uuid || "",
             supportingDocumentUuid: "",
             docId: updatedFormData.step3.signatureFile.fileId || "",
             docType: "signature",
             docSource: "Signature",
-            docName: updatedFormData.step3.signatureFile?.docName || ""
-          } : null,
-          auditDetails: payload.applicationDetails.signatoryDetails?.auditDetails || null,
-          empty: false
+            docName: updatedFormData.step3.signatureFile.fileName || ""
+          } : null
         };
       } else if (currentStep === 4) {
-        // Update supportingDocument
         payload.applicationDetails.supportingDocument = {
-          uuid: payload.applicationDetails.supportingDocument?.uuid || "",
-          creditorBasicDetailsUuid: formData.creditorBasicDetailsUuid || payload.applicationDetails.creditorBasicDetails?.uuid || "",
+          ...payload.applicationDetails.supportingDocument,
           documents: [
             ...(updatedFormData.step4?.identityProofFile ? [{
               uuid: updatedFormData.step4.identityProofFile.uuid || "",
@@ -636,16 +507,131 @@ const Stepper = ({ stepsConfig = [], formAllData }) => {
               docSource: "address_proof",
               docName: updatedFormData.step4.addressProofFile.fileName || ""
             }] : [])
-          ],
-          auditDetails: payload.applicationDetails.supportingDocument?.auditDetails || null,
-          empty: false
+          ]
         };
       }
     } else {
-      // If no previous API response, build a new payload
-      payload = buildStepPayload(updatedFormData, currentStep);
+      // Create mode - build new payload
+      payload = {
+        status: {
+          code: "200",
+          message: "Data Created Successfully"
+        },
+        userInfo: userFormData?.fullloginDetails || {},
+        applicationDetails: {
+          uuid: formData.uuid || "",
+          applicationNumber: formData.applicationNumber || "",
+          status: "Draft",
+          isActive: false,
+          isFinalSubmit: false,
+          creditorBasicDetails: {
+            uuid: formData.creditorBasicDetailsUuid || "",
+            financialCreditorName: updatedFormData.step1?.financialCreditorName || "",
+            financialCreditorEmail: updatedFormData.step1?.financialCreditorEmail || "",
+            identificationTypeDetails: {
+              identificationType: updatedFormData.step1?.identificationType || "",
+              identifications: updatedFormData.step1?.identificationtype_details?.map(item => ({
+                uuid: item.uuid || "",
+                creditorsBasicUuid: formData.creditorBasicDetailsUuid || "",
+                identificationRecord: item.details || "",
+                proofOfIdentificationDocuments: {
+                  uuid: item.proof?.uuid || "",
+                  supportingDocumentUuid: "",
+                  docId: item.proof?.fileId || "",
+                  docType: "identification",
+                  docSource: "identification_type",
+                  docName: item.proof?.fileName || ""
+                }
+              })) || []
+            },
+            addressDetails: {
+              addressLine1: updatedFormData.step1?.addressLine1 || "",
+              addressLine2: updatedFormData.step1?.addressLine2 || "",
+              city: updatedFormData.step1?.city || "",
+              state: updatedFormData.step1?.state || "",
+              pincode: updatedFormData.step1?.pincode || ""
+            }
+          },
+          claimDetails: currentStep >= 2 ? {
+            uuid: formData.claimDetailsUuid || "",
+            creditorBasicDetailsUuid: formData.creditorBasicDetailsUuid || "",
+            claimType: updatedFormData.step2?.claimType || "",
+            claimAmount: parseFloat(updatedFormData.step2?.claimAmount) || 0,
+            isAmountOfClaimCoverdBySecurityInterest: updatedFormData.step2?.hasSecurityInterest === "Yes",
+            securityValue: parseFloat(updatedFormData.step2?.securityValue) || 0,
+            securityDate: updatedFormData.step2?.securityDate || "",
+            isAmountOfClaimCoverdByGuarantee: updatedFormData.step2?.hasGuarantee === "Yes",
+            guaranteeValue: parseFloat(updatedFormData.step2?.guaranteeValue) || 0,
+            guaranteeDate: updatedFormData.step2?.guaranteeDate || "",
+            principalBorrowerDetails: updatedFormData.step2?.entityData?.filter(e => e.type === "PRINCIPAL_BORROWER")?.map(e => ({
+              name: e.name || "",
+              address: e.address || ""
+            })) || [],
+            beneficiaryDetails: updatedFormData.step2?.entityData?.filter(e => e.type === "BENEFICIARY")?.map(e => ({
+              name: e.name || "",
+              address: e.address || ""
+            })) || [],
+            guarantorDetails: updatedFormData.step2?.entityData?.filter(e => e.type === "GUARANTOR")?.map(e => ({
+              name: e.name || "",
+              address: e.address || ""
+            })) || [],
+            debtIncurredDetails: updatedFormData.step2?.debtDetails || "",
+            debtIncurredDate: updatedFormData.step2?.debtDate || "",
+            mutualDealingDetailsAgainstTheClaim: updatedFormData.step2?.mutualDetails || "",
+            bankAccountDetails: {
+              bankAccountNumber: updatedFormData.step2?.accountNumber || "",
+              bankIfscCode: updatedFormData.step2?.ifscCode || "",
+              bankName: updatedFormData.step2?.bankName || "",
+              bankBranchName: updatedFormData.step2?.branchName || "",
+              branchAddress: updatedFormData.step2?.branchAddress || "",
+              city: updatedFormData.step2?.city || "",
+              state: updatedFormData.step2?.state || "",
+              district: updatedFormData.step2?.district || ""
+            }
+          } : {},
+          signatoryDetails: currentStep >= 3 ? {
+            uuid: formData.signatoryDetailsUuid || "",
+            creditorBasicDetailsUuid: formData.creditorBasicDetailsUuid || "",
+            financialCreditorName: updatedFormData.step3?.creditorName || "",
+            positionOfCreditor: updatedFormData.step3?.creditorPosition || "",
+            signatureFinancialCreditor: updatedFormData.step3?.creditorSignatureText || "",
+            addressOfSigningPerson: updatedFormData.step3?.creditorAddress || "",
+            isSignatureToUpload: updatedFormData.step3?.hasSignature === "Yes",
+            document: updatedFormData.step3?.signatureFile ? {
+              uuid: updatedFormData.step3.signatureFile.uuid || "",
+              supportingDocumentUuid: "",
+              docId: updatedFormData.step3.signatureFile.fileId || "",
+              docType: "signature",
+              docSource: "Signature",
+              docName: updatedFormData.step3.signatureFile.fileName || ""
+            } : null
+          } : {},
+          supportingDocument: currentStep >= 4 ? {
+            uuid: "",
+            creditorBasicDetailsUuid: formData.creditorBasicDetailsUuid || "",
+            documents: [
+              ...(updatedFormData.step4?.identityProofFile ? [{
+                uuid: updatedFormData.step4.identityProofFile.uuid || "",
+                supportingDocumentUuid: "",
+                docId: updatedFormData.step4.identityProofFile.fileId || "",
+                docType: updatedFormData.step4.identityProofType || "",
+                docSource: "identity_proof",
+                docName: updatedFormData.step4.identityProofFile.fileName || ""
+              }] : []),
+              ...(updatedFormData.step4?.addressProofFile ? [{
+                uuid: updatedFormData.step4.addressProofFile.uuid || "",
+                supportingDocumentUuid: "",
+                docId: updatedFormData.step4.addressProofFile.fileId || "",
+                docType: updatedFormData.step4.addressProofType || "",
+                docSource: "address_proof",
+                docName: updatedFormData.step4.addressProofFile.fileName || ""
+              }] : [])
+            ]
+          } : {}
+        }
+      };
     }
-  
+
     try {
       const endpoint = `${process.env.REACT_APP_APPLICATION_SERVICE}${URLS_ENDPOINT.APP_SERVICES.APPLICATION_FORMSUBMIT}`;
       const response = await postData(endpoint, payload);
@@ -653,42 +639,37 @@ const Stepper = ({ stepsConfig = [], formAllData }) => {
       if (response.data?.status?.code === "200") {
         // Store the complete API response
         setApiResponse(response.data);
-        if(currentStep === 4) {
-          localStorage.setItem('previewResponse', JSON.stringify(response.data));
-        }
         
         // Update form data with any IDs returned from the server
         const serverUpdatedFormData = { ...updatedFormData };
         
         if (response.data.applicationDetails.creditorBasicDetails?.uuid) {
-          serverUpdatedFormData.creditorBasicDetailsUuid = response.data.applicationDetails.creditorBasicDetails.uuid || formData.creditorBasicDetailsUuid;
+          serverUpdatedFormData.creditorBasicDetailsUuid = response.data.applicationDetails.creditorBasicDetails.uuid;
         }
         if (response.data.applicationDetails.claimDetails?.uuid) {
-          serverUpdatedFormData.claimDetailsUuid = response.data.applicationDetails.claimDetails.uuid || formData.claimDetailsUuid;
+          serverUpdatedFormData.claimDetailsUuid = response.data.applicationDetails.claimDetails.uuid;
         }
         if (response.data.applicationDetails.signatoryDetails?.uuid) {
-          serverUpdatedFormData.signatoryDetailsUuid = response.data.applicationDetails.signatoryDetails.uuid || formData.signatoryDetailsUuid;
-        }
-  
-        // Store application number and UUID if available
-        if (response.data.applicationDetails.applicationNumber) {
-          serverUpdatedFormData.applicationNumber = response.data.applicationDetails.applicationNumber;
+          serverUpdatedFormData.signatoryDetailsUuid = response.data.applicationDetails.signatoryDetails.uuid;
         }
         if (response.data.applicationDetails.uuid) {
           serverUpdatedFormData.uuid = response.data.applicationDetails.uuid;
         }
-  
+        if (response.data.applicationDetails.applicationNumber) {
+          serverUpdatedFormData.applicationNumber = response.data.applicationDetails.applicationNumber;
+        }
+
         setFormData(serverUpdatedFormData);
         localStorage.setItem('formData', JSON.stringify(serverUpdatedFormData));
-  
-        // Store application number if it's new
-        if (response.data.applicationDetails.applicationNumber) {
-          localStorage.setItem('applicationdatawithId', response.data.applicationDetails.applicationNumber);
+
+        // If this is the last step, store the preview data
+        if (currentStep === filteredStepsConfig.length) {
+          localStorage.setItem('previewResponse', JSON.stringify(response.data));
         }
-  
+
         console.log('Application saved successfully', response.data);
         toast.success(`Step ${currentStep} saved successfully`);
-  
+
         // Move to next step
         setCurrentStep((prevStep) => prevStep + 1);
         setHasPreviewed(true);
@@ -700,262 +681,7 @@ const Stepper = ({ stepsConfig = [], formAllData }) => {
       toast.error(`Failed to save step ${currentStep}: ${error.message}`);
     }
   };
-  
-  // const handlePreview = async () => {
-  //   if (!currentSubmitHandler) {
-  //     console.error("No submit handler available.");
-  //     return;
-  //   }
 
-  //   const currentStepData = await currentSubmitHandler();
-  //   if (!currentStepData) {
-  //     console.error("Form validation failed.");
-  //     return;
-  //   }
-
-  //   if (!validateStepData(currentStep, currentStepData)) {
-  //     return;
-  //   }
-
-  //   const processedStepData = await processFileUploads(currentStepData, currentStep);
-
-  //   const updatedFormData = {
-  //     ...formData,
-  //     [`step${currentStep}`]: { ...formData[`step${currentStep}`], ...processedStepData },
-  //   };
-
-  //   if (!deepEqual(updatedFormData, formData)) {
-  //     setFormData(updatedFormData);
-  //     updateRegistrationData(`step${currentStep}`, updatedFormData[`step${currentStep}`], id);
-  //   }
-  //   console.log("Updated Form Data:", updatedFormData);
-  //   const previewPayload = createFormPayload(updatedFormData, false, userFormData, id); // isFinalSubmit: false, use ID if editing
-  //   console.log("Preview Payload:", JSON.stringify(previewPayload, null, 2));
-    
-  //   setCurrentStep(filteredStepsConfig.length);
-  //   setHasPreviewed(true); 
-  // };
-
-
-  // const handlePreview = async () => {
-  //   if (!currentSubmitHandler) {
-  //     console.error("No submit handler available.");
-  //     return;
-  //   }
-  
-  //   const currentStepData = await currentSubmitHandler();
-  //   if (!currentStepData) {
-  //     console.error("Form validation failed.");
-  //     return;
-  //   }
-  
-  //   if (!validateStepData(currentStep, currentStepData)) {
-  //     return;
-  //   }
-  
-  //   const processedStepData = await processFileUploads(currentStepData, currentStep);
-  
-  //   // Update form data with current step's data
-  //   const updatedFormData = {
-  //     ...formData,
-  //     [`step${currentStep}`]: { ...formData[`step${currentStep}`], ...processedStepData },
-  //   };
-  
-  //   // If we already have an API response with an application number, use that as the base for our payload
-  //   let payload;
-  //   if (apiResponse && apiResponse.applicationDetails && apiResponse.applicationDetails.applicationNumber) {
-  //     // Clone the existing API response
-  //     payload = JSON.parse(JSON.stringify(apiResponse));
-      
-  //     // Update all steps data in the payload for preview
-  //     payload.applicationDetails.creditorBasicDetails = {
-  //       uuid: formData.creditorBasicDetailsUuid || payload.applicationDetails.creditorBasicDetails?.uuid || "",
-  //       financialCreditorName: updatedFormData.step1?.financialCreditorName || "",
-  //       financialCreditorEmail: updatedFormData.step1?.financialCreditorEmail || "",
-  //       financialDebtorName: updatedFormData.step1?.corporateDebtorName || "",
-  //       identificationTypeDetails: {
-  //         identificationType: updatedFormData.step1?.identificationType || "",
-  //         identifications: updatedFormData.step1?.identificationtype_details?.map(item => ({
-  //           uuid: item.uuid || "",
-  //           creditorsBasicUuid: formData.creditorBasicDetailsUuid || payload.applicationDetails.creditorBasicDetails?.uuid || "",
-  //           identificationRecord: item.details || "",
-  //           proofOfIdentificationDocuments: {
-  //             uuid: item.proof?.uuid || "",
-  //             supportingDocumentUuid: "",
-  //             docId: item.proof?.fileId || "",
-  //             docType: "identification",
-  //             docSource: "identification_type",
-  //             docName: item.proof?.fileName || ""
-  //           }
-  //         })) || []
-  //       },
-  //       addressDetails: {
-  //         addressLine1: updatedFormData.step1?.addressLine1 || "",
-  //         addressLine2: updatedFormData.step1?.addressLine2 || "",
-  //         city: updatedFormData.step1?.city || "",
-  //         state: updatedFormData.step1?.state || "",
-  //         pincode: updatedFormData.step1?.pincode || ""
-  //       },
-  //       auditDetails: payload.applicationDetails.creditorBasicDetails?.auditDetails || null,
-  //       empty: false
-  //     };
-  
-  //     // Update claimDetails
-  //     const entityData = updatedFormData.step2?.entityData || [];
-  //     // const claimTypeMapping = {
-  //     //   principalBorrower: "PRINCIPAL_BORROWER",
-  //     //   guarantor: "GUARANTOR",
-  //     //   beneficiary: "BENEFICIARY",
-  //     // };
-  //     // // const backendClaimType = claimTypeMapping[updatedFormData.step2?.claimType] || "";
-  //     const principalBorrowers = entityData.filter(e => e.type === "PRINCIPAL_BORROWER");
-  //     const guarantors = entityData.filter(e => e.type === "GUARANTOR");
-  //     const beneficiaries = entityData.filter(e => e.type === "BENEFICIARY");
-      
-  //     payload.applicationDetails.claimDetails = {
-  //       uuid: formData.claimDetailsUuid || payload.applicationDetails.claimDetails?.uuid || "",
-  //       creditorBasicDetailsUuid: formData.creditorBasicDetailsUuid || "",
-  //       claimType: updatedFormData.step2?.claimType || "",
-       
-  //       claimAmount: parseFloat(updatedFormData.step2?.claimAmount) || 0,
-  //       isAmountOfClaimCoverdBySecurityInterest: updatedFormData.step2?.hasSecurityInterest === "yes",
-  //       securityValue: parseFloat(updatedFormData.step2?.securityValue) || 0,
-  //       securityDate: updatedFormData.step2?.securityDate || "",
-  //       isAmountOfClaimCoverdByGuarantee: updatedFormData.step2?.hasGuarantee === "yes",
-  //       guaranteeValue: parseFloat(updatedFormData.step2?.guaranteeValue) || 0,
-  //       guaranteeDate: updatedFormData.step2?.guaranteeDate || "",
-  //       principalBorrowerDetails: principalBorrowers.map(e => ({
-  //         name: e.name || "",
-  //         address: e.address || ""
-  //       })) || [],
-  //       beneficiaryDetails: beneficiaries?.map(e => ({
-  //         name: e.name || "",
-  //         address: e.address || ""
-  //       })) || [],
-  //       guarantorDetails: guarantors?.map(e => ({
-  //         name: e.name || "",
-  //         address: e.address || ""
-  //       })) || [],
-  //       debtIncurredDetails: updatedFormData.step2?.debtDetails || "",
-  //       debtIncurredDate: updatedFormData.step2?.debtDate || "",
-  //       mutualDealingDetailsAgainstTheClaim: updatedFormData.step2?.mutualDetails || "",
-  //       bankAccountDetails: {
-  //         bankAccountNumber: updatedFormData.step2?.accountNumber || "",
-  //         bankIfscCode: updatedFormData.step2?.ifscCode || "",
-  //         bankName: updatedFormData.step2?.bankName || "",
-  //         bankBranchName: updatedFormData.step2?.branchName || "",
-  //         branchAddress: updatedFormData.step2?.branchAddress || "",
-  //         city: updatedFormData.step2?.city || "",
-  //         state: updatedFormData.step2?.state || "",
-  //         district: updatedFormData.step2?.district || ""
-  //       },
-  //       auditDetails: payload.applicationDetails.claimDetails?.auditDetails || null,
-  //       empty: false
-  //     };
-  
-  //     // Update signatoryDetails
-  //     payload.applicationDetails.signatoryDetails = {
-  //       uuid: formData.signatoryDetailsUuid || payload.applicationDetails.signatoryDetails?.uuid || "",
-  //       creditorBasicDetailsUuid: formData.creditorBasicDetailsUuid || payload.applicationDetails.creditorBasicDetails?.uuid || "",
-  //       financialCreditorName: updatedFormData.step3?.creditorName || "",
-  //       positionOfCreditor: updatedFormData.step3?.creditorPosition || "",
-  //       signatureFinancialCreditor: updatedFormData.step3?.creditorSignatureText || "",
-  //       addressOfSigningPerson: updatedFormData.step3?.creditorAddress || "",
-  //       isSignatureToUpload: updatedFormData.step3?.hasSignature === "yes",
-  //       document: updatedFormData.step3?.signatureFile ? {
-  //         uuid: updatedFormData.step3.signatureFile.uuid || "",
-  //         supportingDocumentUuid: "",
-  //         docId: updatedFormData.step3.signatureFile.fileId || "",
-  //         docType: "signature",
-  //         docSource: "Signature",
-  //         docName: updatedFormData.step3.signatureFile.fileName || ""
-  //       } : null,
-  //       auditDetails: payload.applicationDetails.signatoryDetails?.auditDetails || null,
-  //       empty: false
-  //     };
-  
-  //     // Update supportingDocument
-  //     payload.applicationDetails.supportingDocument = {
-  //       uuid: payload.applicationDetails.supportingDocument?.uuid || "",
-  //       creditorBasicDetailsUuid: formData.creditorBasicDetailsUuid || payload.applicationDetails.creditorBasicDetails?.uuid || "",
-  //       documents: [
-  //         ...(updatedFormData.step4?.identityProofFile ? [{
-  //           uuid: updatedFormData.step4.identityProofFile.uuid || "",
-  //           supportingDocumentUuid: "",
-  //           docId: updatedFormData.step4.identityProofFile.fileId || "",
-  //           docType: updatedFormData.step4.identityProofType || "",
-  //           docSource: "identity_proof",
-  //           docName: updatedFormData.step4.identityProofFile.fileName || ""
-  //         }] : []),
-  //         ...(updatedFormData.step4?.addressProofFile ? [{
-  //           uuid: updatedFormData.step4.addressProofFile.uuid || "",
-  //           supportingDocumentUuid: "",
-  //           docId: updatedFormData.step4.addressProofFile.fileId || "",
-  //           docType: updatedFormData.step4.addressProofType || "",
-  //           docSource: "address_proof",
-  //           docName: updatedFormData.step4.addressProofFile.fileName || ""
-  //         }] : [])
-  //       ],
-  //       auditDetails: payload.applicationDetails.supportingDocument?.auditDetails || null,
-  //       empty: false
-  //     };
-  //   } else {
-  //     // If no previous API response, build a new payload
-  //     payload = buildStepPayload(updatedFormData, currentStep);
-  //   }
-  
-  //   try {
-  //     const endpoint = `${process.env.REACT_APP_APPLICATION_SERVICE}${URLS_ENDPOINT.APP_SERVICES.APPLICATION_FORMSUBMIT}`;
-  //     const response = await postData(endpoint, payload);
-      
-  //     if (response.data?.status?.code === "200") {
-  //       // Store the complete API response
-  //       setApiResponse(response.data);
-        
-  //       // Update form data with any IDs returned from the server
-  //       const serverUpdatedFormData = { ...updatedFormData };
-        
-  //       if (response.data.applicationDetails.creditorBasicDetails?.uuid) {
-  //         serverUpdatedFormData.creditorBasicDetailsUuid = response.data.applicationDetails.creditorBasicDetails.uuid || formData.creditorBasicDetailsUuid;
-  //       }
-  //       if (response.data.applicationDetails.claimDetails?.uuid) {
-  //         serverUpdatedFormData.claimDetailsUuid = response.data.applicationDetails.claimDetails.uuid || formData.claimDetailsUuid;
-  //       }
-  //       if (response.data.applicationDetails.signatoryDetails?.uuid) {
-  //         serverUpdatedFormData.signatoryDetailsUuid = response.data.applicationDetails.signatoryDetails.uuid || formData.signatoryDetailsUuid;
-  //       }
-  
-  //       // Store application number and UUID if available
-  //       if (response.data.applicationDetails.applicationNumber) {
-  //         serverUpdatedFormData.applicationNumber = response.data.applicationDetails.applicationNumber;
-  //       }
-  //       if (response.data.applicationDetails.uuid) {
-  //         serverUpdatedFormData.uuid = response.data.applicationDetails.uuid;
-  //       }
-  
-  //       setFormData(serverUpdatedFormData);
-  //       localStorage.setItem('formData', JSON.stringify(serverUpdatedFormData));
-  //       localStorage.setItem('previewResponse', JSON.stringify(response.data));
-  
-  //       // Store application number if it's new
-  //       if (response.data.applicationDetails.applicationNumber) {
-  //         localStorage.setItem('applicationdatawithId', response.data.applicationDetails.applicationNumber);
-  //       }
-  
-  //       console.log('Preview saved successfully', response.data);
-  //       toast.success(`Preview saved successfully`);
-  
-  //       // Move to review step
-  //       setCurrentStep(filteredStepsConfig.length);
-  //       setHasPreviewed(true);
-  //     } else {
-  //       throw new Error(response.data?.status?.message || 'Failed to save preview');
-  //     }
-  //   } catch (error) {
-  //     console.error('Error saving preview:', error);
-  //     toast.error(`Failed to save preview: ${error.message}`);
-  //   }
-  // };
   const handleFinalSubmit = async () => {
     if (!isConfirmed) {
       toast.error("Please confirm the declaration before submitting");
@@ -996,9 +722,6 @@ const Stepper = ({ stepsConfig = [], formAllData }) => {
             applicationNumber: successData.applicationDetails?.applicationNumber || "N/A"
           }
         });
-        // setTimeout(() => {
-        //   navigate("/dashboard");
-        // }, 1500);
       } else {
         throw new Error(response.data?.status?.message || 'Failed to submit application');
       }
@@ -1009,17 +732,11 @@ const Stepper = ({ stepsConfig = [], formAllData }) => {
       setIsSubmitting(false);
     }
   };
-  // const handleSaveDraft = async () => {
-  //   console.log("handleSaveDraft", formData);
-  // };
 
   const handleWorkflowAction = async (action, comments) => {
     try {
       const userFormData = JSON.parse(localStorage.getItem("userFormData"));
-      const applicationNumber = JSON.parse(localStorage.getItem("applicationdatawithId"));
-      console.log("handleWorkflowAction", action, comments);
-      console.log("userFormData", userFormData);
-      console.log("applicationDataxxxxxxxxxxxxxx", applicationNumber);
+      const applicationNumber = formData.applicationNumber || JSON.parse(localStorage.getItem("applicationdatawithId"));
     
       const payload = {
         userInfo: userFormData.fullloginDetails,
@@ -1027,12 +744,9 @@ const Stepper = ({ stepsConfig = [], formAllData }) => {
         comments: comments,
         action: action
       };
-      console.log("Workflow action payload:", payload);
-         const URL =
-            process.env.REACT_APP_APPLICATION_SERVICE +
-            URLS_ENDPOINT.APP_SERVICES.CORPORATE_APPLICATION_SUBMIT;
-
-        const response = await postData(URL, payload);
+      
+      const URL = process.env.REACT_APP_APPLICATION_SERVICE + URLS_ENDPOINT.APP_SERVICES.CORPORATE_APPLICATION_SUBMIT;
+      const response = await postData(URL, payload);
 
       return response.data;
     } catch (error) {
@@ -1042,345 +756,35 @@ const Stepper = ({ stepsConfig = [], formAllData }) => {
   };
   
   const handleActionSubmit = async () => {
-       setIsSubmittingAction(true);
-       try {
-         const actionMap = {
-           "Accept": "APPROVED",
-           "Reject": "REJECTED",
-           "Sendback To Claimants": "SEND_BACK_TO_CITIZEN",
-           "Accept as Contingent": "ACCEPTED_AS_CONTINGENT"
-         };
-   
-         const apiAction = actionMap[actionType];
-         if (!apiAction) {
-           throw new Error("Invalid action type");
-         }
-   
-         const response = await handleWorkflowAction(apiAction, comments);
-         console.log("Workflow response:", response);
-         
-         // if (response.status && response.status.code === "200") {
-           // toast.success(`${actionType} submitted successfully`);
-           toast.success(`${response.message}`);
-           navigate("/dashboard");
-         // } else {
-         //   toast.error(response.status?.message || "Action failed");
-         // }
-       } catch (error) {
-         console.error("Error submitting action:", error);
-         toast.error(error.message || "Failed to submit action");
-       } finally {
-         setIsSubmittingAction(false);
-         handleModalClose();
-       }
-     };
+    setIsSubmittingAction(true);
+    try {
+      const actionMap = {
+        "Accept": "APPROVED",
+        "Reject": "REJECTED",
+        "Sendback To Claimants": "SEND_BACK_TO_CITIZEN",
+        "Accept as Contingent": "ACCEPTED_AS_CONTINGENT"
+      };
 
-  const handleActionClick = (action) => {
-    setActionType(action);
-    setShowModal(true);
-  };
+      const apiAction = actionMap[actionType];
+      if (!apiAction) {
+        throw new Error("Invalid action type");
+      }
 
-  const handleModalClose = () => {
-    setShowModal(false);
-    setComments("");
-  };
-
-  const handlePrevious = () => {
-    setCurrentStep((prevStep) => Math.max(1, prevStep - 1));
-  };
-
-  const handleCancel = () => {
-    // localStorage.removeItem('applicationdatawithId');
-    localStorage.removeItem('apiResponse')
-    localStorage.removeItem('fileUploads')
-    localStorage.removeItem('applicationDetails');
-    localStorage.removeItem('formData');
-    navigate("/dashboard");
-  };
-
-  const calculateProgressBarWidth = () => {
-    return ((currentStep - 1) / (filteredStepsConfig.length - 1)) * 100;
-  };
-
-  const ActiveComponent = filteredStepsConfig[currentStep - 1]?.Component;
-  const shouldRenderReviewStep = currentStep === filteredStepsConfig.length && isDataLoaded;
-
-  useEffect(() => {
-    if (currentStep === 3) {
-      setHasPreviewed(false);
-    }
-  }, [currentStep]);
- 
-  return (
-    <FormDataProvider formData={formData}>
-      <div className="stepper">
-        {filteredStepsConfig.map((step, index) => (
-          <div
-            key={step.name}
-            ref={(el) => (stepRef.current[index] = el)}
-            className={`step ${
-              currentStep > index + 1 || isComplete ? "complete" : ""
-            } ${currentStep === index + 1 ? "active" : ""}`}
-          >
-            <div className="step-number">
-              {currentStep > index + 1 || isComplete ? (
-                <span>✓</span>
-              ) : (
-                index + 1
-              )}
-            </div>
-            <div className="step-name">{step.name}</div>
-          </div>
-        ))}
-
-        <div
-          className="progress-bar"
-          style={{
-            marginLeft: margins.marginLeft,
-            marginRight: margins.marginRight,
-          }}
-        >
-          <div
-            className="progress"
-            style={{ width: `${calculateProgressBarWidth()}%` }}
-          ></div>
-        </div>
-      </div>
-
-      {ActiveComponent && (
-        <ActiveComponent
-          formData={formData[`step${currentStep}`] || {}}
-          provideSubmitHandler={updateSubmitHandler}
-          setFormData={(newStepData) => {
-            setFormData(prev => ({
-              ...prev,
-              [`step${currentStep}`]: newStepData
-            }));
-          }}
-          isEditMode={isEditMode}
-        />
-      )}
-
-      {shouldRenderReviewStep && !isCRPUser && (
-        <ReviewStep />
-      )}
-
-      {currentStep === filteredStepsConfig.length && !isCRPUser && (
-        <div className="confirmation-container">
-          <Form.Group controlId="formConfirmation" className="mt-3 confirmation-checkbox">
-          <Form.Check
-  type="checkbox"
-  label="I confirm that the information provided is correct."
-  checked={isConfirmed}
-  onChange={() => setShowDeclarationModal(true)}
-/>
-
-          </Form.Group>
-        </div>
-      )}
+      const response = await handleWorkflowAction(apiAction, comments);
+      console.log("Workflow response:", response);
       
-      {/* Declaration Modal */}
-      {/* <DeclarationModal
-        show={showDeclarationModal}
-        onHide={() => setShowDeclarationModal(false)}
-        agreed={isConfirmed}
-        onAgree={() => setIsConfirmed(!isConfirmed)}
-      /> */}
+      toast.success(`${response.message}`);
+      navigate("/dashboard");
+    } catch (error) {
+      console.error("Error submitting action:", error);
+      toast.error(error.message || "Failed to submit action");
+    } finally {
+      setIsSubmittingAction(false);
+      handleModalClose();
+    }
+  };
 
-<DeclarationModal
-  show={showDeclarationModal}
-  onHide={() => setShowDeclarationModal(false)}
-  agreed={isConfirmed}
-  onAgree={() => setIsConfirmed(!isConfirmed)}
-  formData={formData}
-/>
-
-
-<div className="stepper-buttons">
-  {currentStep > 1 && (
-    <button className="buttonplus previous-button" onClick={handlePrevious}>
-      Previous
-    </button>
-  )}
-  {currentStep === 1 && (
-    <button className="buttonplus cancel-button" onClick={handleCancel}>
-      Cancel
-    </button>
-  )}
-
-  {/* For CRP users, show simple Next button that only navigates */}
-  {isCRPUser && currentStep < filteredStepsConfig.length && (
-    <button
-      className="buttonplus next-button"
-      onClick={() => setCurrentStep(prev => prev + 1)}
-    >
-      Next
-    </button>
-  )}
-
-  {/* For non-CRP users, show Save & Next button */}
-  {!isCRPUser && currentStep < filteredStepsConfig.length && (
-    <button
-      className="buttonplus next-button"
-      onClick={handleNext}
-      disabled={isComplete}
-    >
-      Save & Next
-    </button>
-  )}
-
-  {/* {currentStep === 4 && !isCRPUser && (
-    <div className="last-step-buttons">
-      <button
-        className="buttonplus preview-button"
-        onClick={handlePreview}
-      >
-        Preview
-      </button>
-    </div>
-  )} */}
-
-  {currentStep === filteredStepsConfig.length && isCRPUser ? (
-    <>
-      <button
-        className="buttonplus sendback-button"
-        onClick={() => handleActionClick("Sendback To Claimants")}
-      >
-        Sendback To Claimants
-      </button>
-      <button
-        className="buttonplus accept-contingent-button"
-        onClick={() => handleActionClick("Accept as Contingent")}
-      >
-        Accept as Contingent
-      </button>
-      <button
-        className="buttonplus accept-button"
-        onClick={() => handleActionClick("Accept")}
-      >
-        Accept
-      </button>
-      <button
-        className="buttonplus reject-button"
-        onClick={() => handleActionClick("Reject")}
-      >
-        Reject
-      </button>
-    </>
-  ) : currentStep === filteredStepsConfig.length ? (
-    <button
-      className="buttonplus next-button"
-      onClick={handleFinalSubmit}
-      disabled={!isConfirmed || isSubmitting}
-    >
-      {isSubmitting ? "Submitting..." : "Submit"}
-    </button>
-  ) : null}
-</div>
-      {/* <div className="stepper-buttons">
-        {currentStep > 1 && (
-          <button className="buttonplus previous-button" onClick={handlePrevious}>
-            Previous
-          </button>
-        )}
-        {currentStep === 1 && (
-          <button className="buttonplus cancel-button" onClick={handleCancel}>
-            Cancel
-          </button>
-        )}
-
-        {currentStep === 4 && !isCRPUser && (
-          <div className="last-step-buttons">
-            <button
-              className="buttonplus preview-button"
-              onClick={handlePreview}
-            >
-              Preview
-            </button>
-          </div>
-        )}
-
-        {currentStep !== 4 && currentStep !== filteredStepsConfig.length && (
-          <button
-            className="buttonplus next-button"
-            onClick={handleNext}
-            disabled={isComplete}
-          >
-            Save & Next
-          </button>
-        )}
-
-        {currentStep === filteredStepsConfig.length && isCRPUser ? (
-          <>
-            <button
-              className="buttonplus sendback-button"
-              onClick={() => handleActionClick("Sendback To Claimants")}
-            >
-              Sendback To Claimants
-            </button>
-            <button
-              className="buttonplus accept-contingent-button"
-              onClick={() => handleActionClick("Accept as Contingent")}
-            >
-              Accept as Contingent
-            </button>
-            <button
-              className="buttonplus accept-button"
-              onClick={() => handleActionClick("Accept")}
-            >
-              Accept
-            </button>
-            <button
-              className="buttonplus reject-button"
-              onClick={() => handleActionClick("Reject")}
-            >
-              Reject
-            </button>
-          </>
-        ) : currentStep === filteredStepsConfig.length ? (
-          <button
-            className="buttonplus next-button"
-            onClick={handleFinalSubmit}
-            disabled={!isConfirmed || isSubmitting}
-          >
-            {isSubmitting ? "Submitting..." : "Submit"}
-          </button>
-        ) : null}
-      </div> */}
-
-      <Modal show={showModal} onHide={handleModalClose} centered>
-        <Modal.Header closeButton>
-          <Modal.Title>{actionType} Form</Modal.Title>
-        </Modal.Header>
-        <Modal.Body>
-          <Form>
-            <Form.Group controlId="comments">
-              <Form.Label>Comments</Form.Label>
-              <Form.Control
-                as="textarea"
-                rows={3}
-                value={comments}
-                onChange={(e) => setComments(e.target.value)}
-                placeholder="Enter your comments..."
-              />
-            </Form.Group>
-          </Form>
-        </Modal.Body>
-        <Modal.Footer>
-          <Button className="modal-close-button" onClick={handleModalClose}>
-            Close
-          </Button>
-          <Button
-            className="modal-submit-button"
-            onClick={handleActionSubmit}
-            disabled={!comments.trim()}
-          >
-            Submit
-          </Button>
-        </Modal.Footer>
-      </Modal>
-    </FormDataProvider>
-  );
-};
-
-export default Stepper;
+  const handleActionClick
+	  
+	  
+	  
