@@ -1,84 +1,263 @@
-// Update the identificationType field in basicDetailsSchema
-const basicDetailsSchema = [
-  {
-    name: "financialCreditorName",
-    label: <>Name of the financial creditor <span className="required-asterisk">*</span></>,
-    type: "text",
-    rules: { required: "Financial creditor name is required" },
-    icon: <FaUser className="me-2" />,
-    placeholder: "Enter financial creditor name"
-  },
-  {
-    name: "financialCreditorEmail",
-    label: <>Email address of the financial creditor <span className="required-asterisk">*</span></>,
-    type: "email",
-    rules: {
-      required: "Email is required",
-      pattern: {
-        value: /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i,
-        message: "Invalid email address"
-      }
-    },
-    icon: <FaUser className="me-2" />,
-    placeholder: "Enter financial creditor email"
-  },
-  {
-    name: "identificationType",
-    label: <>Identification type <span className="required-asterisk">*</span></>,
-    type: "radio",
-    options: [
-      { value: "INCORPORATED", label: "Incorporated body" },
-      { value: "INDIVIDUAL_PARTNERSHIP", label: "Partnership or individual" }
-    ],
-    rules: { required: "Select an identification type" },
-    icon: <FaIdCard className="me-2" />,
-    // Add inline style to show radio buttons in one line
-    inline: true
-  }
-];
+import React from 'react';
+import { useFormContext } from 'react-hook-form';
+import "react-datepicker/dist/react-datepicker.css";
+import { Download, CheckCircle } from "lucide-react";
+import { Button } from "react-bootstrap";
 
-// Add a useEffect to watch for identificationType changes and clear the other type's data
-useEffect(() => {
-  const subscription = watch((value, { name }) => {
-    if (name === "identificationType") {
-      if (value.identificationType === "INCORPORATED") {
-        // Clear partnership records when switching to incorporated
-        setPartnershipRecords([{ id: 1, details: "", proof: null }]);
-      } else {
-        // Clear incorporated records when switching to partnership
-        setIncorporatedRecords([{ id: 1, details: "", proof: null }]);
+const DynamicField = ({
+  fieldConfig,
+  register,
+  errors,
+  setValue,
+  trigger,
+  getValues,
+  control,
+}) => {
+  const {
+    name,
+    label,
+    type,
+    rules = {},
+    options = [],
+    placeholder = '',
+    disabled = false,
+    tooltip = '',
+    note = '',
+    accept = '',
+    isUploading = false,
+    uploadError = null,
+    onFileUpload = () => {},
+    setIsUploading = () => {},
+    setUploadError = () => {},
+    defaultValue = null,
+    onChange = () => {},
+  } = fieldConfig;
+
+  const { watch } = useFormContext();
+  const value = watch(name);
+  const hasError = errors[name];
+  const [uploadSuccess, setUploadSuccess] = React.useState(false);
+
+  const handleFileChange = async (e) => {
+    const file = e.target.files[0];
+    if (file && fieldConfig.onFileUpload) {
+      try {
+        fieldConfig.setIsUploading(true);
+        fieldConfig.setUploadError(null);
+        setUploadSuccess(false);
+
+        const result = await fieldConfig.onFileUpload(file);
+
+        if (result.success) {
+          setValue(name, {
+            fileId: result.fileId,
+            docName: result.docName,
+            docType: result.docType,
+            docSource: result.docSource,
+            fileUrl: result.fileUrl
+          }, { shouldValidate: true });
+          setUploadSuccess(true);
+        }
+      } catch (error) {
+        fieldConfig.setUploadError(error.message);
+        setValue(name, null, { shouldValidate: true });
+        setUploadSuccess(false);
+      } finally {
+        fieldConfig.setIsUploading(false);
       }
     }
-  });
-  return () => subscription.unsubscribe();
-}, [watch]);
+  };
 
+  const renderFilePreview = (fileValue) => {
+    if (!fileValue) return null;
 
-//////////////////
-// In your DynamicField component, modify the radio button rendering part:
-if (type === "radio") {
-  return (
-    <div className="mb-3">
-      <label className="form-label d-flex align-items-center">
-        {icon}
-        {label}
-      </label>
-      <div className={fieldConfig.inline ? "d-flex flex-wrap gap-3" : ""}>
-        {options.map((option) => (
-          <div key={option.value} className="form-check">
-            <input
-              className={`form-check-input ${errors[name] ? "is-invalid" : ""}`}
-              type="radio"
-              id={`${name}_${option.value}`}
-              value={option.value}
-              {...register(name, rules)}
-            />
-            <label className="form-check-label" htmlFor={`${name}_${option.value}`}>
-              {option.label}
-            </label>
+    const fileUrl = typeof fileValue === 'object' ? 
+      `${process.env.REACT_APP_FILE_SERVICE}v1/files/id?fileStoreId=${fileValue.fileId}` : 
+      fileValue;
+
+    const fileName = typeof fileValue === 'object' ? 
+      fileValue.docName || fileValue.name || 'Uploaded file' : 
+      fileValue;
+
+    return (
+      <div className="file-preview-container">
+        {uploadSuccess && (
+          <div className="text-success d-flex align-items-center gap-2 mb-2">
+            <CheckCircle size={16} />
+            <span>File uploaded successfully!</span>
           </div>
-        ))}
+        )}
+        <div className="d-flex align-items-center gap-2">
+          <span>{fileName}</span>
+          <Button
+            variant="link"
+            size="sm"
+            href={fileUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            download
+            className="p-0"
+            title="Download file"
+          >
+            <Download size={16} />
+          </Button>
+        </div>
       </div>
+    );
+  };
+
+  const handleRadioChange = (e) => {
+    const selectedValue = e.target.value;
+    setValue(name, selectedValue, { shouldValidate: true });
+    onChange(e); // Call the custom onChange handler if provided
+  };
+
+  const renderField = () => {
+    switch (type) {
+      case 'text':
+      case 'email':
+      case 'number':
+        return (
+          <input
+            type={type}
+            id={name}
+            className={`form-control ${errors[name] ? 'is-invalid' : ''}`}
+            placeholder={placeholder}
+            disabled={disabled}
+            {...register(name, rules)}
+          />
+        );
+      case 'textarea':
+        return (
+          <textarea
+            id={name}
+            className={`form-control ${errors[name] ? 'is-invalid' : ''}`}
+            placeholder={placeholder}
+            rows={3}
+            {...register(name, rules)}
+          />
+        );
+
+        
+      case 'select':
+        return (
+          <select
+            id={name}
+            className={`form-control ${errors[name] ? 'is-invalid' : ''}`}
+            {...register(name, rules)}
+          >
+            {options.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        );
+        case 'radio':
+          return (
+            <div className="d-flex gap-3">
+              {options.map((option) => (
+                <div key={option.value} className="form-check">
+                  <input
+                    type="radio"
+                    id={`${name}-${option.value}`}
+                    className="form-check-input"
+                    style={{
+                      backgroundColor: value === option.value ? '#269ccc' : '',
+                      borderColor: '#269ccc',
+                    }}
+                    value={option.value}
+                    checked={value === option.value}
+                    {...register(name, rules)}
+                    onChange={handleRadioChange}
+                  />
+                  <label
+                    htmlFor={`${name}-${option.value}`}
+                    className="form-check-label"
+                  >
+                    {option.label}
+                  </label>
+                </div>
+              ))}
+            </div>
+          );
+      case 'radio-group':
+        return (
+          <div className="radio-group">
+            {options.map((option) => (
+              <div key={option.value} className="form-check form-check-inline">
+                <input
+                  type="radio"
+                  id={`${name}-${option.value}`}
+                  className="form-check-input"
+                  style={{
+                    backgroundColor: value === option.value ? '#269ccc' : '',
+                    borderColor: '#269ccc',
+                  }}
+                  value={option.value}
+                  defaultChecked={defaultValue === option.value}
+                  {...register(name, rules)}
+                />
+                <label
+                  htmlFor={`${name}-${option.value}`}
+                  className="form-check-label"
+                >
+                  {option.label}
+                </label>
+              </div>
+            ))}
+          </div>
+        );
+      case 'file':
+        return (
+          <div className="custom-file-input">
+          {fieldConfig.note && (
+            <div className="file-upload-note text-muted small mb-2">
+              {fieldConfig.note}
+              </div>
+          )}
+          <input
+            type="file"
+            id={name}
+            onChange={handleFileChange}
+            className={`form-input ${hasError ? "input-error" : ""}`}
+            style={{ display: "none" }}
+            disabled={fieldConfig.isUploading || disabled}
+            accept={fieldConfig.accept}
+          />
+          <label
+            htmlFor={name}
+            className={`file-label ${hasError ? "input-error" : ""} ${fieldConfig.isUploading ? "uploading" : ""}`}
+          >
+            {fieldConfig.isUploading ? "Uploading..." : "Choose File"}
+          </label>
+
+          {getValues(name) && renderFilePreview(getValues(name))}
+
+          {fieldConfig.uploadError && <p className="error-message">{fieldConfig.uploadError}</p>}
+          {hasError && !fieldConfig.uploadError && <p className="error-message">{errors[name]?.message}</p>}
+        </div>
+        );
+      default:
+        return null;
+    }
+  };
+
+  return (
+    <div className={`form-group ${type === 'radio-group' ? 'radio-group-container' : ''}`}>
+      <label htmlFor={name} className="form-label">
+        {label}
+        {tooltip && (
+          <span
+            className="ms-1 tooltip-icon"
+            title={tooltip}
+            data-bs-toggle="tooltip"
+          >
+            <i className="bi bi-info-circle"></i>
+          </span>
+        )}
+      </label>
+      {renderField()}
       {errors[name] && (
         <div className="invalid-feedback d-block">
           {errors[name].message}
@@ -86,4 +265,6 @@ if (type === "radio") {
       )}
     </div>
   );
-}
+};
+
+export default DynamicField;
