@@ -1,465 +1,811 @@
-  const handleNext = async () => {
-    if (!currentSubmitHandler) {
-      console.error("No submit handler available.");
-      return;
-    }
-  
-    // Get current step data from form
-    const currentStepData = await currentSubmitHandler();
-    if (!currentStepData) {
-      console.error("Form validation failed.");
-      return;
-    }
-  
-    if (!validateStepData(currentStep, currentStepData)) {
-      return;
-    }
-  
-    // Process any file uploads
-    const processedStepData = await processFileUploads(currentStepData, currentStep);
-  
-    // Update form data with current step's data
-    const updatedFormData = {
-      ...formData,
-      [`step${currentStep}`]: { ...formData[`step${currentStep}`], ...processedStepData },
-    };
-    console.log("Updated form data:", updatedFormData);
-    console.log("Updated application data:", applicationDetails);
-    // For edit mode, ensure we have all the UUIDs from applicationDetails
-    if (isEditMode && applicationDetails) {
-      updatedFormData.uuid = applicationDetails.uuid;
-      // updatedFormData.identificationuuid=applicationDetails.creditorBasicDetails.identificationTypeDetails.identifications.uuid
-      updatedFormData.applicationNumber = applicationDetails.applicationNumber;
-      updatedFormData.creditorBasicDetailsUuid = applicationDetails.creditorBasicDetails?.uuid;
-      updatedFormData.claimDetailsUuid = applicationDetails.claimDetails?.uuid;
-      updatedFormData.signatoryDetailsUuid = applicationDetails.signatoryDetails?.uuid;
-      updatedFormData.supportingDocumentUuid = applicationDetails.supportingDocument?.uuid;
-    } else if (apiResponse?.applicationDetails) {
-      // For new applications, get UUIDs from previous API responses
-      updatedFormData.uuid = apiResponse.applicationDetails.uuid;
-      updatedFormData.applicationNumber = apiResponse.applicationDetails.applicationNumber;
-      updatedFormData.creditorBasicDetailsUuid = apiResponse.applicationDetails.creditorBasicDetails?.uuid;
-      updatedFormData.claimDetailsUuid = apiResponse.applicationDetails.claimDetails?.uuid;
-      updatedFormData.signatoryDetailsUuid = apiResponse.applicationDetails.signatoryDetails?.uuid;
-      updatedFormData.supportingDocumentUuid = apiResponse.applicationDetails.supportingDocument?.uuid;
-    }
-    
-    console.log("Is edit mode:", isEditMode);
-    console.log("Application details:", applicationDetails);
-    // console.log("Updated form data:", updatedFormData);
-    
-    // Update the form data state immediately to ensure latest data is available
-    setFormData(updatedFormData);
-    
-    // Store in localStorage to persist between steps
-    localStorage.setItem('formData', JSON.stringify(updatedFormData));
-  
-    // Prepare payload for API call
-    let payload;
-    
-    // In edit mode, create a complete payload with all steps data
-    if (isEditMode && applicationDetails) {
-      // Start with a fresh payload structure
-      payload = {
-        status: {
-          code: "200",
-          message: "Data Updated Successfully"
-        },
-        userInfo: userFormData?.fullloginDetails || {},
-        applicationDetails: {
-          uuid: updatedFormData.uuid || "",
-          applicationNumber: updatedFormData.applicationNumber || "",
-          status: applicationDetails.status || "Draft",
-          isActive: applicationDetails.isActive || false,
-          isFinalSubmit: applicationDetails.isFinalSubmit || false,
-        }
-      };
-      const existingIdentifications=applicationDetails.creditorBasicDetails?.identificationTypeDetails.identifications ||[];
+import React, { useState, useEffect, useCallback, useMemo } from "react";
+import { useForm, FormProvider, Controller } from "react-hook-form";
+import Collapsible from "../formCommon/Collapsible";
+import Tooltip from "@mui/material/Tooltip";
+import { 
+  FaInfoCircle, 
+  FaPlus, 
+  FaMinus,
+  FaFileAlt,
+  FaMoneyBillWave,
+  FaCalendarAlt,
+  FaHandshake,
+  FaBalanceScale,
+  FaUniversity,
+  FaLandmark,
+  FaMapMarkerAlt,
+  FaCity,
+  FaGlobeAmericas
+} from "react-icons/fa";
+import { GiBank } from "react-icons/gi";
+import { BsBank2, BsBuilding } from "react-icons/bs";
+import axios from "axios";
+import "./FormC.css";
 
-      // Step 1 - Creditor Basic Details - Always include in edit mode
-      if (updatedFormData.step1) {
-        payload.applicationDetails.creditorBasicDetails = {
-          uuid: updatedFormData.creditorBasicDetailsUuid || "",
-          financialCreditorName: updatedFormData.step1?.financialCreditorName || "",
-          financialCreditorEmail: updatedFormData.step1?.financialCreditorEmail || "",
-          financialDebtorName: updatedFormData.step1?.corporateDebtorName || "",
-          identificationTypeDetails: {
-            identificationType: updatedFormData.step1?.identificationType || "",
-            identifications: updatedFormData.step1?.identificationtype_details?.map((item, index) => ({
-              uuid: existingIdentifications[index].uuid || item.uuid || "",
-              // uuid:  item.uuid || "",
-              creditorsBasicUuid: updatedFormData.creditorBasicDetailsUuid || "",
-              identificationRecord: item.details || "",
-              proofOfIdentificationDocuments: {
-                 uuid:existingIdentifications[index].proofOfIdentificationDocuments?.uuid || item.proof?.uuid || "",
-                // uuid: item.proof?.uuid || "",
-                supportingDocumentUuid: "",
-                docId: item.proof?.fileId ||existingIdentifications[index].proofOfIdentificationDocuments?.docId || "",
-                // docId: item.proof?.fileId || "",
-                docType: "identification",
-                docSource: "identification_type",
-                docName: item.proof?.fileName || existingIdentifications[index].proofOfIdentificationDocuments?.docName || ""
-                // docName: item.proof?.fileName  || ""
-              }
-            })) || []
-          },
-          addressDetails: {
-            addressLine1: updatedFormData.step1?.addressLine1 || "",
-            addressLine2: updatedFormData.step1?.addressLine2 || "",
-            city: updatedFormData.step1?.city || "",
-            state: updatedFormData.step1?.state || "",
-            pincode: updatedFormData.step1?.pincode || ""
-          },
-          empty: false
-        };
-        
-        // Preserve audit details
-        if (applicationDetails.creditorBasicDetails?.auditDetails) {
-          payload.applicationDetails.creditorBasicDetails.auditDetails = 
-            applicationDetails.creditorBasicDetails.auditDetails;
-        }
-      } else if (applicationDetails.creditorBasicDetails) {
-        // If we don't have step1 data in updatedFormData but it exists in applicationDetails, use that
-        payload.applicationDetails.creditorBasicDetails = applicationDetails.creditorBasicDetails;
-      }
+// DynamicField component with enhanced validation
+const DynamicField = ({ fieldConfig, control, register, errors, setValue, getValues, watch }) => {
+  const { name, label, type, options, rules, tooltip, placeholder, rows, show } = fieldConfig;
+  const hasError = errors[name];
+
+  const handleRadioChange = (value) => {
+    setValue(name, value, { shouldValidate: true });
+    if (fieldConfig.onChange) fieldConfig.onChange(value);
+  };
+
+  if (show !== undefined && !show) return null;
+
+  return (
+    <div className={`form-group ${type === "radio" ? "radio-group-container" : ""}`}>
+      <label className="form-label">
+        {label}
+        {rules?.required && <span className="required-asterisk">*</span>}
+        {tooltip && (
+          <Tooltip title={tooltip} arrow>
+            <span className="form-tooltip">
+              <FaInfoCircle />
+            </span>
+          </Tooltip>
+        )}
+      </label>
       
-      // Step 2 - Claim Details
-      if (updatedFormData.step2) {
-        const entityData = updatedFormData.step2?.entityData || [];
-        const principalBorrowers = entityData.filter(e => e.type === "PRINCIPAL_BORROWER");
-        const guarantors = entityData.filter(e => e.type === "GUARANTOR");
-        const beneficiaries = entityData.filter(e => e.type === "BENEFICIARY");
-        
-        payload.applicationDetails.claimDetails = {
-          uuid: updatedFormData.claimDetailsUuid || "",
-          creditorBasicDetailsUuid: updatedFormData.creditorBasicDetailsUuid || "",
-          claimType: updatedFormData.step2?.claimType || "",
-          claimAmount: parseFloat(updatedFormData.step2?.claimAmount) || 0,
-          isAmountOfClaimCoverdBySecurityInterest: updatedFormData.step2?.hasSecurityInterest === "yes",
-          securityValue: parseFloat(updatedFormData.step2?.securityValue) || 0,
-          securityDate: updatedFormData.step2?.securityDate || "",
-          isAmountOfClaimCoverdByGuarantee: updatedFormData.step2?.hasGuarantee === "yes",
-          guaranteeValue: parseFloat(updatedFormData.step2?.guaranteeValue) || 0,
-          guaranteeDate: updatedFormData.step2?.guaranteeDate || "",
-          principalBorrowerDetails: principalBorrowers.map(e => ({
-            name: e.name || "",
-            address: e.address || ""
-          })) || [],
-          beneficiaryDetails: beneficiaries?.map(e => ({
-            name: e.name || "",
-            address: e.address || ""
-          })) || [],
-          guarantorDetails: guarantors?.map(e => ({
-            name: e.name || "",
-            address: e.address || ""
-          })) || [],
-          debtIncurredDetails: updatedFormData.step2?.debtDetails || "",
-          debtIncurredDate: updatedFormData.step2?.debtDate || "",
-          mutualDealingDetailsAgainstTheClaim: updatedFormData.step2?.mutualDetails || "",
-          bankAccountDetails: {
-            bankAccountNumber: updatedFormData.step2?.accountNumber || "",
-            bankIfscCode: updatedFormData.step2?.ifscCode || "",
-            bankName: updatedFormData.step2?.bankName || "",
-            bankBranchName: updatedFormData.step2?.branchName || "",
-            branchAddress: updatedFormData.step2?.branchAddress || "",
-            city: updatedFormData.step2?.city || "",
-            state: updatedFormData.step2?.state || "",
-            district: updatedFormData.step2?.district || ""
-          },
-          empty: false
-        };
-        
-        // Preserve audit details
-        if (applicationDetails.claimDetails?.auditDetails) {
-          payload.applicationDetails.claimDetails.auditDetails = 
-            applicationDetails.claimDetails.auditDetails;
-        }
-      } else if (applicationDetails.claimDetails) {
-        // If we don't have step2 data in updatedFormData but it exists in applicationDetails, use that
-        payload.applicationDetails.claimDetails = applicationDetails.claimDetails;
-      } else {
-        // If neither exists, include an empty object
-        payload.applicationDetails.claimDetails = { empty: true };
-      }
-      
-      // Step 3 - Signatory Details
-      if (updatedFormData.step3) {
-        payload.applicationDetails.signatoryDetails = {
-          uuid: updatedFormData.signatoryDetailsUuid || "",
-          creditorBasicDetailsUuid: updatedFormData.creditorBasicDetailsUuid || "",
-          financialCreditorName: updatedFormData.step3?.creditorName || "",
-          positionOfCreditor: updatedFormData.step3?.creditorPosition || "",
-          signatureFinancialCreditor: updatedFormData.step3?.creditorSignatureText || "",
-          addressOfSigningPerson: updatedFormData.step3?.creditorAddress || "",
-          isSignatureToUpload: updatedFormData.step3?.hasSignature === "yes",
-          document: updatedFormData.step3?.signatureFile ? {
-            uuid: updatedFormData.step3.signatureFile.uuid || "",
-            supportingDocumentUuid: "",
-            docId: updatedFormData.step3.signatureFile.fileId || "",
-            docType: "signature",
-            docSource: "Signature",
-            docName: updatedFormData.step3.signatureFile.docName || updatedFormData.step3.signatureFile.fileName || ""
-          } : null,
-          empty: false
-        };
-        
-        // Preserve audit details
-        if (applicationDetails.signatoryDetails?.auditDetails) {
-          payload.applicationDetails.signatoryDetails.auditDetails = 
-            applicationDetails.signatoryDetails.auditDetails;
-        }
-      } else if (applicationDetails.signatoryDetails) {
-        // If we don't have step3 data in updatedFormData but it exists in applicationDetails, use that
-        payload.applicationDetails.signatoryDetails = applicationDetails.signatoryDetails;
-      } else {
-        // If neither exists, include an empty object
-        payload.applicationDetails.signatoryDetails = { empty: true };
-      }
-      
-      // Step 4 - Supporting Documents
-      if (updatedFormData.step4) {
-        payload.applicationDetails.supportingDocument = {
-          uuid: updatedFormData.supportingDocumentUuid || "",
-          creditorBasicDetailsUuid: updatedFormData.creditorBasicDetailsUuid || "",
-          documents: [
-            ...(updatedFormData.step4?.identityProofFile ? [{
-              uuid: updatedFormData.step4.identityProofFile.uuid || "",
-              supportingDocumentUuid: updatedFormData.supportingDocumentUuid || "",
-              docId: updatedFormData.step4.identityProofFile.fileId || "",
-              docType: updatedFormData.step4.identityProofType || "",
-              docSource: "identity_proof",
-              docName: updatedFormData.step4.identityProofFile.fileName || ""
-            }] : []),
-            ...(updatedFormData.step4?.addressProofFile ? [{
-              uuid: updatedFormData.step4.addressProofFile.uuid || "",
-              supportingDocumentUuid: updatedFormData.supportingDocumentUuid || "",
-              docId: updatedFormData.step4.addressProofFile.fileId || "",
-              docType: updatedFormData.step4.addressProofType || "",
-              docSource: "address_proof",
-              docName: updatedFormData.step4.addressProofFile.fileName || ""
-            }] : [])
-          ],
-          empty: false
-        };
-        
-        // Preserve audit details
-        if (applicationDetails.supportingDocument?.auditDetails) {
-          payload.applicationDetails.supportingDocument.auditDetails = 
-            applicationDetails.supportingDocument.auditDetails;
-        }
-      }
-      
-      
-      
-      else if (applicationDetails.supportingDocument) {
-        // If we don't have step4 data in updatedFormData but it exists in applicationDetails, use that
-        payload.applicationDetails.supportingDocument = applicationDetails.supportingDocument;
-      } else {
-        // If neither exists, include an empty object
-        payload.applicationDetails.supportingDocument = { empty: true };
-      }
-    } else if (apiResponse?.applicationDetails) {
-      // For new applications with previous API response, use that as base
-      payload = JSON.parse(JSON.stringify(apiResponse));
-      
-      // Update with current step data
-      if (currentStep === 1) {
-        payload.applicationDetails.creditorBasicDetails = {
-          uuid: updatedFormData.creditorBasicDetailsUuid || payload.applicationDetails.creditorBasicDetails?.uuid || "",
-          financialCreditorName: updatedFormData.step1?.financialCreditorName || "",
-          financialCreditorEmail: updatedFormData.step1?.financialCreditorEmail || "",
-          financialDebtorName: updatedFormData.step1?.corporateDebtorName || "",
-          identificationTypeDetails: {
-            identificationType: updatedFormData.step1?.identificationType || "",
-            identifications: updatedFormData.step1?.identificationtype_details?.map(item => ({
-              uuid: item.uuid || "",
-              creditorsBasicUuid: updatedFormData.creditorBasicDetailsUuid || payload.applicationDetails.creditorBasicDetails?.uuid || "",
-              identificationRecord: item.details || "",
-              proofOfIdentificationDocuments: {
-                uuid: item.proof?.uuid || "",
-                supportingDocumentUuid: "",
-                docId: item.proof?.fileId || "",
-                docType: "identification",
-                docSource: "identification_type",
-                docName: item.proof?.fileName || ""
-              }
-            })) || []
-          },
-          addressDetails: {
-            addressLine1: updatedFormData.step1?.addressLine1 || "",
-            addressLine2: updatedFormData.step1?.addressLine2 || "",
-            city: updatedFormData.step1?.city || "",
-            state: updatedFormData.step1?.state || "",
-            pincode: updatedFormData.step1?.pincode || ""
-          },
-          auditDetails: payload.applicationDetails.creditorBasicDetails?.auditDetails || null,
-          empty: false
-        };
-      } else if (currentStep === 2) {
-        const entityData = updatedFormData.step2?.entityData || [];
-        const principalBorrowers = entityData.filter(e => e.type === "PRINCIPAL_BORROWER");
-        const guarantors = entityData.filter(e => e.type === "GUARANTOR");
-        const beneficiaries = entityData.filter(e => e.type === "BENEFICIARY");
-        
-        payload.applicationDetails.claimDetails = {
-          uuid: updatedFormData.claimDetailsUuid || payload.applicationDetails.claimDetails?.uuid || "",
-          creditorBasicDetailsUuid: updatedFormData.creditorBasicDetailsUuid || payload.applicationDetails.creditorBasicDetails?.uuid || "",
-          claimType: updatedFormData.step2?.claimType || "",
-          claimAmount: parseFloat(updatedFormData.step2?.claimAmount) || 0,
-          isAmountOfClaimCoverdBySecurityInterest: updatedFormData.step2?.hasSecurityInterest === "yes",
-          securityValue: parseFloat(updatedFormData.step2?.securityValue) || 0,
-          securityDate: updatedFormData.step2?.securityDate || "",
-          isAmountOfClaimCoverdByGuarantee: updatedFormData.step2?.hasGuarantee === "yes",
-          guaranteeValue: parseFloat(updatedFormData.step2?.guaranteeValue) || 0,
-          guaranteeDate: updatedFormData.step2?.guaranteeDate || "",
-          principalBorrowerDetails: principalBorrowers.map(e => ({
-            name: e.name || "",
-            address: e.address || ""
-          })) || [],
-          beneficiaryDetails: beneficiaries?.map(e => ({
-            name: e.name || "",
-            address: e.address || ""
-          })) || [],
-          guarantorDetails: guarantors?.map(e => ({
-            name: e.name || "",
-            address: e.address || ""
-          })) || [],
-          debtIncurredDetails: updatedFormData.step2?.debtDetails || "",
-          debtIncurredDate: updatedFormData.step2?.debtDate || "",
-          mutualDealingDetailsAgainstTheClaim: updatedFormData.step2?.mutualDetails || "",
-          bankAccountDetails: {
-            bankAccountNumber: updatedFormData.step2?.accountNumber || "",
-            bankIfscCode: updatedFormData.step2?.ifscCode || "",
-            bankName: updatedFormData.step2?.bankName || "",
-            bankBranchName: updatedFormData.step2?.branchName || "",
-            branchAddress: updatedFormData.step2?.branchAddress || "",
-            city: updatedFormData.step2?.city || "",
-            state: updatedFormData.step2?.state || "",
-            district: updatedFormData.step2?.district || ""
-          },
-          auditDetails: payload.applicationDetails.claimDetails?.auditDetails || null,
-          empty: false
-        };
-      } else if (currentStep === 3) {
-        payload.applicationDetails.signatoryDetails = {
-          uuid: updatedFormData.signatoryDetailsUuid || payload.applicationDetails.signatoryDetails?.uuid || "",
-          creditorBasicDetailsUuid: updatedFormData.creditorBasicDetailsUuid || payload.applicationDetails.creditorBasicDetails?.uuid || "",
-          financialCreditorName: updatedFormData.step3?.creditorName || "",
-          positionOfCreditor: updatedFormData.step3?.creditorPosition || "",
-          signatureFinancialCreditor: updatedFormData.step3?.creditorSignatureText || "",
-          addressOfSigningPerson: updatedFormData.step3?.creditorAddress || "",
-          isSignatureToUpload: updatedFormData.step3?.hasSignature === "yes",
-          document: updatedFormData.step3?.signatureFile ? {
-            uuid: updatedFormData.step3.signatureFile.uuid || "",
-            supportingDocumentUuid: "",
-            docId: updatedFormData.step3.signatureFile.fileId || "",
-            docType: "signature",
-            docSource: "Signature",
-            docName: updatedFormData.step3.signatureFile.docName || updatedFormData.step3.signatureFile.fileName || ""
-          } : null,
-          auditDetails: payload.applicationDetails.signatoryDetails?.auditDetails || null,
-          empty: false
-        };
-      }
-      
-      else if (currentStep === 4) {
-        const existingDocuments = payload.applicationDetails.supportingDocument?.documents || [];
-        const identityProofDoc = updatedFormData.step4?.identityProofFile ? {
-          uuid: updatedFormData.step4.identityProofFile.uuid || "",
-          supportingDocumentUuid: payload.applicationDetails.supportingDocument?.uuid || "",
-          docId: updatedFormData.step4.identityProofFile.fileId || "",
-          docType: updatedFormData.step4.identityProofType || "",
-          docSource: "identity_proof",
-          docName: updatedFormData.step4.identityProofFile.fileName || ""
-        } : existingDocuments.find(d => d.docSource === "identity_proof");
-  
-        const addressProofDoc = updatedFormData.step4?.addressProofFile ? {
-          uuid: updatedFormData.step4.addressProofFile.uuid || "",
-          supportingDocumentUuid: payload.applicationDetails.supportingDocument?.uuid || "",
-          docId: updatedFormData.step4.addressProofFile.fileId || "",
-          docType: updatedFormData.step4.addressProofType || "",
-          docSource: "address_proof",
-          docName: updatedFormData.step4.addressProofFile.fileName || ""
-        } : existingDocuments.find(d => d.docSource === "address_proof");
-  
-        // Filter out existing identity and address proof documents
-        const otherDocs = existingDocuments.filter(
-          d => d.docSource !== "identity_proof" && d.docSource !== "address_proof"
-        );
-  
-        payload.applicationDetails.supportingDocument = {
-          ...payload.applicationDetails.supportingDocument,
-          documents: [
-            ...(identityProofDoc ? [identityProofDoc] : []),
-            ...(addressProofDoc ? [addressProofDoc] : []),
-            ...otherDocs
-          ]
-        };
-      }
-    } else {
-      // For brand new applications, build a new payload
-      payload = buildStepPayload(updatedFormData, currentStep);
-    }
-  
-    console.log("Final payload:", payload);
-  
+      {type === "select" ? (
+        <select
+          {...register(name, rules)}
+          className={`form-control ${hasError ? "is-invalid" : ""}`}
+          onChange={(e) => {
+            setValue(name, e.target.value, { shouldValidate: true });
+            if (fieldConfig.onChange) fieldConfig.onChange(e.target.value);
+          }}
+        >
+          {options.map((option) => (
+            <option key={option.value} value={option.value} disabled={option.disabled}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      ) : type === "radio" ? (
+        <div className="radio-group">
+          {options.map((option) => (
+            <label key={option.value} className="radio-option">
+              <input
+                type="radio"
+                {...register(name, rules)}
+                value={option.value}
+                checked={watch(name) === option.value}
+                onChange={() => handleRadioChange(option.value)}
+                className="radio-input"
+              />
+              <span className="radio-label">{option.label}</span>
+            </label>
+          ))}
+        </div>
+      ) : type === "textarea" ? (
+        <textarea
+          {...register(name, rules)}
+          className={`form-control ${hasError ? "is-invalid" : ""}`}
+          rows={rows || 3}
+          placeholder={placeholder}
+        />
+      ) : type === "date" ? (
+        <input
+          {...register(name, rules)}
+          type="date"
+          className={`form-control ${hasError ? "is-invalid" : ""}`}
+          placeholder={placeholder}
+        />
+      ) : (
+        <input
+          {...register(name, rules)}
+          type={type}
+          className={`form-control ${hasError ? "is-invalid" : ""}`}
+          placeholder={placeholder}
+        />
+      )}
+      {hasError && <div className="invalid-feedback">{errors[name]?.message}</div>}
+    </div>
+  );
+};
+
+// IFSCSearch component
+const IFSCSearch = ({ fieldConfig, register, errors, setValue, trigger }) => {
+  const [bankDetails, setBankDetails] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  const fetchBankDetails = async (ifsc) => {
+    if (ifsc.length < 4) return;
+    
+    setLoading(true);
+    setError(null);
     try {
-      const endpoint = `${process.env.REACT_APP_APPLICATION_SERVICE}${URLS_ENDPOINT.APP_SERVICES.APPLICATION_FORMSUBMIT}`;
-      const response = await postData(endpoint, payload);
+      const response = await axios.get(`https://ifsc.razorpay.com/${ifsc}`);
+      setBankDetails(response.data);
       
-      if (response.data?.status?.code === "200") {
-        // Store the complete API response
-        setApiResponse(response.data);
-        if(currentStep === 4) {
-          localStorage.setItem('previewResponse', JSON.stringify(response.data));
-        }
-        
-        // Update form data with any IDs returned from the server
-        const serverUpdatedFormData = { ...updatedFormData };
-        
-        if (response.data.applicationDetails.uuid) {
-          serverUpdatedFormData.uuid = response.data.applicationDetails.uuid;
-        }
-        
-        if (response.data.applicationDetails.applicationNumber) {
-          serverUpdatedFormData.applicationNumber = response.data.applicationDetails.applicationNumber;
-        }
-        
-        if (response.data.applicationDetails.creditorBasicDetails?.uuid) {
-          serverUpdatedFormData.creditorBasicDetailsUuid = response.data.applicationDetails.creditorBasicDetails.uuid;
-        }
-        
-        if (response.data.applicationDetails.claimDetails?.uuid) {
-          serverUpdatedFormData.claimDetailsUuid = response.data.applicationDetails.claimDetails.uuid;
-        }
-        
-        if (response.data.applicationDetails.signatoryDetails?.uuid) {
-          serverUpdatedFormData.signatoryDetailsUuid = response.data.applicationDetails.signatoryDetails.uuid;
-        }
-        
-        if (response.data.applicationDetails.supportingDocument?.uuid) {
-          serverUpdatedFormData.supportingDocumentUuid = response.data.applicationDetails.supportingDocument.uuid;
-        }
-  
-        setFormData(serverUpdatedFormData);
-        localStorage.setItem('formData', JSON.stringify(serverUpdatedFormData));
-  
-        // Store application number if it's new
-        if (response.data.applicationDetails.applicationNumber) {
-          localStorage.setItem('applicationdatawithId', response.data.applicationDetails.applicationNumber);
-        }
-  
-        console.log('Application saved successfully', response.data);
-        toast.success(`Step ${currentStep} ${isEditMode ? 'updated' : 'saved'} successfully`);
-  
-        // Move to next step
-        setCurrentStep((prevStep) => prevStep + 1);
-        setHasPreviewed(true);
-      } else {
-        throw new Error(response.data?.status?.message || 'Failed to save step');
-      }
-    } catch (error) {
-      console.error('Error saving step:', error);
-      toast.error(`Failed to ${isEditMode ? 'update' : 'save'} step ${currentStep}: ${error.message}`);
+      setValue("bankName", response.data.BANK, { shouldValidate: true });
+      setValue("branchName", response.data.BRANCH, { shouldValidate: true });
+      setValue("branchAddress", `${response.data.ADDRESS}, ${response.data.CITY}, ${response.data.STATE}`, { shouldValidate: true });
+      setValue("city", response.data.CITY, { shouldValidate: true });
+      setValue("state", response.data.STATE, { shouldValidate: true });
+      setValue("district", response.data.DISTRICT, { shouldValidate: true });
+      
+      await Promise.all([
+        trigger("bankName"),
+        trigger("branchName"),
+        trigger("branchAddress"),
+        trigger("city"),
+        trigger("state"),
+        trigger("district")
+      ]);
+    } catch (err) {
+      setError("Invalid IFSC code or failed to fetch details");
+      setBankDetails(null);
+    } finally {
+      setLoading(false);
     }
   };
+
+  return (
+    <div className="form-group">
+      <label className="form-label">
+        {fieldConfig.label}
+        {fieldConfig.rules?.required && <span className="required-asterisk">*</span>}
+      </label>
+      <input
+        {...register(fieldConfig.name, fieldConfig.rules)}
+        type="text"
+        className={`form-control ${errors[fieldConfig.name] ? "is-invalid" : ""}`}
+        placeholder={fieldConfig.placeholder}
+        onChange={async (e) => {
+          setValue(fieldConfig.name, e.target.value.toUpperCase(), { shouldValidate: true });
+          await trigger(fieldConfig.name);
+          fetchBankDetails(e.target.value);
+        }}
+      />
+      {loading && <div className="loading-indicator">Loading bank details...</div>}
+      {error && <div className="invalid-feedback">{error}</div>}
+      {errors[fieldConfig.name] && (
+        <div className="invalid-feedback">{errors[fieldConfig.name].message}</div>
+      )}
+    </div>
+  );
+};
+
+const ClaimTypeFields = ({ 
+  claimType, 
+  control, 
+  register, 
+  errors, 
+  setValue, 
+  getValues, 
+  watch,
+  trigger
+}) => {
+  // Initialize state based on form values
+  const hasSecurityInterest = watch("hasSecurityInterest");
+  const hasGuarantee = watch("hasGuarantee");
+  
+  const [showSecurityFields, setShowSecurityFields] = useState(hasSecurityInterest === "yes");
+  const [showGuaranteeFields, setShowGuaranteeFields] = useState(hasGuarantee === "yes");
+
+  // Initialize entity data from existing data or create empty array
+  const [entityData, setEntityData] = useState(() => {
+    return getValues("entityData") || [{ id: 1, name: "", address: "", type: getEntityType(claimType) }];
+  });
+
+  // Function to get entity type based on claim type
+  function getEntityType(claimType) {
+    switch(claimType) {
+      case "PRINCIPAL_BORROWER": return "GUARANTOR";
+      case "GUARANTOR": return "PRINCIPAL_BORROWER";
+      case "BENEFICIARY": return "BENEFICIARY";
+      default: return "";
+    }
+  }
+
+  // Handle form value changes
+  useEffect(() => {
+    setShowSecurityFields(hasSecurityInterest === "yes");
+    setShowGuaranteeFields(hasGuarantee === "yes");
+  }, [hasSecurityInterest, hasGuarantee]);
+
+  const handleSecurityInterestChange = (value) => {
+    setShowSecurityFields(value === "yes");
+    if (value === "no") {
+      setValue("securityValue", "", { shouldValidate: false });
+      setValue("securityDate", "", { shouldValidate: false });
+    }
+  };
+
+  const handleGuaranteeChange = (value) => {
+    setShowGuaranteeFields(value === "yes");
+    if (value === "no") {
+      setValue("guaranteeValue", "", { shouldValidate: false });
+      setValue("guaranteeDate", "", { shouldValidate: false });
+    }
+  };
+
+  // Update form data when entity data changes
+  useEffect(() => {
+    setValue("entityData", entityData, { shouldValidate: true });
+  }, [entityData, setValue]);
+
+  const updateEntityDetails = (id, field, value) => {
+    const updatedEntities = entityData.map(entity => 
+      entity.id === id ? { ...entity, [field]: value } : entity
+    );
+    setEntityData(updatedEntities);
+  };
+
+  const addEntityField = () => {
+    const newId = entityData.length > 0 ? Math.max(...entityData.map(e => e.id)) + 1 : 1;
+    setEntityData([...entityData, { 
+      id: newId, 
+      name: "", 
+      address: "", 
+      type: getEntityType(claimType) 
+    }]);
+  };
+
+  const removeEntityField = (id) => {
+    if (entityData.length <= 1) return;
+    const updatedEntities = entityData.filter(entity => entity.id !== id);
+    setEntityData(updatedEntities);
+  };
+
+  const commonClaimFields = [
+    {
+      name: "claimAmount",
+      label: "Amount of claim",
+      type: "number",
+      rules: { 
+        required: "Claim amount is required",
+        min: { value: 1, message: "Amount must be greater than 0" }
+      },
+      placeholder: "Enter claim amount"
+    }
+  ];
+
+  const additionalFields = [
+    {
+      name: "hasSecurityInterest",
+      label: "Amount of claim covered by security interest",
+      type: "radio",
+      options: [
+        { value: "yes", label: "Yes" },
+        { value: "no", label: "No" }
+      ],
+      rules: { required: "This field is required" },
+      onChange: handleSecurityInterestChange,
+      show: claimType !== "BENEFICIARY"
+    },
+    {
+      name: "securityValue",
+      label: "Value of the security",
+      type: "number",
+      rules: showSecurityFields ? { 
+        required: "Security value is required",
+        min: { value: 1, message: "Value must be greater than 0" }
+      } : {},
+      placeholder: "Enter security value",
+      show: showSecurityFields && claimType !== "BENEFICIARY"
+    },
+    {
+      name: "securityDate",
+      label: "Date of the security",
+      type: "date",
+      rules: showSecurityFields ? { 
+        required: "Security date is required",
+        validate: value => {
+          const today = new Date().toISOString().split('T')[0];
+          return value <= today || "Date cannot be in the future";
+        }
+      } : {},
+      placeholder: "Select security date",
+      show: showSecurityFields && claimType !== "BENEFICIARY"
+    },
+    {
+      name: "hasGuarantee",
+      label: "Amount of claim covered by guarantee",
+      type: "radio",
+      options: [
+        { value: "yes", label: "Yes" },
+        { value: "no", label: "No" }
+      ],
+      rules: { required: "This field is required" },
+      onChange: handleGuaranteeChange,
+      show: claimType !== "BENEFICIARY"
+    },
+    {
+      name: "guaranteeValue",
+      label: "Value of the guarantee",
+      type: "number",
+      rules: showGuaranteeFields ? { 
+        required: "Guarantee value is required",
+        min: { value: 1, message: "Value must be greater than 0" }
+      } : {},
+      placeholder: "Enter guarantee value",
+      show: showGuaranteeFields && claimType !== "BENEFICIARY"
+    },
+    {
+      name: "guaranteeDate",
+      label: "Date of the guarantee",
+      type: "date",
+      rules: showGuaranteeFields ? { 
+        required: "Guarantee date is required",
+        validate: value => {
+          const today = new Date().toISOString().split('T')[0];
+          return value <= today || "Date cannot be in the future";
+        }
+      } : {},
+      placeholder: "Select guarantee date",
+      show: showGuaranteeFields && claimType !== "BENEFICIARY"
+    }
+  ];
+
+  const getEntityFieldLabels = () => {
+    switch (claimType) {
+      case "PRINCIPAL_BORROWER":
+        return {
+          nameLabel: "Name of the guarantor",
+          addressLabel: "Address of the guarantor"
+        };
+      case "GUARANTOR":
+        return {
+          nameLabel: "Name of the Principal Borrower",
+          addressLabel: "Address of the Principal Borrower"
+        };
+      case "BENEFICIARY":
+        return {
+          nameLabel: "Name of the Beneficiary",
+          addressLabel: "Address of the Beneficiary"
+        };
+      default:
+        return {
+          nameLabel: "Name",
+          addressLabel: "Address"
+        };
+    }
+  };
+
+  const { nameLabel, addressLabel } = getEntityFieldLabels();
+
+  return (
+    <div className="form-section">
+      {commonClaimFields.map((field) => (
+        <DynamicField
+          key={field.name}
+          fieldConfig={field}
+          control={control}
+          register={register}
+          errors={errors}
+          setValue={setValue}
+          getValues={getValues}
+          watch={watch}
+        />
+      ))}
+
+      {additionalFields.map((field) => (
+        <DynamicField
+          key={field.name}
+          fieldConfig={field}
+          control={control}
+          register={register}
+          errors={errors}
+          setValue={setValue}
+          getValues={getValues}
+          watch={watch}
+        />
+      ))}
+
+      {entityData.map((entity, index) => (
+        <div key={entity.id} className="entity-field-group mb-4 p-3 border rounded bg-light">
+          <div className="d-flex justify-content-between align-items-center mb-3">
+            <h6 className="mb-0">{claimType === "GUARANTOR" ? "Principal Borrower" : 
+                      claimType === "PRINCIPAL_BORROWER" ? "Guarantor" : "Beneficiary"} {index + 1}</h6>
+            {entityData.length > 1 && (
+              <button
+                type="button"
+                className="btn btn-sm btn-danger"
+                onClick={() => removeEntityField(entity.id)}
+              >
+                <FaMinus className="me-1" /> Remove
+              </button>
+            )}
+          </div>
+          
+          <div className="row g-3">
+            <div className="col-12">
+              <label className="form-label">
+                {nameLabel} <span className="required-asterisk">*</span>
+              </label>
+              <input
+                type="text"
+                className={`form-control ${errors.entityData?.[index]?.name ? "is-invalid" : ""}`}
+                value={entity.name || ""}
+                onChange={(e) => updateEntityDetails(entity.id, "name", e.target.value)}
+                placeholder={`Enter ${nameLabel.toLowerCase()}`}
+              />
+              {errors.entityData?.[index]?.name && (
+                <div className="invalid-feedback">{errors.entityData[index].name.message}</div>
+              )}
+            </div>
+            
+            <div className="col-12">
+              <label className="form-label">
+                {addressLabel} <span className="required-asterisk">*</span>
+              </label>
+              <input
+                type="text"
+                className={`form-control ${errors.entityData?.[index]?.address ? "is-invalid" : ""}`}
+                value={entity.address || ""}
+                onChange={(e) => updateEntityDetails(entity.id, "address", e.target.value)}
+                placeholder={`Enter ${addressLabel.toLowerCase()}`}
+              />
+              {errors.entityData?.[index]?.address && (
+                <div className="invalid-feedback">{errors.entityData[index].address.message}</div>
+              )}
+            </div>
+          </div>
+        </div>
+      ))}
+
+      <button 
+        type="button" 
+        className="btn btn-outline-primary btn-sm add-more-btn"
+        onClick={addEntityField}
+      >
+        <FaPlus className="me-2" /> Add {claimType === "GUARANTOR" ? "Principal Borrower" : 
+                      claimType === "PRINCIPAL_BORROWER" ? "Guarantor" : "Beneficiary"}
+      </button>
+    </div>
+  );
+};
+
+const FormCDetails = ({ provideSubmitHandler, formData, onValidationComplete }) => {
+  const methods = useForm({ mode: "onChange" });
+  const { 
+    register, 
+    handleSubmit, 
+    formState: { errors, isValid }, 
+    control, 
+    setValue, 
+    getValues, 
+    watch, 
+    reset, 
+    trigger 
+  } = methods;
+  
+  const [selectedClaimType, setSelectedClaimType] = useState("");
+
+  const bankAccountFields = [
+    {
+      name: "accountNumber",
+      label: "Account Number",
+      type: "text",
+      rules: { 
+        required: "Account number is required",
+        pattern: {
+          value: /^[0-9]{9,18}$/,
+          message: "Account number must be 9-18 digits"
+        }
+      },
+      placeholder: "Enter account number"
+    },
+    {
+      name: "ifscCode",
+      label: "IFSC Code",
+      type: "text",
+      rules: { 
+        required: "IFSC code is required",
+        pattern: {
+          value: /^[A-Za-z]{4}0[A-Za-z0-9]{6}$/,
+          message: "Invalid IFSC code format (e.g., ABCD0123456)"
+        }
+      },
+      placeholder: "Enter IFSC code (e.g., ABCD0123456)",
+      component: IFSCSearch
+    },
+    {
+      name: "bankName",
+      label: "Bank Name",
+      type: "text",
+      rules: { required: "Bank name is required" },
+      placeholder: "Enter bank name"
+    },
+    {
+      name: "branchName",
+      label: "Branch Name",
+      type: "text",
+      rules: { required: "Branch name is required" },
+      placeholder: "Enter branch name"
+    },
+    {
+      name: "branchAddress",
+      label: "Branch Address",
+      type: "text",
+      rules: { required: "Branch address is required" },
+      placeholder: "Enter branch address"
+    },
+    {
+      name: "city",
+      label: "City",
+      type: "text",
+      rules: { required: "City is required" },
+      placeholder: "Enter city"
+    },
+    {
+      name: "state",
+      label: "State",
+      type: "text",
+      rules: { required: "State is required" },
+      placeholder: "Enter state"
+    },
+    {
+      name: "district",
+      label: "District",
+      type: "text",
+      rules: { required: "District is required" },
+      placeholder: "Enter district"
+    }
+  ];
+
+  const claimTypeOptions = [
+    { value: "", label: "Select Claim Type", disabled: true },
+    { value: "PRINCIPAL_BORROWER", label: "Corporate Debtor as Principal Borrower" },
+    { value: "GUARANTOR", label: "Corporate Debtor as Guarantor" },
+    { value: "BENEFICIARY", label: "Financial Debt Covered" },
+  ];
+
+  const onSubmit = useCallback(async () => {
+    const isValid = await trigger();
+    if (!isValid) {
+      console.error("Validation failed");
+      return false;
+    }
+    
+    // Get all form values including entity data
+    const formValues = getValues();
+    
+    // Log the complete form data with entity data
+    console.log("Form Submit Data with Entity Data:", formValues);
+    
+    return formValues;
+  }, [trigger, getValues]);
+
+  useEffect(() => {
+    if (formData) {
+      Object.keys(formData).forEach((key) => {
+        setValue(key, formData[key]);
+      });
+      if (formData.claimType) {
+        setSelectedClaimType(formData.claimType);
+      }
+    }
+  }, [formData, setValue]);
+
+  // Function to get entity type based on claim type
+  function getEntityTypeFromClaimType(claimType) {
+    switch(claimType) {
+      case "PRINCIPAL_BORROWER": return "GUARANTOR";
+      case "GUARANTOR": return "PRINCIPAL_BORROWER";
+      case "BENEFICIARY": return "BENEFICIARY";
+      default: return "";
+    }
+  }
+
+  const handleClaimTypeChange = async (value) => {
+    setSelectedClaimType(value);
+    
+    const baseReset = {
+      claimType: value,
+      claimAmount: "",
+      hasSecurityInterest: "",
+      hasGuarantee: "",
+      securityValue: "",
+      securityDate: "",
+      guaranteeValue: "",
+      guaranteeDate: "",
+      entityData: [{ id: 1, name: "", address: "", type: getEntityTypeFromClaimType(value) }]
+    };
+
+    reset(baseReset);
+    await trigger();
+  };
+
+  const getClaimTitle = () => {
+    switch (selectedClaimType) {
+      case "PRINCIPAL_BORROWER":
+        return " Corporate Debtor as Principal Borrower";
+      case "GUARANTOR":
+        return " Corporate Debtor as Guarantor";
+      case "BENEFICIARY":
+        return " Financial Debt Covered";
+      default:
+        return "Claim Details";
+    }
+  };
+
+  useEffect(() => {
+    if (provideSubmitHandler) {
+      provideSubmitHandler(onSubmit);
+    }
+  }, [provideSubmitHandler, onSubmit]);
+
+  return (
+    <FormProvider {...methods}>
+      <form className="form-stepper">
+        {/* Claim Details Section */}
+        <div className="form-section-container mb-4 bg-white p-4 rounded-3 shadow-sm">
+          <Collapsible 
+            title={
+              <div className="section-header d-flex align-items-center">
+                <FaFileAlt className="section-icon me-2" />
+                <span>Details of Claim</span>
+              </div>
+            } 
+            defaultOpen={true}
+            iconColor="#269ccc"
+          >
+            <div className="container-fluid">
+              <div className="row g-3">
+                {/* Claim Type Dropdown */}
+                <div className="col-md-6">
+                  <div className="form-group">
+                    <label className="form-label">
+                      <FaMoneyBillWave className="field-icon me-2" />
+                      Select Claim Type <span className="required-asterisk">*</span>
+                    </label>
+                    <select
+                      {...register("claimType", { required: "Claim type is required" })}
+                      className={`form-control ${errors.claimType ? "is-invalid" : ""}`}
+                      onChange={(e) => handleClaimTypeChange(e.target.value)}
+                      value={selectedClaimType}
+                    >
+                      {claimTypeOptions.map((option) => (
+                        <option key={option.value} value={option.value} disabled={option.disabled}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                    {errors.claimType && <div className="invalid-feedback">{errors.claimType.message}</div>}
+                  </div>
+                </div>
+              </div>
+
+              {/* Claim Type Specific Fields */}
+              {selectedClaimType && (
+                <ClaimTypeFields
+                  claimType={selectedClaimType}
+                  control={control}
+                  register={register}
+                  errors={errors}
+                  setValue={setValue}
+                  getValues={getValues}
+                  watch={watch}
+                  trigger={trigger}
+                />
+              )}
+
+              <div className="row g-3 mt-3">
+                {/* Details of How Debt Incurred */}
+                <div className="col-md-12">
+                  <div className="form-group">
+                    <label className="form-label">
+                      <FaFileAlt className="field-icon me-2" />
+                      Details of how debt incurred <span className="required-asterisk">*</span>
+                    </label>
+                    <textarea
+                      {...register("debtDetails", { required: "This field is required" })}
+                      className={`form-control ${errors.debtDetails ? "is-invalid" : ""}`}
+                      placeholder="Enter details of how debt was incurred"
+                      rows={3}
+                    />
+                    {errors.debtDetails && <div className="invalid-feedback">{errors.debtDetails.message}</div>}
+                  </div>
+                </div>
+
+                {/* Date of Debt Incurred */}
+                <div className="col-md-6">
+                  <div className="form-group">
+                    <label className="form-label">
+                      <FaCalendarAlt className="field-icon me-2" />
+                      Date of debt incurred <span className="required-asterisk">*</span>
+                    </label>
+                    <input
+                      {...register("debtDate", {
+                        required: "This field is required",
+                        validate: (value) => {
+                          const today = new Date().toISOString().split("T")[0];
+                          return value <= today || "Date cannot be in the future";
+                        },
+                      })}
+                      type="date"
+                      className={`form-control ${errors.debtDate ? "is-invalid" : ""}`}
+                      placeholder="Select date"
+                    />
+                    {errors.debtDate && <div className="invalid-feedback">{errors.debtDate.message}</div>}
+                  </div>
+                </div>
+
+                {/* Mutual Dealings */}
+                <div className="col-md-12">
+                  <div className="form-group">
+                    <label className="form-label">
+                      <FaHandshake className="field-icon me-2" />
+                      Details of any mutual credit, mutual debts, or other mutual dealings
+                    </label>
+                    <textarea
+                      {...register("mutualDetails")}
+                      className="form-control"
+                      placeholder="Enter details of any mutual dealings"
+                      rows={5}
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+          </Collapsible>
+        </div>
+
+        {/* Bank Account Details Section */}
+        <div className="form-section-container mb-4 bg-white p-4 rounded-3 shadow-sm">
+          <Collapsible 
+            title={
+              <div className="section-header d-flex align-items-center">
+                <BsBank2 className="section-icon me-2" />
+                <span>Bank Account Details</span>
+              </div>
+            } 
+            defaultOpen={true}
+            iconColor="#269ccc"
+          >
+            <div className="container-fluid">
+              <div className="row g-3">
+                {bankAccountFields.map((field) =>
+                  field.component ? (
+                    <div key={field.name} className="col-md-6">
+                      <field.component
+                        fieldConfig={field}
+                        register={register}
+                        errors={errors}
+                        setValue={setValue}
+                        trigger={trigger}
+                      />
+                    </div>
+                  ) : (
+                    <div key={field.name} className="col-md-6">
+                      <div className="form-group">
+                        <label className="form-label">
+                          {field.name === "accountNumber" && <FaUniversity className="field-icon me-2" />}
+                          {field.name === "ifscCode" && <GiBank className="field-icon me-2" />}
+                          {field.name === "bankName" && <FaLandmark className="field-icon me-2" />}
+                          {field.name === "branchName" && <BsBuilding className="field-icon me-2" />}
+                          {field.name === "branchAddress" && <FaMapMarkerAlt className="field-icon me-2" />}
+                          {field.name === "city" && <FaCity className="field-icon me-2" />}
+                          {field.name === "state" && <FaGlobeAmericas className="field-icon me-2" />}
+                          {field.name === "district" && <FaMapMarkerAlt className="field-icon me-2" />}
+                          {field.label} {field.rules?.required && <span className="required-asterisk">*</span>}
+                        </label>
+                        <input
+                          {...register(field.name, field.rules)}
+                          type={field.type || "text"}
+                          className={`form-control ${errors[field.name] ? "is-invalid" : ""}`}
+                          placeholder={field.placeholder}
+                        />
+                        {errors[field.name] && (
+                          <div className="invalid-feedback">{errors[field.name].message}</div>
+                        )}
+                      </div>
+                    </div>
+                  )
+                )}
+              </div>
+            </div>
+          </Collapsible>
+        </div>
+      </form>
+    </FormProvider>
+  );
+};
+
+export default FormCDetails;
