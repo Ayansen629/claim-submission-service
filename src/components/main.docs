@@ -1,174 +1,273 @@
-// Modified IFSCSearch component with disabled support
-const ModifiedIFSCSearch = ({ fieldConfig, register, errors, setValue, trigger }) => {
-  const [bankDetails, setBankDetails] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
-  const [isCRPUser, setIsCRPUser] = useState(false);
+import React, { useCallback, useEffect, useState } from "react";
+import { useForm, FormProvider } from "react-hook-form";
+import DynamicField from "./formCommon/DynamicField";
+import Collapsible from "./formCommon/Collapsible";
+import { FaSignature, FaUserTie, FaHome, FaUpload, FaCheckCircle } from "react-icons/fa";
+import { MdDescription } from "react-icons/md";
+import 'bootstrap/dist/css/bootstrap.min.css';
+import { uploadDocument } from "../../../services/documentUploadService";
+import "./StepThird.css";
 
-  // Check if user is CRP
-  useEffect(() => {
-    const storedData = localStorage.getItem('userFormData');
-    if (storedData) {
-      const parsedData = JSON.parse(storedData);
-      setIsCRPUser(parsedData?.userType === "CRP");
-    }
-  }, []);
-
-  const fetchBankDetails = async (ifsc) => {
-    if (ifsc.length < 4 || isCRPUser) return;
+const StepThird = ({ provideSubmitHandler, formData, onValidationComplete }) => {
+    const methods = useForm({
+        mode: "onChange",
+        reValidateMode: "onChange"
+    });
     
-    setLoading(true);
-    setError(null);
-    try {
-      const response = await axios.get(`https://ifsc.razorpay.com/${ifsc}`);
-      setBankDetails(response.data);
-      
-      setValue("bankName", response.data.BANK, { shouldValidate: true });
-      setValue("branchName", response.data.BRANCH, { shouldValidate: true });
-      setValue("branchAddress", `${response.data.ADDRESS}, ${response.data.CITY}, ${response.data.STATE}`, { shouldValidate: true });
-      setValue("city", response.data.CITY, { shouldValidate: true });
-      setValue("state", response.data.STATE, { shouldValidate: true });
-      setValue("district", response.data.DISTRICT, { shouldValidate: true });
-      
-      await Promise.all([
-        trigger("bankName"),
-        trigger("branchName"),
-        trigger("branchAddress"),
-        trigger("city"),
-        trigger("state"),
-        trigger("district")
-      ]);
-    } catch (err) {
-      setError("Invalid IFSC code or failed to fetch details");
-      setBankDetails(null);
-    } finally {
-      setLoading(false);
-    }
-  };
+    const { 
+        register, 
+        handleSubmit, 
+        formState: { errors, isValid }, 
+        trigger, 
+        setValue, 
+        control, 
+        getValues,
+        watch
+    } = methods;
 
-  return (
-    <div className="form-group">
-      <label className="form-label">
-        <GiBank className="field-icon me-2" />
-        {fieldConfig.label}
-        {fieldConfig.rules?.required && <span className="required-asterisk">*</span>}
-      </label>
-      <input
-        {...register(fieldConfig.name, fieldConfig.rules)}
-        type="text"
-        className={`form-control ${errors[fieldConfig.name] ? "is-invalid" : ""}`}
-        placeholder={fieldConfig.placeholder}
-        onChange={async (e) => {
-          setValue(fieldConfig.name, e.target.value.toUpperCase(), { shouldValidate: true });
-          await trigger(fieldConfig.name);
-          if (!isCRPUser) {
-            fetchBankDetails(e.target.value);
-          }
-        }}
-        disabled={isCRPUser}
-      />
-      {loading && <div className="loading-indicator">Loading bank details...</div>}
-      {error && <div className="invalid-feedback">{error}</div>}
-      {errors[fieldConfig.name] && (
-        <div className="invalid-feedback">{errors[fieldConfig.name].message}</div>
-      )}
-    </div>
-  );
-};
+    const [hasSignature, setHasSignature] = useState(false);
+    const watchAllFields = watch();
+    const [isUploading, setIsUploading] = useState(false);
+    const [uploadError, setUploadError] = useState(null);
+    const [uploadSuccess, setUploadSuccess] = useState(false);
 
+    const handleFileUpload = async (file) => {
+        try {
+            setIsUploading(true);
+            setUploadError(null);
+            setUploadSuccess(false);
+            const result = await uploadDocument(file, 'identification');
+            setUploadSuccess(true);
+            return result;
+        } catch (error) {
+            setUploadError(error.message);
+            throw error;
+        } finally {
+            setIsUploading(false);
+        }
+    };
 
-////////////////////////
-const FormCDetails = ({ provideSubmitHandler, formData, onValidationComplete }) => {
-  const methods = useForm({ mode: "onChange" });
-  const { 
-    register, 
-    handleSubmit, 
-    formState: { errors, isValid }, 
-    control, 
-    setValue, 
-    getValues, 
-    watch, 
-    reset, 
-    trigger 
-  } = methods;
-  
-  const [selectedClaimType, setSelectedClaimType] = useState("");
-  const [isCRPUser, setIsCRPUser] = useState(false);
-
-  // Check if user is CRP
-  useEffect(() => {
-    const storedData = localStorage.getItem('userFormData');
-    if (storedData) {
-      const parsedData = JSON.parse(storedData);
-      setIsCRPUser(parsedData?.userType === "CRP");
-    }
-  }, []);
-
-  // Rest of the component remains the same...
-
-  return (
-    <FormProvider {...methods}>
-      <form className="form-stepper">
-        {/* ... */}
+    const creditorDetailsSchema = [
+       { 
+                  name: "creditorName", 
+                  label: <>
+                      <FaUserTie className="field-icon" />
+                      Name of financial creditor (in BLOCK LETTERS) <span className="required-asterisk">*</span>
+                  </>, 
+                  type: "text", 
+                  rules: { 
+                      required: "Creditor name is required",
+                      pattern: {
+                          value: /^[A-Z\s]+$/,
+                          message: "Please enter in BLOCK LETTERS only"
+                      },
+                      minLength: {
+                          value: 3,
+                          message: "Name must be at least 3 characters"
+                      }
+                  },
+                  placeholder: "Enter name in BLOCK LETTERS",
+                  className: "mb-4 creditor-name-field",
+                  onChange: async (e) => {
+                      await trigger("creditorName");
+                  },
+                  colSize: 6
+              },
+              { 
+                  name: "creditorPosition", 
+                  label: <>
+                      <MdDescription className="field-icon" />
+                      Position with or in relation to creditor <span className="required-asterisk">*</span>
+                  </>, 
+                  type: "text", 
+                  rules: { 
+                      required: "Position is required",
+                      minLength: {
+                          value: 3,
+                          message: "Position must be at least 3 characters"
+                      }
+                  },
+                  placeholder: "Enter position/relation to creditor",
+                  className: "mb-4 creditor-position-field",
+                  onChange: async (e) => {
+                      await trigger("creditorPosition");
+                  },
+                  colSize: 6
+              },
+        { 
+            name: "creditorSignatureText", 
+            label: <>
+                <FaSignature className="field-icon" />
+                Signature of financial creditor <span className="required-asterisk">*</span>
+            </>, 
+            type: "text", 
+            rules: { 
+                required: "Signature is required",
+                minLength: {
+                    value: 3,
+                    message: "Signature must be at least 3 characters"
+                }
+            },
+            placeholder: "Enter signature text",
+            className: "mb-4",
+            onChange: async (e) => {
+                await trigger("creditorSignatureText");
+            },
+            colSize: 6
+        },
+        { 
+            name: "creditorAddress", 
+            label: <>
+                <FaHome className="field-icon" />
+                Address of person signing <span className="required-asterisk">*</span>
+            </>, 
+            type: "textarea",
+            rules: { 
+                required: "Address is required",
+                minLength: {
+                    value: 10,
+                    message: "Address must be at least 10 characters"
+                }
+            },
+            placeholder: "Enter complete address",
+            className: "mb-4",
+            rows: 3,
+            onChange: async (e) => {
+                await trigger("creditorAddress");
+            },
+            colSize: 12
+        },
+        { 
+            name: "hasSignature", 
+            label: <>
+                <FaUpload className="field-icon" />
+                Do you have a signature to upload?
+            </>, 
+            type: "radio", 
+            options: [
+                { value: "yes", label: "Yes" },
+                { value: "no", label: "No" }
+            ],
+            rules: { required: "Please select an option" },
+            className: "mb-4",
+            onChange: (e) => {
+                setHasSignature(e.target.value === "yes");
+                setValue("signatureFile", null);
+                setUploadSuccess(false);
+            },
+            colSize: 6,
+            inline: true
+        },
         
-        {/* Bank Account Details Section */}
-        <div className="form-section-container mb-4 bg-white p-4 rounded-3 shadow-sm">
-          <Collapsible 
-            title={
-              <div className="section-header d-flex align-items-center">
-                <BsBank2 className="section-icon me-2" />
-                <span>Bank Account Details</span>
-              </div>
-            } 
-            defaultOpen={true}
-            iconColor="#269ccc"
-          >
-            <div className="container-fluid">
-              <div className="row g-3">
-                {bankAccountFields.map((field) =>
-                  field.component ? (
-                    <div key={field.name} className="col-md-6">
-                      <field.component
-                        fieldConfig={field}
-                        register={register}
-                        errors={errors}
-                        setValue={setValue}
-                        trigger={trigger}
-                      />
+        ...(hasSignature ? [{
+            name: "signatureFile",
+            label: <>
+                <FaSignature className="field-icon" />
+                Upload Signature <span className="required-asterisk">*</span>
+            </>,
+            type: "file",
+            rules: { 
+                required: "Signature file is required",
+                validate: {
+                    fileSize: (files) => {
+                        if (files && files[0]) {
+                            const fileSizeInMB = files[0].size / (1024 * 1024);
+                            return fileSizeInMB <= 5 || "File size must be ≤ 5MB";
+                        }
+                        return true;
+                    }
+                }
+            },
+            accept: ".jpg,.jpeg,.png,.pdf",
+            onFileUpload: handleFileUpload,
+            isUploading,
+            uploadError,
+            uploadSuccess,
+            note: "Max file size: 5MB (PDF, JPEG, PNG)",
+            className: "mb-4 border p-3 rounded",
+            colSize: 6
+        }] : [])
+    ];
+
+    const onSubmit = useCallback(async () => {
+        const isValid = await trigger();
+        
+        if (!isValid) {
+            const errorField = Object.keys(errors)[0];
+            if (errorField) {
+                document.querySelector(`[name="${errorField}"]`)?.scrollIntoView({ 
+                    behavior: 'smooth', 
+                    block: 'center' 
+                });
+            }
+            return false;
+        }
+        
+        return getValues();
+    }, [trigger, getValues, errors]);
+
+    useEffect(() => {
+        if (formData) {
+            Object.keys(formData).forEach((key) => {
+                setValue(key, formData[key], { shouldValidate: true });
+            });
+            if (formData.hasSignature) {
+                setHasSignature(formData.hasSignature === "yes");
+            }
+        }
+    }, [formData, setValue]);
+
+    useEffect(() => {
+        if (provideSubmitHandler) {
+            provideSubmitHandler(onSubmit);
+        }
+    }, [provideSubmitHandler, onSubmit]);
+
+    return (
+       <FormProvider {...methods}>
+                <form className="form-stepper">
+                    <div className="form-section-container">
+                        <Collapsible 
+                            title={
+                                <div className="section-header">
+                                    <FaSignature className="section-icon" />
+                                    <span>Signature of financial creditor or person authorised to act on its behalf</span>
+                                </div>
+                            } 
+                            defaultOpen={true}
+                        >
+                            <div className="row g-3 align-items-start">
+                                {creditorDetailsSchema.map((fieldConfig) => (
+                                    <div 
+                                        key={fieldConfig.name} 
+                                        className={`col-md-${fieldConfig.colSize || 12} ${fieldConfig.className}`}
+                                    >
+                                        <DynamicField
+                                            fieldConfig={{
+                                                ...fieldConfig,
+                                                isUploading,
+                                                uploadError,
+                                                uploadSuccess,
+                                                setIsUploading,
+                                                setUploadError,
+                                                setUploadSuccess,
+                                                onFileUpload: handleFileUpload
+                                            }}
+                                            control={control}
+                                            register={register}
+                                            errors={errors}
+                                            setValue={setValue}
+                                            trigger={trigger}
+                                            getValues={getValues}
+                                        />
+                                    </div>
+                                ))}
+                            </div>
+                        </Collapsible>
                     </div>
-                  ) : (
-                    <div key={field.name} className="col-md-6">
-                      <div className="form-group">
-                        <label className="form-label">
-                          {field.name === "accountNumber" && <FaUniversity className="field-icon me-2" />}
-                          {field.name === "ifscCode" && <GiBank className="field-icon me-2" />}
-                          {field.name === "bankName" && <FaLandmark className="field-icon me-2" />}
-                          {field.name === "branchName" && <BsBuilding className="field-icon me-2" />}
-                          {field.name === "branchAddress" && <FaMapMarkerAlt className="field-icon me-2" />}
-                          {field.name === "city" && <FaCity className="field-icon me-2" />}
-                          {field.name === "state" && <FaGlobeAmericas className="field-icon me-2" />}
-                          {field.name === "district" && <FaMapMarkerAlt className="field-icon me-2" />}
-                          {field.label} {field.rules?.required && <span className="required-asterisk">*</span>}
-                        </label>
-                        <input
-                          {...register(field.name, field.rules)}
-                          type={field.type || "text"}
-                          className={`form-control ${errors[field.name] ? "is-invalid" : ""}`}
-                          placeholder={field.placeholder}
-                          disabled={isCRPUser}
-                        />
-                        {errors[field.name] && (
-                          <div className="invalid-feedback">{errors[field.name].message}</div>
-                        )}
-                      </div>
-                    </div>
-                  )
-                )}
-              </div>
-            </div>
-          </Collapsible>
-        </div>
-      </form>
-    </FormProvider>
-  );
+                </form>
+            </FormProvider>
+    );
 };
+
+export default StepThird;
