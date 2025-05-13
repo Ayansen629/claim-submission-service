@@ -8,10 +8,13 @@ const ClaimTypeFields = ({
   watch,
   trigger
 }) => {
-  // Initialize state based on form values
+  // Watch form values
   const hasSecurityInterest = watch("hasSecurityInterest");
   const hasGuarantee = watch("hasGuarantee");
+  const currentClaimType = watch("claimType");
+  const formEntityData = watch("entityData");
   
+  // State for showing/hiding fields
   const [showSecurityFields, setShowSecurityFields] = useState(hasSecurityInterest === "yes");
   const [showGuaranteeFields, setShowGuaranteeFields] = useState(hasGuarantee === "yes");
 
@@ -25,10 +28,7 @@ const ClaimTypeFields = ({
     }
   };
 
-  const currentClaimType = watch("claimType");
-  const formEntityData = watch("entityData");
-  
-  // Initialize entity data with correct types
+  // Initialize entity data
   const [entityData, setEntityData] = useState(() => {
     const existingData = getValues("entityData");
     if (existingData && existingData.length > 0) {
@@ -42,18 +42,51 @@ const ClaimTypeFields = ({
     }];
   });
 
+  // Handle security interest change
+  const handleSecurityInterestChange = async (value) => {
+    const wasYes = hasSecurityInterest === "yes";
+    const isNo = value === "no";
+    
+    setShowSecurityFields(value === "yes");
+    
+    if (wasYes && isNo) {
+      // Clear fields when switching from Yes to No
+      setValue("securityValue", "");
+      setValue("securityDate", "");
+      
+      // Trigger validation to clear any errors
+      await trigger(["securityValue", "securityDate"]);
+    }
+  };
+
+  // Handle guarantee change
+  const handleGuaranteeChange = async (value) => {
+    const wasYes = hasGuarantee === "yes";
+    const isNo = value === "no";
+    
+    setShowGuaranteeFields(value === "yes");
+    
+    if (wasYes && isNo) {
+      // Clear fields when switching from Yes to No
+      setValue("guaranteeValue", "");
+      setValue("guaranteeDate", "");
+      
+      // Trigger validation to clear any errors
+      await trigger(["guaranteeValue", "guaranteeDate"]);
+    }
+  };
+
   // Update entity types when claimType changes
   useEffect(() => {
     if (claimType) {
-      setEntityData(prev => {
-        return prev.map(entity => ({
-          ...entity,
-          type: getEntityType(claimType)
-        }));
-      });
+      setEntityData(prev => prev.map(entity => ({
+        ...entity,
+        type: getEntityType(claimType)
+      })));
     }
   }, [claimType]);
 
+  // Reset entity data when claim type changes
   useEffect(() => {
     setEntityData([{ 
       id: 1, 
@@ -69,31 +102,13 @@ const ClaimTypeFields = ({
     }]);
   }, [currentClaimType, setValue]);
 
-  // Handle form value changes
+  // Sync show/hide states with form values
   useEffect(() => {
     setShowSecurityFields(hasSecurityInterest === "yes");
     setShowGuaranteeFields(hasGuarantee === "yes");
   }, [hasSecurityInterest, hasGuarantee]);
 
-  const handleSecurityInterestChange = (value) => {
-    setShowSecurityFields(value === "yes");
-    if (value === "no") {
-      setValue("securityValue", "");
-      setValue("securityDate", "");
-      trigger(["securityValue", "securityDate"]);
-    }
-  };
-
-  const handleGuaranteeChange = (value) => {
-    setShowGuaranteeFields(value === "yes");
-    if (value === "no") {
-      setValue("guaranteeValue", "");
-      setValue("guaranteeDate", "");
-      trigger(["guaranteeValue", "guaranteeDate"]);
-    }
-  };
-
-  // Sync entityData with form values when claimType changes or when form data loads
+  // Sync entityData with form values
   useEffect(() => {
     if (formEntityData && formEntityData.length > 0) {
       setEntityData(formEntityData);
@@ -109,68 +124,10 @@ const ClaimTypeFields = ({
     }
   }, [currentClaimType, formEntityData, setValue]);
 
-  // Update form data when entity data changes
+  // Update form when entity data changes
   useEffect(() => {
     setValue("entityData", entityData, { shouldValidate: true });
   }, [entityData, setValue]);
-
-  const updateEntityDetails = (id, field, value) => {
-    const updatedEntities = entityData.map(entity => 
-      entity.id === id ? { ...entity, [field]: value } : entity
-    );
-    setEntityData(updatedEntities);
-  };
-
-  const addEntityField = () => {
-    const newId = entityData.length > 0 ? Math.max(...entityData.map(e => e.id)) + 1 : 1;
-    setEntityData([...entityData, { 
-      id: newId, 
-      name: "", 
-      address: "", 
-      type: getEntityType(claimType) 
-    }]);
-  };
-
-  const removeEntityField = (id) => {
-    if (entityData.length <= 1) return;
-    const updatedEntities = entityData.filter(entity => entity.id !== id);
-    setEntityData(updatedEntities);
-  };
-
-  const getEntityFieldLabels = () => {
-    switch (claimType) {
-      case "PRINCIPAL_BORROWER":
-        return {
-          nameLabel: "Name of the guarantor",
-          addressLabel: "Address of the guarantor",
-          sectionTitle: "Guarantor Details",
-          addButtonText: "Add Guarantor"
-        };
-      case "GUARANTOR":
-        return {
-          nameLabel: "Name of the Principal Borrower",
-          addressLabel: "Address of the Principal Borrower",
-          sectionTitle: "Principal Borrower Details",
-          addButtonText: "Add Principal Borrower"
-        };
-      case "BENEFICIARY":
-        return {
-          nameLabel: "Name of the Beneficiary",
-          addressLabel: "Address of the Beneficiary",
-          sectionTitle: "Beneficiary Details",
-          addButtonText: "Add Beneficiary"
-        };
-      default:
-        return {
-          nameLabel: "Name",
-          addressLabel: "Address",
-          sectionTitle: "Entity Details",
-          addButtonText: "Add Entity"
-        };
-    }
-  };
-
-  const { nameLabel, addressLabel, sectionTitle, addButtonText } = getEntityFieldLabels();
 
   // Field configurations
   const fieldConfigurations = [
@@ -303,6 +260,9 @@ const ClaimTypeFields = ({
                     {...register(field.name, field.validation)}
                     value={option.value}
                     className="custom-radio-input"
+                    onChange={(e) => {
+                      if (field.onChange) field.onChange(e.target.value);
+                    }}
                   />
                   <label htmlFor={`${field.name}${option.value}`} className="custom-radio-label">
                     {option.label}
@@ -314,9 +274,7 @@ const ClaimTypeFields = ({
           </div>
         );
       
-      case "number":
-      case "text":
-      case "date":
+      default:
         return (
           <div className="form-group">
             <label className="form-label">
@@ -332,10 +290,67 @@ const ClaimTypeFields = ({
             {errors[field.name] && <div className="invalid-feedback">{errors[field.name].message}</div>}
           </div>
         );
-      
-      default:
-        return null;
     }
+  };
+
+  // Get entity field labels based on claim type
+  const getEntityFieldLabels = () => {
+    switch (claimType) {
+      case "PRINCIPAL_BORROWER":
+        return {
+          nameLabel: "Name of the guarantor",
+          addressLabel: "Address of the guarantor",
+          sectionTitle: "Guarantor Details",
+          addButtonText: "Add Guarantor"
+        };
+      case "GUARANTOR":
+        return {
+          nameLabel: "Name of the Principal Borrower",
+          addressLabel: "Address of the Principal Borrower",
+          sectionTitle: "Principal Borrower Details",
+          addButtonText: "Add Principal Borrower"
+        };
+      case "BENEFICIARY":
+        return {
+          nameLabel: "Name of the Beneficiary",
+          addressLabel: "Address of the Beneficiary",
+          sectionTitle: "Beneficiary Details",
+          addButtonText: "Add Beneficiary"
+        };
+      default:
+        return {
+          nameLabel: "Name",
+          addressLabel: "Address",
+          sectionTitle: "Entity Details",
+          addButtonText: "Add Entity"
+        };
+    }
+  };
+
+  const { nameLabel, addressLabel, sectionTitle, addButtonText } = getEntityFieldLabels();
+
+  // Entity field management functions
+  const updateEntityDetails = (id, field, value) => {
+    const updatedEntities = entityData.map(entity => 
+      entity.id === id ? { ...entity, [field]: value } : entity
+    );
+    setEntityData(updatedEntities);
+  };
+
+  const addEntityField = () => {
+    const newId = entityData.length > 0 ? Math.max(...entityData.map(e => e.id)) + 1 : 1;
+    setEntityData([...entityData, { 
+      id: newId, 
+      name: "", 
+      address: "", 
+      type: getEntityType(claimType) 
+    }]);
+  };
+
+  const removeEntityField = (id) => {
+    if (entityData.length <= 1) return;
+    const updatedEntities = entityData.filter(entity => entity.id !== id);
+    setEntityData(updatedEntities);
   };
 
   return (
@@ -348,7 +363,7 @@ const ClaimTypeFields = ({
         ))}
       </div>
 
-      {/* Entity Fields */}
+      {/* Entity Fields Section */}
       <div className="entity-fields-container mt-4">
         <h5 className="mb-3">{sectionTitle}</h5>
         
