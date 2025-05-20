@@ -1,47 +1,790 @@
-// Update the search input container in ActionTable.jsx
-<div
-  className={`row px-1 ${style.application_search} ${
-    props?.hideSearchBar
-      ? "justify-content-end mb-1"
-      : "justify-content-between"
-  }`}
->
-  <div
-    className="col-sm-6 my-1 fw-bold"
-    style={{ width: "fit-content" }}
-  >
-    {props?.tableHeader ? props?.tableHeader : ""}
-  </div>
-  {props?.filters && (
-    <div className="col-sm-6 my-1" style={{ width: "fit-content" }}>
-      {props.filters()}
-    </div>
-  )}
+import React from "react";
+import { useState, useEffect, useRef } from "react";
+import style from "./ActionTable.module.css";
+import _ from "lodash";
+import GenericExportDropdown from "./export/GenericExport";
+import { BsEye, BsPencil, BsTrash, BsDownload, BsUpload } from 'react-bootstrap-icons';
+import { useTranslation } from "react-i18next";
+import { FaCodePullRequest } from "react-icons/fa6";
+import { Dropdown } from "react-bootstrap";
+import Tooltip from "@mui/material/Tooltip";
+import ErrorOutlineIcon from "@mui/icons-material/ErrorOutline";
+import { FcViewDetails } from "react-icons/fc";
+
+import DatePicker from "react-datepicker";
+import "react-datepicker/dist/react-datepicker.css";
+import DateRangePickerComponent from "./DateRangePickerComponent";
+
+const ActionTable = (props: any) => {
+  // const { t } = useTranslation();
+  const [searchedData, setSearchedData] = useState(props?.rowData || []);
+  const [startDate, setStartDate] = useState(null);
+  const [endDate, setEndDate] = useState(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [selected, setSelected] = useState<any[]>([]);
+  const [sortedColumn, setSortedColumn] = useState<string | null>(null);
+  const [sortOrder, setSortOrder] = useState<string>("");
+  const hideColumns = props?.hideColumns || [];
+  useEffect(() => {
+    props?.rowData && setSearchedData(props?.rowData);
+    setCurrentPage(1);
+    const selectedRows = props?.rowData
+      .filter((item: any) => item.isChecked)
+      .map((item: any) => item.id);
+    setSelected(selectedRows);
+  }, [props?.rowData]);
+
+  const handleDateFilter = (startDate, endDate) => {
+    let filteredData = props?.rowData || [];
+    
+    if (startDate && endDate) {
+      filteredData = filteredData.filter(item => {
+        const yearOfRegistry = new Date(item.yearOfRegistry).getFullYear();
+        return yearOfRegistry >= startDate.getFullYear() && yearOfRegistry <= endDate.getFullYear();
+      });
+    }
   
-  <div className="d-flex justify-content-end" style={{ flex: 1 }}>
-    {!props.hideSearchBar && (
-      <div className="col-sm-4 my-1 ms-auto">
-        <input
-          type="search"
-          onChange={handleOnSearch}
-          placeholder="Search"
-          className={`my-1 p-2 ${props?.hideSearchBar && "d-none"}`}
-        />
-      </div>
-    )}
+    // Sorting the filtered data in ascending order based on yearOfRegistry
+    filteredData = filteredData.sort((a, b) => {
+      const yearA = new Date(a.yearOfRegistry).getFullYear();
+      const yearB = new Date(b.yearOfRegistry).getFullYear();
+      return yearA - yearB;
+    });
+  
+    // Apply other filters if needed, like search filters
+    setSearchedData(filteredData);
+  };
+  
 
-    {window.location.pathname.includes('/dashboard') && !window.location.pathname.includes('/employee') && (
-      <DateRangePickerComponent onFilterDate={handleDateFilter}/>
-    )}
+  const [itemsPerPage, setItemPerPage] = useState(props?.tableConfig?.defaultRowsPerPage || 5);
 
-    {props.rowData?.length > 0 && !props.hideExportBtn && (
-      <div className="col-sm-2 my-1">
-        <GenericExportDropdown
-          columns={props.columns}
-          rowData={props.rowData}
-          style={{ position: "relative", right: "5rem" }}
-        />
+  const indexOfLastItem = currentPage * itemsPerPage;
+  const indexOfFirstItem = indexOfLastItem - itemsPerPage;
+  const currentItems = searchedData?.slice(indexOfFirstItem, indexOfLastItem);
+
+  
+  const totalPages = Math.ceil(searchedData?.length / itemsPerPage);
+
+  const handleNextPage = () => {
+    setCurrentPage((prevPage) => Math.min(prevPage + 1, totalPages));
+  };
+
+  const handlePrevPage = () => {
+    setCurrentPage((prevPage) => Math.max(prevPage - 1, 1));
+  };
+
+
+
+  const handleOnSearch = (e: any) => {
+    if (e.target.value) {
+      const searchValue = e.target.value.toLowerCase();
+
+      const filterObject = (obj: any): boolean => {
+        return Object.values(obj).some((value) => {
+          if (typeof value === "object" && value !== null) {
+            return filterObject(value);
+          }
+          return value?.toString().toLowerCase().includes(searchValue);
+        });
+      };
+
+      const filtered = props?.rowData?.filter((item: any) =>
+        filterObject(item)
+      );
+      handleDateFilter(startDate, endDate);
+      setSearchedData(filtered);
+      setCurrentPage(1);
+    } else setSearchedData(props?.rowData);
+  };
+
+  const sortByColumn = (column: string) => {
+    if (sortedColumn === column) {
+      setSortOrder(sortOrder === "asc" ? "desc" : "asc");
+    } else {
+      setSortedColumn(column);
+      setSortOrder("asc");
+    }
+  };
+
+  const showSortedColumnIcon = (columnName: string) => {
+    return sortedColumn === columnName ? (
+      sortOrder === "asc" ? (
+        <i className="fa fa-long-arrow-up table-arrow" aria-hidden="true" />
+      ) : (
+        <i className="fa fa-long-arrow-down table-arrow" aria-hidden="true"></i>
+      )
+    ) : (
+      <></>
+    );
+  };
+
+  useEffect(() => {
+    if (sortOrder && sortedColumn) {
+      const sortedData = [...searchedData]?.sort((a, b) => {
+        const columnValueA = _.get(a, sortedColumn);
+        const columnValueB = _.get(b, sortedColumn);
+
+        if (sortOrder === "asc") {
+          return typeof columnValueA === "string"
+            ? columnValueA?.localeCompare(columnValueB)
+            : columnValueA - columnValueB;
+        } else {
+          return typeof columnValueA === "string"
+            ? columnValueB?.localeCompare(columnValueA)
+            : columnValueB - columnValueA;
+        }
+      });
+      setSearchedData(sortedData);
+    }
+  }, [sortOrder, sortedColumn]);
+
+  const handleAdd = () => { };
+  const handleDeleteRow = (rowData: any) => {
+    props?.onDeleteRow(rowData);
+  };
+  const handleView = (rowData: any) => {
+    props?.onViewRow(rowData);
+  };
+  const handleHistoryViews = (rowData: any) => {
+    props?.onHistoryView(rowData);
+  }
+  const handleDownload = (rowData: any) => {
+    props?.download(rowData);
+  };
+
+  const onCheckColumn = (event: any, data: any) => {
+    if (props?.checkType === "multiCheck") {
+      if (event.target.checked) {
+        const newSelecteds = currentItems?.map((n: any, index: number) => n); // replaced rowData to currentItems to select only the current page items
+        setSelected(newSelecteds);
+        props?.onCheckHandler(newSelecteds);
+        return;
+      }
+      setSelected([]);
+      props?.onCheckHandler([]);
+    } else {
+      setSelected([]);
+      props?.onCheckHandler([]);
+    }
+  };
+
+  const onRowCheck = (event: any, id: any, row: any) => {
+    if (props?.checkType === "multiCheck") {
+      const selectedIndex: any = selected.map((e) => e.id).indexOf(id);
+      let newSelected: any = [];
+      const NOCHECK_ITEM = -1;
+      if (selectedIndex === NOCHECK_ITEM) {
+        newSelected = newSelected.concat(selected, row);
+      } else if (selectedIndex === 0) {
+        newSelected = newSelected.concat(selected.slice(1));
+      } else if (selectedIndex === selected.length - 1) {
+        newSelected = newSelected.concat(selected.slice(0, -1));
+      } else if (selectedIndex > 0) {
+        newSelected = newSelected.concat(
+          selected.slice(0, selectedIndex),
+          selected.slice(selectedIndex + 1)
+        );
+      }
+      setSelected(newSelected);
+      props?.onCheckHandler(newSelected);
+    } else {
+      const selectedIndex: any = selected.map((e) => e.id).indexOf(id);
+      let newSelected: any = [];
+      const NOCHECK_ITEM = -1;
+      if (selectedIndex === NOCHECK_ITEM) {
+        newSelected = newSelected.concat(selected, row);
+      } else if (selectedIndex === 0) {
+        newSelected = newSelected.concat(selected.slice(1));
+      } else if (selectedIndex > 0) {
+        newSelected = newSelected.concat(
+          selected.slice(0, selectedIndex),
+          selected.slice(selectedIndex + 1)
+        );
+      }
+      setSelected(newSelected);
+      props?.onCheckHandler(newSelected);
+    }
+  };
+
+  const isSelected = (id: any) => {
+    const pos: any = selected.map((e) => e.id).indexOf(id);
+    return pos !== -1;
+  };
+  const handleEdit = (rowData: any) => {
+    props.handleEditRow(rowData)
+  };
+
+
+  const uncheckLast = () => {
+    if (props?.checkType === "singleCheck") {
+      let ns: any = selected.slice(1);
+      setSelected(ns);
+    }
+  };
+
+  const handlePullBack = (rowData: any) => {
+    props?.pullBack(rowData);
+  };
+  useEffect(() => {
+    let x: any = document.getElementById("table-column-check");
+    const checkedItems = selected.every((id) =>
+      currentItems.some((obj: any) => obj.id === id)
+    );
+
+    if (props?.checkType) {
+      if (
+        selected.length > 0 &&
+        selected.length < props?.rowData?.length &&
+        selected.length === currentItems.length &&
+        checkedItems
+      ) {
+        x.indeterminate = true;
+      } else {
+        x.indeterminate = false;
+      }
+      if (selected.length > 1 && props?.checkType === "singleCheck") {
+        uncheckLast();
+      }
+      // props?.onCheckHandler(selected);
+    }
+  }, [selected, currentItems]);
+
+  const onRowClick = (event: any, rowData: any) => {
+    props?.additionalMethod(rowData);
+  };
+  const onChangeRowsPerPage = (item: any) => {
+    setItemPerPage(item);
+  };
+  const PaginationOptions = () => {
+    const [isShow, setIsShow] = useState(false);
+    const exportRef = useRef<any>(null);
+
+    useEffect(() => {
+      const handleOutsideClick = (e: any) => {
+        if (exportRef.current && !exportRef.current.contains(e.target)) {
+          setIsShow(false);
+        }
+      };
+      document.addEventListener("click", handleOutsideClick);
+
+      return () => {
+        document.removeEventListener("click", handleOutsideClick);
+      };
+    }, []);
+
+    return (
+      <div
+        id="export_button"
+        ref={exportRef}
+        className="d-inline-flex flex-row align-items-center stickyCard"
+      >
+        <div className="ps-3" style={{ marginRight: "10px" }}>
+          {" "}
+          {/* Added margin to create a gap */}
+          Rows per page
+        </div>
+        <Dropdown>
+          <Dropdown.Toggle
+            id="dropdownMenuButton1"
+            style={{
+              color: "white", // Text color
+              backgroundColor: "#0b5ed7", // Background color
+              borderColor: "#000000", // Border color (optional, for consistency)
+            }}
+          >
+            <span className="font-14">{itemsPerPage}</span>
+          </Dropdown.Toggle>
+
+          <Dropdown.Menu>
+            {(props?.tableConfig?.paginationOptions || [5, 10, 25, 50, 100]).map((item, i) => (
+              <Dropdown.Item
+                key={i}
+                onClick={() => onChangeRowsPerPage(item)}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = "#0b5ed7"; // Hover background color
+                  e.currentTarget.style.color = "#fff"; // Hover text color
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = ""; // Reset background color
+                  e.currentTarget.style.color = ""; // Reset text color
+                }}
+                style={{
+                  cursor: "pointer",
+                  transition: "background-color 0.3s ease, color 0.3s ease", // Smooth transition
+                }}
+              >
+                {item}
+              </Dropdown.Item>
+            ))}
+          </Dropdown.Menu>
+        </Dropdown>
       </div>
-    )}
-  </div>
-</div>
+    );
+  };
+
+  return (
+    <>
+      <div className="mb-5 px-2 py-3 generic-action-table pt-3">
+        <div
+          className={`row px-1 ${style.application_search} ${
+            props?.hideSearchBar
+              ? "justify-content-end mb-1"
+              : "justify-content-between"
+          }`}
+        >
+          <div
+            className="col-sm-6 my-1 fw-bold"
+            style={{ width: "fit-content" }}
+          >
+            {props?.tableHeader ? props?.tableHeader : ""}
+          </div>
+          
+          <div className="d-flex justify-content-end" style={{ flex: 1 }}>
+            {props?.filters && (
+              <div className="my-1 me-3" style={{ width: "fit-content" }}>
+                {props.filters()}
+              </div>
+            )}
+            
+            {!props.hideSearchBar && (
+              <div className="my-1 me-3" style={{ width: "300px" }}>
+                <input
+                  type="search"
+                  onChange={handleOnSearch}
+                  placeholder="Search"
+                  className="form-control"
+                  style={{ width: "100%" }}
+                />
+              </div>
+            )}
+
+            {window.location.pathname.includes('/dashboard') && !window.location.pathname.includes('/employee') && (
+              <div className="my-1 me-3">
+                <DateRangePickerComponent onFilterDate={handleDateFilter}/>
+              </div>
+            )}
+
+            {props.rowData?.length > 0 && !props.hideExportBtn && (
+              <div className="my-1">
+                <GenericExportDropdown
+                  columns={props.columns}
+                  rowData={props.rowData}
+                />
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div style={{ overflow: "auto" }}>
+          <table
+            className={`${style.table} table table-bordered`}
+            style={{
+              width: `${props?.tableWidth}`,
+              backgroundColor: "#ffffff",
+            }}
+          >
+            <thead>
+              <tr className={`${style.table_header}`}>
+                {props?.columns?.map(
+                  (data: any, colIndx: any) =>
+                    !hideColumns.includes(data.fieldName) && (
+                      <th
+                        key={colIndx}
+                        className="px-0 py-2 text-center"
+                        style={{
+                          minWidth: data?.minWidth || "8rem",
+                          fontSize: "1.1rem", 
+                        }}
+                        onClick={() => sortByColumn(data.fieldName)}
+                      >
+                        {data.titleCode || data.colName}
+                        {showSortedColumnIcon(data.fieldName)}
+                      </th>
+                    )
+                )}
+              </tr>
+            </thead>
+
+            <tbody style={{ backgroundColor: "#ffffff" }}>
+              {searchedData.length !== 0 ? (
+                currentItems?.map((row: any, index: number) => {
+                  const rowId = row.id;
+                  const isItemSelected = isSelected(rowId);
+
+                  return (
+                    <tr
+                      key={rowId}
+                      className={`${style.table_data} table-row-hover`}
+                      style={{ backgroundColor: "#ffffff" }}
+                    >
+                      {props?.columns.map((o: any, colIndex: any) => {
+                        // Columns that need to check for missing data
+                        if (
+                          [
+                            "nameOfVessel",
+                            "portOfRegistry",
+                            "addressOfOwner",
+                            "yearOfRegistry",
+                            "vesselType",
+                          ].includes(o.fieldName) &&
+                          !_.get(row, o.fieldName)
+                        ) {
+                          return (
+                            <td
+                              key={colIndex}
+                              className={`px-0 py-2 ${style.actionTable_table_data}`}
+                              style={{ textAlign: "center", background: "#ffffff" }}
+                            >
+                              <Tooltip title="No data available" placement="top" arrow>
+                                <ErrorOutlineIcon style={{ color: "#888", fontSize: "20px" }} />
+                              </Tooltip>
+                            </td>
+                          );
+                        }
+
+                        // Check for clickable fields
+                        if (o?.isClickable) {
+                          return (
+                            <td
+                              key={colIndex}
+                              className={`px-0 py-2 ${style.actionTable_table_data}`}
+                              style={{
+                                color: "#3370D4",
+                                cursor: "pointer",
+                                background: "#ececf9",
+                                fontWeight: row.isRead ? "normal" : "bolder",
+                              }}
+                              onClick={(e) => onRowClick(row, e)}
+                            >
+                              <span>{_.get(row, o.fieldName)}</span>
+                            </td>
+                          );
+                        }
+
+                        // Check for checkbox field
+                        if (o.fieldName === "checkbox") {
+                          return (
+                            <td
+                              key={colIndex}
+                              className={`px-0 py-2 ${style.actionTable_table_data}`}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={isItemSelected}
+                                onChange={(event) => onRowCheck(event, rowId, row)}
+                              />
+                            </td>
+                          );
+                        }
+
+                        // Add tooltip for "nameOfOwner" field
+                        if (o?.colName === "nameOfOwner" && !hideColumns.includes(o.fieldName)) {
+                          return (
+                            <td
+                              key={colIndex}
+                              className={`px-0 py-2 ${style.actionTable_table_data}`}
+                              style={{ background: "#ffffff" }}
+                            >
+                              <Tooltip
+                                title={_.get(row, o.fieldName) || "No name available"}
+                                placement="top"
+                                arrow
+                              >
+                                <span>
+                                  {_.get(row, o.fieldName)
+                                    ?.split(" ")
+                                    .slice(0, 3)
+                                    .join(" ") || "No name available"}
+                                </span>
+                              </Tooltip>
+                            </td>
+                          );
+                        }
+
+                        // Check for the "addressOfOwner" field
+                        if (o?.colName === "addressOfOwner" && !hideColumns.includes(o.fieldName)) {
+                          return (
+                            <td
+                              key={colIndex}
+                              className={`px-0 py-2 ${style.actionTable_table_data}`}
+                              style={{ background: "#ffffff" }}
+                            >
+                              <Tooltip
+                                title={_.get(row, o.fieldName) || "No address available"}
+                                placement="top"
+                                arrow
+                              >
+                                <span
+                                  style={{
+                                    display: "inline-block",
+                                    whiteSpace: "nowrap",
+                                    overflow: "hidden",
+                                    textOverflow: "ellipsis",
+                                    maxWidth: "200px", // Adjust the max width for preview
+                                  }}
+                                >
+                                  {_.get(row, o.fieldName)
+                                    ?.split(" ")
+                                    .slice(0, 4)
+                                    .join(" ") || "No address available"}
+                                </span>
+                              </Tooltip>
+                            </td>
+                          );
+                        }
+
+                        // Check for the "history" field
+                        if (o?.colName === "History" && !hideColumns.includes(o.fieldName)) {
+                          return (
+                            <td
+                              key={colIndex}
+                              className={`px-0 py-2 ${style.actionTable_table_data}`}
+                              style={{ background: "#ffffff" }}
+                            >
+                              <div className="d-flex" style={{ gap: "8px", justifyContent: "center" }}>
+                                <Tooltip title="View history" placement="top" arrow>
+                                  <button
+                                    onClick={() => handleHistoryViews(row)}
+                                    type="button"
+                                    className="btn btn-info"
+                                  >
+                                    <FcViewDetails className="table-action-icon" />
+                                  </button>
+                                </Tooltip>
+                              </div>
+                            </td>
+                          );
+                        }
+
+                        // Handle status field with different colors
+                        if (o.fieldName === "status" && !hideColumns.includes(o.fieldName)) {
+                          const status = _.get(row, o.fieldName);
+                          let statusColor = "#ffffff"; // Default background
+                          let textColor = "#000000"; // Default text color
+                          
+                          // Define colors for different status values
+                          switch(status?.toLowerCase()) {
+                            case "active":
+                            case "approved":
+                              statusColor = "#d4edda"; // Light green
+                              textColor = "#155724"; // Dark green
+                              break;
+                            case "pending":
+                            case "in progress":
+                              statusColor = "#fff3cd"; // Light yellow
+                              textColor = "#856404"; // Dark yellow/amber
+                              break;
+                            case "rejected":
+                            case "failed":
+                              statusColor = "#f8d7da"; // Light red
+                              textColor = "#721c24"; // Dark red
+                              break;
+                            case "draft":
+                              statusColor = "#e2e3e5"; // Light gray
+                              textColor = "#383d41"; // Dark gray
+                              break;
+                            case "completed":
+                              statusColor = "#cce5ff"; // Light blue
+                              textColor = "#004085"; // Dark blue
+                              break;
+                            default:
+                              statusColor = "#ffffff"; // Default white
+                              textColor = "#000000"; // Default black
+                          }
+                          
+                          return (
+                            <td
+                              key={colIndex}
+                              className={`px-0 py-2 ${style.actionTable_table_data}`}
+                              style={{ background: "#ffffff" }}
+                            >
+                              <span style={{
+                                backgroundColor: statusColor,
+                                color: textColor,
+                                padding: "4px 8px",
+                                borderRadius: "4px",
+                                display: "inline-block",
+                                fontWeight: "500"
+                              }}>
+                                {status}
+                              </span>
+                            </td>
+                          );
+                        }
+                        
+                        // Handle "action" or other non-hidden fields
+                        if (!hideColumns.includes(o.fieldName) && o.fieldName !== "action") {
+                          return (
+                            <td
+                              key={colIndex}
+                              className={`px-0 py-2 ${style.actionTable_table_data}`}
+                              style={{ background: "#ffffff" }}
+                            >
+                              <span>{_.get(row, o.fieldName)}</span>
+                            </td>
+                          );
+                        }
+
+                        // Handle action column
+                        if (o.fieldName === "action" && !hideColumns.includes(o.fieldName)) {
+                          return (
+                            <td
+                              key={colIndex}
+                              className={`px-3 py-2 ${style.actionTable_table_data}`}
+                              style={{ background: "#ffffff" }}
+                            >
+                              <div className="d-flex" style={{ gap: "12px", justifyContent: "center" }}>
+                                {/* Action Buttons */}
+                                {o.actions.includes("add") && (
+                                  <Tooltip title="Add new item" placement="top" arrow>
+                                    <button onClick={handleAdd} type="button" className="btn btn-primary">
+                                      <i className="fa fa-plus" aria-hidden="true"></i>
+                                    </button>
+                                  </Tooltip>
+                                )}
+                                
+                                {o.actions.includes("edit") && (
+                                  <Tooltip title="Edit this item" placement="top" arrow>
+                                    <button
+                                      onClick={() => handleEdit(row)}
+                                      type="button"
+                                      className="btn btn-primary"
+                                      disabled={!o.actions.includes("edit")}
+                                    >
+                                      <BsPencil size={16} color="white" />
+                                    </button>
+                                  </Tooltip>
+                                )}
+                                
+                                {o.actions.includes("view") && (
+                                  <Tooltip title="View details" placement="top" arrow>
+                                    <button onClick={() => handleView(row)} type="button" className="btn btn-primary">
+                                      <BsEye size={16} color="white" />
+                                    </button>
+                                  </Tooltip>
+                                )}
+                                
+                                {o.actions.includes("delete") && (
+                                  <Tooltip title="Delete this item" placement="top" arrow>
+                                    <button onClick={() => handleDeleteRow(row)} type="button" className="btn btn-danger">
+                                      <BsTrash size={16} color="white" />
+                                    </button>
+                                  </Tooltip>
+                                )}
+                                
+                                {o.actions.includes("download") && (
+                                  <Tooltip title="Download file" placement="top" arrow>
+                                    <button onClick={() => handleDownload(row)} type="button" className="btn btn-primary">
+                                      <BsDownload size={16} color="white" />
+                                    </button>
+                                  </Tooltip>
+                                )}
+                                
+                                {o.actions.includes("upload") && (
+                                  <Tooltip title="Upload file" placement="top" arrow>
+                                    <button onClick={() => handleView(row)} type="button" className="btn btn-secondary">
+                                      <BsUpload size={16} color="white" />
+                                    </button>
+                                  </Tooltip>
+                                )}
+                              </div>
+                            </td>
+                          );
+                        }
+
+                        return null; // Return null for hidden or unsupported columns
+                      })}
+                    </tr>
+                  );
+                })
+              ) : (
+                <tr>
+                  <td colSpan={props.columns.length} className="text-center">
+                    <strong>No results found</strong>
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        <div className={style.tableFooter}>
+          <div className={style.tableFooterContent}>
+            <div className={style.tableInfo}>
+              <span className={style.entriesInfo}>
+                Showing {indexOfFirstItem + 1}-{Math.min(indexOfLastItem, searchedData.length)} of {searchedData.length} entries
+              </span>
+              {selected.length > 0 && (
+                <span className={style.selectedBadge}>
+                  {selected.length} selected
+                </span>
+              )}
+            </div>
+            
+            <div className={style.tablePagination}>
+              <PaginationOptions />
+              
+              <div className={style.paginationControls}>
+                <button 
+                  className={`${style.paginationButton} ${currentPage === 1 ? style.disabled : ''}`}
+                  onClick={handlePrevPage}
+                  disabled={currentPage === 1}
+                >
+                  <span className={style.paginationIcon}>«</span>
+                </button>
+                
+                <div className={style.paginationPages}>
+                  {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                    // Logic to show current page and surrounding pages
+                    let pageNum;
+                    if (totalPages <= 5) {
+                      pageNum = i + 1;
+                    } else if (currentPage <= 3) {
+                      pageNum = i + 1;
+                    } else if (currentPage >= totalPages - 2) {
+                      pageNum = totalPages - 4 + i;
+                    } else {
+                      pageNum = currentPage - 2 + i;
+                    }
+                    
+                    return (
+                      <button
+                        key={pageNum}
+                        className={`${style.pageNumber} ${currentPage === pageNum ? style.active : ''}`}
+                        onClick={() => setCurrentPage(pageNum)}
+                      >
+                        {pageNum}
+                      </button>
+                    );
+                  })}
+                  
+                  {totalPages > 5 && currentPage < totalPages - 2 && (
+                    <>
+                      <span className={style.paginationEllipsis}>...</span>
+                      <button
+                        className={style.pageNumber}
+                        onClick={() => setCurrentPage(totalPages)}
+                      >
+                        {totalPages}
+                      </button>
+                    </>
+                  )}
+                </div>
+                
+                <button 
+                  className={`${style.paginationButton} ${currentPage === totalPages || totalPages === 0 ? style.disabled : ''}`}
+                  onClick={handleNextPage}
+                  disabled={currentPage === totalPages || totalPages === 0}
+                >
+                  <span className={style.paginationIcon}>»</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+};
+
+export default ActionTable;
