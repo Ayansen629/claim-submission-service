@@ -33,19 +33,19 @@ const VesselBuilderRegistrationPage = () => {
   const totalSteps = 2;
 
   useEffect(() => {
-
-    setTimeout(() => {
-      console.log("Current Step:", currentStep);
-      console.log("current form data:", formData);
+    // Only update values when needed
+    const updateFormValues = () => {
       Object.keys(formData).forEach(key => {
-        if (formData[key]) {
-          console.log("Setting value for", key, formData[key]);
+        if (formData[key] && !watch(key)) {
           setValue(key, formData[key], { shouldValidate: false });
         }
       });
-    }, 0);
-  }, [currentStep, setValue, formData]);
-
+    };
+    
+    if (currentStep === 1) {
+      updateFormValues();
+    }
+  }, [currentStep]);
 
   const formFields = {
     step1: [
@@ -103,7 +103,6 @@ const VesselBuilderRegistrationPage = () => {
             message: 'Please enter a valid Phone number'
           }
         },
-
       },
       {
         name: 'panNumber',
@@ -209,7 +208,7 @@ const VesselBuilderRegistrationPage = () => {
         label: 'Country',
         type: 'text',
         required: false,
-        disabled : true,
+        disabled: true,
         icon: FaMapMarkerAlt,
         colSize: 6,
         placeholder: 'Please enter country',
@@ -240,23 +239,20 @@ const VesselBuilderRegistrationPage = () => {
     ]
   };
 
-
   const getDetailsByPIN = async (pinCode) => {
     try {
       const URL = PUBLIC_URL + URLS_ENDPOINT.APP_SERVICES.GET_DETAILS_BY_PINCODE + pinCode;
       loaderRef.current?.show();
       const response = await getData(URL);
-      console.log(response);
       if (response?.status === 200 && response?.data?.length > 0) {
         setValue('district', response?.data[0]?.district);
         setValue('stateUt', response?.data[0]?.stateName);
         loaderRef?.current?.hide();
       } else {
         loaderRef?.current?.hide();
-        toast.info("No Data Found! Pleasee enter manually..", { position: "top-right" });
+        toast.info("No Data Found! Please enter manually..", { position: "top-right" });
       }
     } catch (err) {
-      console.log(err);
       loaderRef?.current?.hide();
       handleErrorMessage(err?.response?.data);
     }
@@ -270,47 +266,37 @@ const VesselBuilderRegistrationPage = () => {
     }
   };
 
-  // Validate current step
   const validateStep = async () => {
-    // Get all required fields for current step
     const requiredFields = getCurrentStepFields()
       .filter(field => field.required && (!field.showIf || field.showIf()));
-
-    // Check for empty required fields
-    let missingFields = [];
-    requiredFields.forEach(field => {
-      const value = getValues(field.name);
-      if (!value || value === '') {
-        missingFields.push(field.label);
-        setError(field.name, {
-          type: 'required',
-          message: `${field.label} is required`
+    
+    const fieldsToValidate = requiredFields.map(field => field.name);
+    const isValid = await trigger(fieldsToValidate);
+    
+    if (!isValid) {
+      const firstError = Object.keys(errors)[0];
+      if (firstError) {
+        document.getElementById(firstError)?.scrollIntoView({
+          behavior: 'smooth',
+          block: 'center'
         });
       }
-    });
-
-
-    // Validate all fields in current step
-    const fieldsToValidate = requiredFields.map(field => field.name);
-    return await trigger(fieldsToValidate);
+      return false;
+    }
+    
+    return true;
   };
 
-  // Handle next button click
   const handleNext = async () => {
     const isStepValid = await validateStep();
 
     if (isStepValid) {
-      // Clear validation message when all fields are valid
       setValidationMessage("");
-
-      // Save all form values including file selections
       const currentValues = getValues();
-
 
       const fileFields = getCurrentStepFields().filter(field => field.type === 'file');
       fileFields.forEach(field => {
         if (currentValues[field.name]) {
-
           setFormData(prev => ({
             ...prev,
             [field.name]: currentValues[field.name]
@@ -318,7 +304,6 @@ const VesselBuilderRegistrationPage = () => {
         }
       });
 
-      // Save all other form values
       setFormData(prev => ({ ...prev, ...currentValues }));
 
       if (currentStep < totalSteps) {
@@ -330,16 +315,11 @@ const VesselBuilderRegistrationPage = () => {
     }
   };
 
-  // Handle previous button click
   const handlePrevious = () => {
-    // Save current values before navigating
     const currentValues = getValues();
-
-
     const fileFields = getCurrentStepFields().filter(field => field.type === 'file');
     fileFields.forEach(field => {
       if (currentValues[field.name]) {
-
         setFormData(prev => ({
           ...prev,
           [field.name]: currentValues[field.name]
@@ -347,16 +327,12 @@ const VesselBuilderRegistrationPage = () => {
       }
     });
 
-    // Save all other form values
     setFormData(prev => ({ ...prev, ...currentValues }));
-
-    // Navigate to previous step
     setCurrentStep(Math.max(1, currentStep - 1));
     window.scrollTo(0, 0);
     setValidationMessage("");
   };
 
-  // Handle form submission
   const onSubmit = (data) => {
     const finalData = { ...formData, ...data };
     console.log('Form submitted with data:', JSON.stringify(finalData, null, 2));
@@ -364,24 +340,26 @@ const VesselBuilderRegistrationPage = () => {
     window.scrollTo(0, 0);
   };
 
-
-
-
   const DynamicField = ({ field }) => {
-    if (field.showIf && !field.showIf()) return null;
-
     const handleChange = (e) => {
       if (field.onChange) field.onChange(e, setValue, watch);
-
-      if (e.target.value && errors[field.name]) {
+      
+      if (errors[field.name]) {
         clearErrors(field.name);
-        setValidationMessage("");
       }
+      
+      const timer = setTimeout(() => {
+        trigger(field.name);
+      }, 500);
+      
+      return () => clearTimeout(timer);
+    };
+
+    const handleBlur = () => {
+      trigger(field.name);
     };
 
     switch (field.type) {
-
-
       case 'file':
         return (
           <InputFile
@@ -393,21 +371,16 @@ const VesselBuilderRegistrationPage = () => {
             onChange={(e) => {
               if (e.target.files && e.target.files[0]) {
                 const file = e.target.files[0];
-
-                // Store file name in form data
                 setValue(field.name, file.name);
                 setFormData(prev => {
                   const updated = { ...prev, [field.name]: file.name };
-                  console.log(`Updated formData with file ${field.name}:`, updated);
                   return updated;
                 });
 
-                // Clear any errors
                 if (errors[field.name]) {
                   clearErrors(field.name);
                 }
 
-                // File type validation
                 const validTypes = ['application/pdf', 'image/jpeg', 'image/png', 'image/jpg'];
                 if (!validTypes.includes(file.type)) {
                   setError(field.name, {
@@ -416,7 +389,6 @@ const VesselBuilderRegistrationPage = () => {
                   });
                 }
 
-                // File size validation (max 2MB)
                 if (file.size > 2 * 1024 * 1024) {
                   setError(field.name, {
                     type: 'manual',
@@ -444,11 +416,11 @@ const VesselBuilderRegistrationPage = () => {
               ...field.validation,
             })}
             onChange={handleChange}
+            onBlur={handleBlur}
             errors={errors}
             readOnly={field.readOnly}
             icon={field.icon}
             maxlength={field?.maxlength}
-            onKeyDown={field?.keyDown}
             disabled={field?.disabled || false}
             className="mb-4"
             style={{
@@ -459,7 +431,7 @@ const VesselBuilderRegistrationPage = () => {
         );
     }
   };
-  // Step titles
+
   const stepTitles = [
     { title: "Vessel Builder Details", icon: FaBuilding },
     { title: "Documents Upload", icon: FaFileUpload }
@@ -524,13 +496,10 @@ const VesselBuilderRegistrationPage = () => {
                 ) : (
                   <FormProvider {...methods}>
                     <form>
-                      {/* Form instruction */}
                       <div className="text-center mb-4">
                         <p className="text-muted">Please complete all required information to register as a vessel builder</p>
                       </div>
 
-
-                      {/* Stepper */}
                       <div className="stepper-container mb-5">
                         <div className="stepper d-flex justify-content-between">
                           {[1, 2].map((step) => (
@@ -579,7 +548,6 @@ const VesselBuilderRegistrationPage = () => {
                         </div>
                       </div>
 
-                      {/* Step Content */}
                       <div className="step-content">
                         <div className="form-section p-4 rounded mb-4">
                           <div className="section-title">
@@ -599,14 +567,11 @@ const VesselBuilderRegistrationPage = () => {
                         </div>
                       </div>
 
-                      <div className="form-navigation  mt-4" style={{ display: 'block' }}>
-
-                        {
-                          currentStep > 1 &&
+                      <div className="form-navigation mt-4" style={{ display: 'block' }}>
+                        {currentStep > 1 &&
                           <Button
                             variant="outline-secondary"
                             onClick={handlePrevious}
-                            // hidden={currentStep === 1}
                             className="prev-btn"
                             style={{ 'float': 'left' }}
                           >
@@ -619,7 +584,6 @@ const VesselBuilderRegistrationPage = () => {
                           onClick={handleNext}
                           className="next-btn"
                           style={{ 'float': 'right' }}
-
                         >
                           {currentStep === totalSteps ? 'Submit Registration' : 'Next'}
                           {currentStep !== totalSteps && <FaArrowRight className="btn-icon ms-2" />}
@@ -634,14 +598,159 @@ const VesselBuilderRegistrationPage = () => {
         </Row>
       </Container>
     </>
-
   );
 };
 
 export default VesselBuilderRegistrationPage;
+////////////
+import React, { useState } from "react";
+import { Form, InputGroup, OverlayTrigger, Tooltip } from "react-bootstrap";
+import { FaEye, FaEyeSlash } from "react-icons/fa";
+import classNames from "classnames";
 
+interface InputTextProps {
+  label: string;
+  required?: boolean;
+  name: string;
+  type?: string;
+  placeholder?: string;
+  register?: any;
+  disabled?: boolean;
+  onChange?: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onBlur?: () => void;
+  maxlength?: number;
+  readOnly?: boolean;
+  errors?: any;
+  className?: string;
+  onKeyDown?: (e: React.KeyboardEvent<HTMLInputElement>) => void;
+  icon?: React.ElementType;
+  description?: string;
+  style?: React.CSSProperties;
+}
 
-// InputFile.tsx
+const InputText: React.FC<InputTextProps> = ({
+  label,
+  required,
+  name,
+  type = "text",
+  placeholder,
+  register,
+  disabled,
+  onChange,
+  onBlur,
+  maxlength,
+  readOnly,
+  errors,
+  className = "",
+  onKeyDown,
+  icon: IconComponent,
+  description,
+  style = {},
+}) => {
+  const [showPassword, setShowPassword] = useState(false);
+  const inputType = type === "password" ? (showPassword ? "text" : "password") : type;
+  const hasError = errors && errors[name];
+
+  const togglePasswordVisibility = () => setShowPassword((prev) => !prev);
+
+  return (
+    <Form.Group className={`mb-3 ${className}`} controlId={name}>
+      {label && (
+        <Form.Label className="fw-semibold d-block">
+          {label}
+          {required && <span className="text-danger ms-1">*</span>}
+        </Form.Label>
+      )}
+
+      <InputGroup className="flex-nowrap w-100 flex-md-nowrap flex-wrap">
+        {IconComponent && (
+          <InputGroup.Text
+            className={`bg-white border-end-0 ${
+              hasError ? "border-danger text-danger" : ""
+            }`}
+            style={{
+              borderColor: hasError ? "#dc3545" : "#ced4da",
+              transition: "all 0.3s ease",
+            }}
+          >
+            <IconComponent size={18} color={hasError ? "#dc3545" : "#387AD4"} />
+          </InputGroup.Text>
+        )}
+
+        <Form.Control
+          type={inputType}
+          name={name}
+          placeholder={placeholder}
+          {...register}
+          disabled={disabled}
+          onChange={onChange}
+          onBlur={onBlur}
+          maxLength={maxlength}
+          readOnly={readOnly}
+          onKeyDown={onKeyDown}
+          min={0}
+          className={`shadow-sm w-100 ${hasError ? "is-invalid" : ""} ${
+            IconComponent ? "border-start-0" : ""
+          } ${type === "password" ? "border-end-0" : ""}`}
+          style={{
+            ...style,
+            borderColor: hasError ? "#dc3545" : "#ced4da",
+            backgroundColor: hasError ? "#fff8f8" : "white",
+            transition: "all 0.3s ease",
+          }}
+        />
+
+        {type === "password" && (
+          <OverlayTrigger
+            placement="top"
+            overlay={
+              <Tooltip id={`tooltip-${name}`}>
+                {showPassword ? "Hide password" : "Show password"}
+              </Tooltip>
+            }
+          >
+            <InputGroup.Text
+              className={`bg-white border-start-0 ${
+                hasError ? "border-danger" : ""
+              }`}
+              role="button"
+              onClick={togglePasswordVisibility}
+              aria-label="Toggle password visibility"
+              style={{
+                cursor: "pointer",
+                borderColor: hasError ? "#dc3545" : "#ced4da",
+              }}
+            >
+              {showPassword ? (
+                <FaEyeSlash
+                  size={18}
+                  color={hasError ? "#dc3545" : "#387AD4"}
+                />
+              ) : (
+                <FaEye size={18} color={hasError ? "#dc3545" : "#387AD4"} />
+              )}
+            </InputGroup.Text>
+          </OverlayTrigger>
+        )}
+      </InputGroup>
+
+      {description && (
+        <Form.Text style={{ color: "#5A67D8" }} className="d-block mt-1">
+          {description}
+        </Form.Text>
+      )}
+
+      {hasError?.message && (
+        <Form.Text className="text-danger d-block">
+          {errors?.[name]?.message}
+        </Form.Text>
+      )}
+    </Form.Group>
+  );
+};
+
+export default InputText;
+//////////////////
 import React, { useState, useEffect } from "react";
 import { Form } from "react-bootstrap";
 import { FaUpload, FaFile, FaFilePdf, FaFileImage, FaCheckCircle } from "react-icons/fa";
@@ -676,65 +785,36 @@ const InputFile: React.FC<InputFileProps> = ({
   defaultValue
 }) => {
   const hasError = errors && errors[name];
-  // const [fileName, setFileName] = useState<string>(defaultValue && defaultValue.trim() !== "" ? defaultValue : "");
-  
-  // // Update fileName when component mounts or watch value changes
-  // useEffect(() => {
-  //   // Check if there's a value from watch
-  //   if (watch) {
-  //     const value = watch(name);
-  //     if (value && typeof value === 'string' && value.trim() !== "") {
-  //       console.log(`InputFile ${name} watch value:`, value);
-  //       setFileName(value);
-  //     }
-  //   }
-    
-  //   // Also check defaultValue on mount
-  //   if (defaultValue && defaultValue.trim() !== "" && !fileName) {
-  //     setFileName(defaultValue);
-  //   }
-  // }, [watch, name, defaultValue]);
-  
-// Fix the useState initialization in InputFile.tsx
-const [fileName, setFileName] = useState<string>(
-  defaultValue && typeof defaultValue === 'string' && defaultValue.trim() !== "" 
-    ? defaultValue 
-    : ""
-);
+  const [fileName, setFileName] = useState<string>(
+    defaultValue && typeof defaultValue === 'string' && defaultValue.trim() !== "" 
+      ? defaultValue 
+      : ""
+  );
 
-// Also fix the useEffect check
-useEffect(() => {
-  // Check if there's a value from watch
-  if (watch) {
-    const value = watch(name);
-    if (value && typeof value === 'string' && value.trim() !== "") {
-      console.log(`InputFile ${name} watch value:`, value);
-      setFileName(value);
+  useEffect(() => {
+    if (watch) {
+      const value = watch(name);
+      if (value && typeof value === 'string' && value.trim() !== "") {
+        setFileName(value);
+      }
     }
-  }
-  
-  // Also check defaultValue on mount
-  if (defaultValue && typeof defaultValue === 'string' && defaultValue.trim() !== "" && !fileName) {
-    setFileName(defaultValue);
-  }
-}, [watch, name, defaultValue]);
+    
+    if (defaultValue && typeof defaultValue === 'string' && defaultValue.trim() !== "" && !fileName) {
+      setFileName(defaultValue);
+    }
+  }, [watch, name, defaultValue]);
 
-  
-  // Handle file change internally
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
       setFileName(file.name);
-      console.log(`File selected for ${name}:`, file.name);
     }
     
-    // Call the parent onChange handler if provided
     if (onChange) {
       onChange(e);
     }
   };
   
-  // Get file icon based on extension
   const getFileIcon = () => {
     if (!fileName || typeof fileName !== 'string') return <FaFile color="#0d6efd" />;
     
@@ -749,7 +829,6 @@ useEffect(() => {
     <Form.Group className={`mb-4 ${className}`} controlId={name}>
       <Form.Label className="fw-bold text-dark">
         {label}
-        {/* {required && <span className="text-danger ms-1">*</span>} */}
       </Form.Label>
       
       <div 
@@ -829,166 +908,3 @@ useEffect(() => {
 };
 
 export default InputFile;
-
-import React, { useState, useEffect } from "react";
-import { Form, InputGroup, OverlayTrigger, Tooltip } from "react-bootstrap";
-import { FaEye, FaEyeSlash } from "react-icons/fa";
-import classNames from "classnames";
-
-interface InputTextProps {
-  label: string;
-  required?: boolean;
-  name: string;
-  type?: string;
-  placeholder?: string;
-  register?: any;
-  disabled?: boolean;
-  onChange?: (e: React.ChangeEvent<HTMLInputElement>) => void;
-  maxlength?: number;
-  readOnly?: boolean;
-  errors?: any;
-  className?: string;
-  onKeyDown?: (e: React.KeyboardEvent<HTMLInputElement>) => void;
-  icon?: React.ElementType;
-  description?: string;
-  style?: React.CSSProperties;
-}
-
-const InputText: React.FC<InputTextProps> = ({
-  label,
-  required,
-  name,
-  type = "text",
-  placeholder,
-  register,
-  disabled,
-
-  onChange,
-  maxlength,
-  readOnly,
-  errors,
-  className = "",
-  onKeyDown,
-  icon: IconComponent,
-  description,
-  style = {},
-}) => {
-  const [showPassword, setShowPassword] = useState(false);
-  const [value, setValue] = useState("");
-
-  const isPassword = type === "password";
-  const inputType = isPassword ? (showPassword ? "text" : "password") : type;
-  const hasError = errors && errors[name];
-
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setValue(e.target.value);
-
-    if (onChange) {
-      onChange(e);
-    }
-  };
-
-  const togglePasswordVisibility = () => setShowPassword((prev) => !prev);
-
-  const inputClasses = classNames("shadow-sm w-100", {
-    "is-invalid": hasError,
-    "border-start-0": IconComponent,
-    "border-end-0": isPassword,
-    "disabled": disabled,
-  });
-
-  return (
-    <Form.Group className={`mb-3 ${className}`} controlId={name}>
-      {label && (
-        <Form.Label className="fw-semibold d-block">
-          {label}
-          {required && <span className="text-danger ms-1">*</span>}
-        </Form.Label>
-      )}
-
-      <InputGroup className="flex-nowrap w-100 flex-md-nowrap flex-wrap">
-        {IconComponent && (
-          <InputGroup.Text
-            className={`bg-white border-end-0 ${
-              hasError ? "border-danger text-danger" : ""
-            }`}
-            style={{
-              borderColor: hasError ? "#dc3545" : "#ced4da",
-              transition: "all 0.3s ease",
-            }}
-          >
-            <IconComponent size={18} color={hasError ? "#dc3545" : "#387AD4"} />
-          </InputGroup.Text>
-        )}
-
-        <Form.Control
-          type={inputType}
-          name={name}
-          placeholder={placeholder}
-          {...register}
-          disabled={disabled}
-          onChange={handleChange}
-          maxLength={maxlength}
-          readOnly={readOnly}
-          onKeyDown={onKeyDown}
-          min={0}
-          className={inputClasses}
-          aria-label={label}
-          style={{
-            ...style,
-            borderColor: hasError ? "#dc3545" : "#ced4da",
-            backgroundColor: hasError ? "#fff8f8" : "white",
-            transition: "all 0.3s ease",
-          }}
-        />
-
-        {isPassword && (
-          <OverlayTrigger
-            placement="top"
-            overlay={
-              <Tooltip id={`tooltip-${name}`}>
-                {showPassword ? "Hide password" : "Show password"}
-              </Tooltip>
-            }
-          >
-            <InputGroup.Text
-              className={`bg-white border-start-0 ${
-                hasError ? "border-danger" : ""
-              }`}
-              role="button"
-              onClick={togglePasswordVisibility}
-              aria-label="Toggle password visibility"
-              style={{
-                cursor: "pointer",
-                borderColor: hasError ? "#dc3545" : "#ced4da",
-              }}
-            >
-              {showPassword ? (
-                <FaEyeSlash
-                  size={18}
-                  color={hasError ? "#dc3545" : "#387AD4"}
-                />
-              ) : (
-                <FaEye size={18} color={hasError ? "#dc3545" : "#387AD4"} />
-              )}
-            </InputGroup.Text>
-          </OverlayTrigger>
-        )}
-      </InputGroup>
-
-      {description && (
-        <Form.Text style={{ color: "#5A67D8" }} className="d-block mt-1">
-          {description}
-        </Form.Text>
-      )}
-
-      {hasError?.message && (
-        <Form.Text className="text-danger d-block">
-          {errors?.[name]?.message}
-        </Form.Text>
-      )}
-    </Form.Group>
-  );
-};
-
-export default InputText;
