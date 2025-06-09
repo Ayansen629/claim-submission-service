@@ -1,444 +1,422 @@
-import { useNavigate } from "react-router-dom";
-import "react-toastify/dist/ReactToastify.css";
-import { useTranslation } from "react-i18next";
-import { useEffect, useState, useRef } from "react";
-import ActionTable from "../../../common/ActionTable.tsx";
-import { toast } from "react-toastify";
-import ActionModal from "../../../common/ActionModal.tsx";
-import {
-  APP_MESSAGES,
-  CONSTANT_REGEX_SAMPLE,
-} from "../../../../utils/constants.ts";
-import { FormProvider, useForm } from "react-hook-form";
-import { USER_REGIS_MASTER } from "./userManagConst.ts";
+import { useEffect } from "react";
+import { useFieldArray, useFormContext } from "react-hook-form";
 import { Card, Row, Col, Button } from "react-bootstrap";
 import InputSelect from "../../../common/InputSelect.tsx";
 import InputText from "../../../common/InputText.tsx";
-import EmployeeRegistrationForm from "./EmployeeRegistrationForm.js";
-import NewLoader from "../../../common/NewLoader.js";
-import {
-  getData,
-  postData,
-  postFORMdata,
-} from "../../../../services/http.service.ts";
-import { URLS_ENDPOINT } from "../../../../utils/urlsConstants.ts";
-import { handleErrorMessage } from "../../../../utils/errorMessageHandler.js";
+import Collapsible from "../../../common/Collapsible.js";
+import { FaPlus, FaTrash, FaUser, FaMapMarkerAlt, FaGraduationCap, FaBriefcase, FaFileUpload } from "react-icons/fa";
 import { useMasterData } from "../../../context/MasterDataContext.js";
-import * as yup from "yup";
-import { yupResolver } from "@hookform/resolvers/yup";
+import { URLS_ENDPOINT } from "../../../../utils/urlsConstants.ts";
+import { getData } from "../../../../services/http.service.ts";
 
-// Yup validation schema
-const employeeSchema = yup.object().shape({
-  vesselUserDetails: yup.object().shape({
-    firstName: yup.string().required("First Name is required"),
-    lastName: yup.string().required("Last Name is required"),
-    emailId: yup.string().email("Invalid email").required("Email is required"),
-    phoneNumber: yup
-      .string()
-      .matches(CONSTANT_REGEX_SAMPLE.MOBILE, "Invalid phone number")
-      .required("Phone number is required"),
-    dateOfBirth: yup.date().required("Date of Birth is required"),
-    gender: yup.string().required("Gender is required"),
-    addressLine1: yup.string().required("Address Line 1 is required"),
-    pin: yup
-      .string()
-      .matches(/^\d{6}$/, "Invalid PIN code")
-      .required("PIN code is required"),
-    district: yup.string().required("District is required"),
-    stateUt: yup.string().required("State/UT is required"),
-    country: yup.string().required("Country is required"),
-  }),
-  educationDetails: yup.array().of(
-    yup.object().shape({
-      qualification: yup.string().required("Qualification is required"),
-      stream: yup.string().required("Stream is required"),
-      yearOfPassing: yup
-        .number()
-        .min(1900, "Invalid year")
-        .max(new Date().getFullYear(), "Invalid year")
-        .required("Year of Passing is required"),
-    })
-  ),
-  professional: yup.object().shape({
-    appointmentDate: yup.date().required("Appointment Date is required"),
-    employeeType: yup.string().required("Employee Type is required"),
-    employeeStatus: yup.string().required("Employee Status is required"),
-    designation: yup.string().required("Designation is required"),
-    roles: yup.string().required("Role is required"),
-  }),
-  documents: yup.object().shape({
-    addressProof: yup.mixed().required("Address Proof is required"),
-    identityProof: yup.mixed().required("Identity Proof is required"),
-    appointmentLetter: yup.mixed().required("Appointment Letter is required"),
-  }),
-});
-
-const empFormdefaultValues = {
-  vesselUserDetails: {
-    id: "",
-    userType: "",
-    userCategory: "",
-    firstName: "",
-    lastName: "",
-    emailId: "",
-    phoneNumber: "",
-    panNumber: "",
-    gstNumber: "",
-    addressDetails: "",
-    addressLine1: "",
-    addressLine2: "",
-    pin: "",
-    district: "",
-    stateUt: "",
-    country: "",
-    isActive: true,
-    keycloakId: "",
-    dateOfBirth: "",
-    gender: "",
-    authorizedPerson: null,
-    companyRegistration: null,
-    educationDetails: {
-      uuid: "",
-      employeeUUID: "",
-      qualification: "",
-      stream: "",
-      yearOfPassing: "",
-      additionalEducationDetails: "",
-    },
-    professionalDetails: {
-      uuid: "",
-      employeeUUID: "",
-      appointmentDate: "",
-      employeeType: "",
-      employeeStatus: "",
-      designation: "",
-      department: "",
-      section: "",
-      role: "",
-    },
-    aadharNumber: "",
-    password: "",
-  },
-  documents: {
-    addressProof: null,
-    identityProof: null,
-    appointmentLetter: null,
-  },
-};
-
-const UserManagement = () => {
-  const { t } = useTranslation();
-  let navigate = useNavigate();
-  const [rowData, setRowData] = useState([]);
-  const [modal, setModal] = useState(false);
-  const [modalAction, setModalAction] = useState("");
-  const [userFormData, setuserFormData] = useState(empFormdefaultValues);
-  const [modalTitle, setModalTitle] = useState(t("Add Employee"));
-  const [isLoading, setIsLoading] = useState(false);
-  const loaderRef = useRef();
-  const { masterData } = useMasterData();
-
-  const methods = useForm({
-    defaultValues: empFormdefaultValues,
-    resolver: yupResolver(employeeSchema),
-    mode: "onChange",
+const EmployeeRegistrationForm = () => {
+  const { control, register, setValue, watch, formState: { errors } } = useFormContext();
+  const { fields, append, remove } = useFieldArray({
+    control,
+    name: "educationDetails"
   });
 
+  const watchPin = watch("vesselUserDetails.pin");
+
+  const { masterData } = useMasterData();
+
   useEffect(() => {
-    setuserFormData([]);
-    getUserDetails();
-  }, []);
-
-  const columns = USER_REGIS_MASTER.USER_INFO_COLUMNS;
-  const userMockData = USER_REGIS_MASTER.MOCK_USER_DATA;
-
-  const getUserDetails = async () => {
-    setIsLoading(true);
-    try {
-      setTimeout(() => {
-        setRowData(userMockData);
-        setIsLoading(false);
-      }, 500);
-    } catch (error) {
-      console.error("Error fetching user details:", error);
-      toast.error(t("Error fetching user details"));
-      setIsLoading(false);
-    }
-  };
-
-  const handleRowClick = (e) => {};
-
-  const handleBtnClick = () => {
-    methods.reset();
-    setModalTitle(t("Add Employee"));
-    setModal(true);
-  };
-
-  const handleEditRow = (e) => {
-    setModalTitle(t("Edit Employee"));
-    setuserFormData(e);
-    methods.reset(e);
-    setModal(true);
-  };
-
-  const Toggle = () => {
-    methods.reset();
-    setuserFormData(empFormdefaultValues);
-    setModal(false);
-  };
-
-  const onSubmitFilterForm = async (e) => {
-    if (e && Object.keys(e).length > 0) {
-      console.log("Filter form submitted:", e);
-    }
-  };
-
-  const handleFormSubmit = async (data) => {
-    try {
-      console.log("Form submitted with data:", JSON.stringify(data, null, 2));
-      
-      const formDataObj = new FormData();
-      
-      // Structure the payload according to API requirements
-      const payload = {
-        vesselUserDetails: {
-          ...data.vesselUserDetails,
-          professionalDetails: {
-            ...data.professional,
-            role: data.professional.roles
+    const fetchAddressDetails = async (pin) => {
+      if (pin?.length === 6) {
+        try {
+          const URL = process.env.REACT_APP_PUBLIC_URL + URLS_ENDPOINT.APP_SERVICES.GET_DETAILS_BY_PINCODE + pin;
+          const response = await getData(URL);
+          if (response?.status === 200 && response?.data?.length > 0) {
+            setValue('vesselUserDetails.district', response?.data[0]?.district);
+            setValue('vesselUserDetails.stateUt', response?.data[0]?.stateName);
+            setValue("vesselUserDetails.country", "India");
+          } else {
+            setValue("vesselUserDetails.district", "");
+            setValue("vesselUserDetails.stateUt", "");
+            setValue("vesselUserDetails.country", "");
           }
-        },
-        documents: data.documents,
-        educationDetails: data.educationDetails
-      };
-
-      formDataObj.append("data", JSON.stringify(payload));
-      
-      // Append files
-      if (data.documents) {
-        for (const [docKey, docFile] of Object.entries(data.documents)) {
-          if (docFile && docFile[0]) {
-            formDataObj.append(docKey, docFile[0]);
-          }
+        } catch (error) {
+          setValue("vesselUserDetails.district", "");
+          setValue("vesselUserDetails.stateUt", "");
+          setValue("vesselUserDetails.country", "");
         }
       }
-      
-      await submitEmpDetails(formDataObj);
-      
-      setModal(false);
-      getUserDetails();
-    } catch (error) {
-      console.error("Error submitting form:", error);
-      toast.error("Error submitting form");
-    }
-  };
+    };
 
-  const submitEmpDetails = async (payload) => {
-    try {
-      const URL =
-        process.env.REACT_APP_AUTH_URL + URLS_ENDPOINT.USER_SERVICE.CREATE_EMP;
-      loaderRef.current?.show();
-      
-      const response = await postFORMdata(URL, payload);
-      const apiRes = { ...response?.data };
-      if (
-        response?.status === 200 &&
-        apiRes?.responseStatus?.status === "200"
-      ) {
-        loaderRef?.current?.hide();
-        toast.success(
-          apiRes?.responseStatus?.message || "Employee registered successfully!",
-          { position: "top-right" }
-        );
-      } else {
-        loaderRef?.current?.hide();
-        toast.info(
-          apiRes?.responseStatus?.message || "Something went wrong..",
-          { position: "top-right" }
-        );
-      }
-    } catch (err) {
-      console.log(err);
-      loaderRef?.current?.hide();
-      handleErrorMessage(err?.response?.data);
+    if (watchPin) {
+      fetchAddressDetails(watchPin);
     }
-  };
+  }, [watchPin, setValue]);
 
   return (
-    <>
-      <NewLoader ref={loaderRef} />
-
-      <div className="w-full">
-        <Card>
-          <form
-            style={{ padding: "2rem", margin: 0 }}
-            onSubmit={methods.handleSubmit(onSubmitFilterForm)}
-          >
-            <Row>
-              <Col md={2}>
+    <div className="employee-registration-form">
+      {/* Personal Details Section */}
+      <Collapsible
+        title={
+          <div className="d-flex align-items-center">
+            <FaUser className="me-2" style={{ color: "#2466BF" }} />
+            <span style={{ color: "#2466BF" }}>Personal Details</span>
+          </div>
+        }
+        defaultOpen={true}
+      >
+        <Card className="form-section-card">
+          <Card.Body>
+            <Row className="g-3">
+              <Col md={4}>
                 <InputText
-                  type="text"
-                  name="empId"
-                  maxlength={10}
-                  label="Employee Id"
-                  placeholder="Enter Employee Id"
-                  register={methods.register("empId")}
-                  errors={methods.formState.errors}
-                  onKeyDown={(e) => {
-                    if (!/^\d$/.test(e.key)) {
-                      e.preventDefault();
-                    }
-                  }}
+                  name="vesselUserDetails.firstName"
+                  label="First Name"
+                  placeholder="Enter first name"
+                  register={register("vesselUserDetails.firstName")}
+                  errors={errors}
                 />
               </Col>
-
-              <Col md={2}>
+              <Col md={4}>
                 <InputText
-                  type="text"
-                  name="empName"
-                  label="Employee Name"
-                  placeholder="Enter employee name"
-                  register={methods.register("empName")}
-                  errors={methods.formState.errors}
+                  name="vesselUserDetails.lastName"
+                  label="Last Name"
+                  placeholder="Enter last name"
+                  register={register("vesselUserDetails.lastName")}
+                  errors={errors}
                 />
               </Col>
-
-              <Col md={2}>
+              <Col md={4}>
+                <InputText
+                  name="vesselUserDetails.emailId"
+                  label="Email ID"
+                  type="email"
+                  placeholder="Enter email address"
+                  register={register("vesselUserDetails.emailId")}
+                  errors={errors}
+                />
+              </Col>
+              <Col md={4}>
+                <InputText
+                  name="vesselUserDetails.phoneNumber"
+                  label="Phone Number"
+                  placeholder="Enter 10-digit phone number"
+                  register={register("vesselUserDetails.phoneNumber")}
+                  errors={errors}
+                />
+              </Col>
+              <Col md={4}>
                 <InputSelect
+                  name="vesselUserDetails.gender"
+                  label="Gender"
+                  placeholder="-- Select gender --"
+                  options={masterData?.genders?.map(type => ({
+                    value: type.valueCode,
+                    label: type.valueLabel
+                  })) || []}
+                  register={register}
+                  errors={errors}
+                />
+              </Col>
+              <Col md={4}>
+                <InputText
+                  name="vesselUserDetails.dateOfBirth"
+                  label="Date of Birth"
+                  type="date"
+                  placeholder="Select date of birth"
+                  register={register("vesselUserDetails.dateOfBirth")}
+                  errors={errors}
+                />
+              </Col>
+            </Row>
+          </Card.Body>
+        </Card>
+      </Collapsible>
+
+      {/* Address Details Section */}
+      <Collapsible
+        title={
+          <div className="d-flex align-items-center">
+            <FaMapMarkerAlt className="me-2" style={{ color: "#2466BF" }} />
+            <span style={{ color: "#2466BF" }}>Address Details</span>
+          </div>
+        }
+      >
+        <Card className="form-section-card">
+          <Card.Body>
+            <Row className="g-3">
+              <Col md={6}>
+                <InputText
+                  name="vesselUserDetails.addressLine1"
+                  label="Address Line-1"
+                  placeholder="Enter address line 1"
+                  register={register("vesselUserDetails.addressLine1")}
+                  errors={errors}
+                />
+              </Col>
+              <Col md={6}>
+                <InputText
+                  name="vesselUserDetails.addressLine2"
+                  label="Address Line-2"
+                  placeholder="Enter address line 2 (optional)"
+                  register={register("vesselUserDetails.addressLine2")}
+                  errors={errors}
+                />
+              </Col>
+              <Col md={3}>
+                <InputText
+                  name="vesselUserDetails.pin"
+                  label="PIN"
+                  placeholder="Enter 6-digit PIN code"
+                  register={register("vesselUserDetails.pin")}
+                  errors={errors}
+                />
+              </Col>
+              <Col md={3}>
+                <InputText
+                  name="vesselUserDetails.district"
+                  label="District"
+                  placeholder="Auto-populated"
+                  register={register("vesselUserDetails.district")}
+                  errors={errors}
+                  readOnly
+                />
+              </Col>
+              <Col md={3}>
+                <InputText
+                  name="vesselUserDetails.stateUt"
+                  label="State/UT"
+                  placeholder="Auto-populated"
+                  register={register("vesselUserDetails.stateUt")}
+                  errors={errors}
+                  readOnly
+                />
+              </Col>
+              <Col md={3}>
+                <InputText
+                  name="vesselUserDetails.country"
+                  label="Country"
+                  placeholder="Enter country"
+                  register={register("vesselUserDetails.country")}
+                  errors={errors}
+                  readOnly
+                />
+              </Col>
+            </Row>
+          </Card.Body>
+        </Card>
+      </Collapsible>
+
+      {/* Education Details Section */}
+      <Collapsible
+        title={
+          <div className="d-flex align-items-center">
+            <FaGraduationCap className="me-2" style={{ color: "#2466BF" }} />
+            <span style={{ color: "#2466BF" }}>Education Details</span>
+          </div>
+        }
+      >
+        <Card className="form-section-card">
+          <Card.Body>
+            {fields.map((field, index) => (
+              <div key={field.id} className="education-entry mb-4">
+                {index > 0 && <div className="entry-divider mb-3"></div>}
+                <Row className="g-3">
+                  <Col md={4}>
+                    <InputText
+                      name={`educationDetails.${index}.qualification`}
+                      label={`Qualification ${index === 0 ? '*' : ''}`}
+                      placeholder="Enter qualification"
+                      register={register(`educationDetails.${index}.qualification`)}
+                      errors={errors}
+                    />
+                  </Col>
+                  <Col md={4}>
+                    <InputText
+                      name={`educationDetails.${index}.stream`}
+                      label={`Stream ${index === 0 ? '*' : ''}`}
+                      placeholder="Enter stream"
+                      register={register(`educationDetails.${index}.stream`)}
+                      errors={errors}
+                    />
+                  </Col>
+                  <Col md={3}>
+                    <InputText
+                      name={`educationDetails.${index}.yearOfPassing`}
+                      label={`Year of Passing ${index === 0 ? '*' : ''}`}
+                      placeholder="Enter year"
+                      type="number"
+                      register={register(`educationDetails.${index}.yearOfPassing`)}
+                      errors={errors}
+                    />
+                  </Col>
+                  <Col md={1} className="d-flex align-items-end">
+                    {index > 0 && (
+                      <Button
+                        variant="danger"
+                        size="sm"
+                        onClick={() => remove(index)}
+                        className="mt-1"
+                      >
+                        <FaTrash />
+                      </Button>
+                    )}
+                  </Col>
+                </Row>
+              </div>
+            ))}
+            <Button
+              variant="outline-primary"
+              onClick={() => append({ qualification: "", stream: "", yearOfPassing: "" })}
+              className="add-education-btn"
+            >
+              <FaPlus className="me-2" /> Add Education Details
+            </Button>
+          </Card.Body>
+        </Card>
+      </Collapsible>
+
+      {/* Professional Details Section */}
+      <Collapsible
+        title={
+          <div className="d-flex align-items-center">
+            <FaBriefcase className="me-2" style={{ color: "#2466BF" }} />
+            <span style={{ color: "#2466BF" }}>Professional Details</span>
+          </div>
+        }
+      >
+        <Card className="form-section-card">
+          <Card.Body>
+            <Row className="g-3">
+              <Col md={4}>
+                <InputText
+                  name="professional.appointmentDate"
+                  label="Appointment Date"
+                  type="date"
+                  placeholder="Select appointment date"
+                  register={register("professional.appointmentDate")}
+                  errors={errors}
+                />
+              </Col>
+              <Col md={4}>
+                <InputSelect
+                  name="professional.employeeType"
+                  label="Employee Type"
+                  placeholder="Select employee type"
+                  options={masterData?.employeeTypes?.map(type => ({
+                    value: type.valueCode,
+                    label: type.valueLabel
+                  })) || []}
+                  register={register}
+                  errors={errors}
+                />
+              </Col>
+              <Col md={4}>
+                <InputSelect
+                  name="professional.employeeStatus"
+                  label="Employee Status"
+                  placeholder="Select employee status"
+                  options={masterData?.employeeStatuses?.map(type => ({
+                    value: type.valueCode,
+                    label: type.valueLabel
+                  })) || []}
+                  register={register}
+                  errors={errors}
+                />
+              </Col>
+              <Col md={4}>
+                <InputSelect
+                  name="professional.designation"
                   label="Designation"
-                  name="designation"
+                  placeholder="Select designation"
                   options={masterData?.designations?.map(type => ({
                     value: type.valueCode,
                     label: type.valueLabel
                   })) || []}
-                  register={methods.register}
-                  errors={methods.formState.errors}
-                  defaultValue={""}
+                  register={register}
+                  errors={errors}
                 />
               </Col>
-
-              <Col md={2}>
-                <InputSelect
-                  label="Status"
-                  name="status"
-                  options={[
-                    { value: "active", label: "Active" },
-                    { value: "inactive", label: "Inactive" },
-                  ]}
-                  register={methods.register}
-                  errors={methods.formState.errors}
-                  defaultValue={""}
-                />
-              </Col>
-
-              <Col md={2}>
+              <Col md={4}>
                 <InputText
-                  type="text"
-                  name="phoneNumber"
-                  label="Phone Number"
-                  maxlength={10}
-                  placeholder="Enter Phone Number"
-                  register={methods.register("phoneNumber")}
-                  onKeyDown={(e) => {
-                    if (!/^\d$/.test(e.key)) {
-                      e.preventDefault();
-                    }
-                  }}
-                  errors={methods.formState.errors}
+                  name="professional.department"
+                  label="Department"
+                  placeholder="Auto-populated"
+                  register={register("professional.department")}
+                  errors={errors}
+                  readOnly
                 />
               </Col>
-
-              <Col md={2}>
-                <div style={{ display: "flex", gap: "8px", marginTop: "2rem" }}>
-                  <div className="w48">
-                    <button className="generic-btn-submit" type="submit">
-                      Filter
-                    </button>
-                  </div>
-                  <div className="w48">
-                    <button
-                      className="generic-btn-cancel "
-                      type="reset"
-                      onClick={() => {
-                        methods.reset();
-                      }}
-                    >
-                      {t("login.reset")}
-                    </button>
-                  </div>
-                </div>
+              <Col md={4}>
+                <InputText
+                  name="professional.section"
+                  label="Section"
+                  placeholder="Enter section"
+                  register={register("professional.section")}
+                  errors={errors}
+                />
+              </Col>
+              <Col md={4}>
+                <InputSelect
+                  name="professional.roles"
+                  label="Roles"
+                  placeholder="Select role"
+                  options={masterData?.roles?.map(type => ({
+                    value: type.valueCode,
+                    label: type.valueLabel
+                  })) || []}
+                  register={register}
+                  errors={errors}
+                />
               </Col>
             </Row>
-            <Row className="mt-2">
-              <Col
-                md={{ span: 2, offset: 10 }}
-                className="d-flex justify-content-end"
-              >
-                <button
-                  className="generic-btn-submit"
-                  type="button"
-                  onClick={handleBtnClick}
-                >
-                  <i className="fa fa-plus" aria-hidden="true"></i> {t("Add")}
-                </button>
-              </Col>
-            </Row>
-          </form>
+          </Card.Body>
         </Card>
-        
-        <ActionTable
-          tableHeader="Employee List"
-          columns={columns}
-          rowData={rowData}
-          additionalMethod={handleRowClick}
-          showCustomBtn={true}
-          btnName={t("Add")}
-          handleBtnClick={handleBtnClick}
-          handleEditRow={handleEditRow}
-          hideExportBtn={true}
-          searchBarPlaceholder={t("Table.SEARCH_BY")}
-        />
+      </Collapsible>
 
-        <ActionModal
-          show={modal}
-          close={Toggle}
-          title={modalTitle}
-          action={modalAction}
-          isFooterHide={true}
-          size={"lg"}
-        >
-          <FormProvider {...methods}>
-            <form onSubmit={methods.handleSubmit(handleFormSubmit)}>
-              <EmployeeRegistrationForm />
-              <div className="d-flex justify-content-end mt-4 gap-2">
-                <Button
-                  variant="secondary"
-                  onClick={Toggle}
-                  className="cancel-btn"
-                >
-                  Cancel
-                </Button>
-                <Button
-                  variant="primary"
-                  type="submit"
-                  className="submit-btn"
-                  style={{
-                    background: "linear-gradient(135deg, #0077b6, #023e8a)",
-                    border: "none",
-                    boxShadow: "0 4px 6px rgba(0, 0, 0, 0.1)",
-                    padding: "8px 20px",
-                  }}
-                  disabled={!methods.formState.isValid}
-                >
-                  Submit
-                </Button>
-              </div>
-            </form>
-          </FormProvider>
-        </ActionModal>
-      </div>
-    </>
+      {/* Documents Upload Section */}
+      <Collapsible
+        title={
+          <div className="d-flex align-items-center">
+            <FaFileUpload className="me-2" style={{ color: "#2466BF" }} />
+            <span style={{ color: "#2466BF" }}>Documents Upload</span>
+          </div>
+        }
+      >
+        <Card className="form-section-card">
+          <Card.Body>
+            <Row className="g-3">
+              <Col md={4}>
+                <InputText
+                  name="documents.addressProof"
+                  label="Address Proof"
+                  type="file"
+                  register={register("documents.addressProof")}
+                  errors={errors}
+                />
+                <small className="text-muted">Upload PDF, JPG or PNG (Max: 2MB)</small>
+              </Col>
+              <Col md={4}>
+                <InputText
+                  name="documents.identityProof"
+                  label="Identity Proof"
+                  type="file"
+                  register={register("documents.identityProof")}
+                  errors={errors}
+                />
+                <small className="text-muted">Upload PDF, JPG or PNG (Max: 2MB)</small>
+              </Col>
+              <Col md={4}>
+                <InputText
+                  name="documents.appointmentLetter"
+                  label="Appointment Letter"
+                  type="file"
+                  register={register("documents.appointmentLetter")}
+                  errors={errors}
+                />
+                <small className="text-muted">Upload PDF, JPG or PNG (Max: 2MB)</small>
+              </Col>
+            </Row>
+          </Card.Body>
+        </Card>
+      </Collapsible>
+    </div>
   );
 };
 
-export default UserManagement;
+export default EmployeeRegistrationForm;
