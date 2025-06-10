@@ -1,8 +1,9 @@
-import React, { useRef, useEffect } from "react";
+import React, { useRef } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { useForm } from "react-hook-form";
+import { useForm, useFieldArray, Controller } from "react-hook-form";
 import { Container, Row, Col, Card, Button } from "react-bootstrap";
 import { toast } from "react-toastify";
+import axios from "axios";
 import {
   FaUser,
   FaMapMarkerAlt,
@@ -10,17 +11,20 @@ import {
   FaFileUpload,
   FaGraduationCap,
   FaPlus,
-  FaTrash
+  FaTrash,
+  FaArrowLeft,
 } from "react-icons/fa";
 import InputText from "../../../common/InputText.tsx";
+import { handleErrorMessage } from "../../../../utils/errorMessageHandler.js";
 import InputSelect from "../../../common/InputSelect.tsx";
 import Collapsible from "../../../common/Collapsible.js";
 import { CONSTANT_REGEX } from "../../../../utils/constants.ts";
 import { useMasterData } from "../../../context/MasterDataContext.js";
 import NewLoader from "../../../common/NewLoader.js";
 import "./EmployeeRegistration.css";
-import { getData } from "../../../../services/http.service.ts";
+import { getData, postFORMdata } from "../../../../services/http.service.ts";
 import { URLS_ENDPOINT } from "../../../../utils/urlsConstants.ts";
+import AppToggleButton from "../../../common/AppToggleButton.js";
 
 const EmployeeRegistration = () => {
   const navigate = useNavigate();
@@ -28,125 +32,195 @@ const EmployeeRegistration = () => {
   const isEditMode = !!id;
   const loaderRef = useRef();
   const { masterData } = useMasterData();
-  
-  // Form setup with explicit validation mode
+
   const {
     register,
     handleSubmit,
+    control,
     formState: { errors },
     setValue,
     watch,
     reset,
-    control,
   } = useForm({
     mode: "onSubmit",
     defaultValues: {
-      vesselUserDetails: {
-        firstName: "",
-        lastName: "",
-        email: "",
-        phoneNumber: "",
-        gender: "",
-        dateOfBirth: "",
-        addressLine1: "",
-        addressLine2: "",
-        pin: "",
-        district: "",
-        stateUt: "",
-        country: "India",
-      },
-      professional: {
-        appointmentDate: "",
-        employeeType: "",
-        employeeStatus: "",
-        designation: "",
-        department: "Shipping", // Default department
-        section: "",
-        roles: "",
-      },
-      educationDetails: [{
-        qualification: "",
-        stream: "",
-        yearOfPassing: "",
-      }],
-      documents: {
-        addressProof: "",
-        identityProof: "",
-        appointmentLetter: "",
-      }
+      firstName: "",
+      lastName: "",
+      email: "",
+      phoneNumber: "",
+      gender: "",
+      dateOfBirth: "",
+      addressLine1: "",
+      addressLine2: "",
+      pin: "",
+      district: "",
+      stateUt: "",
+      country: "India",
+      appointmentDate: "",
+      employeeType: "",
+      designation: "",
+      addressProof: "",
+      identityProof: "",
+      appointmentLetter: "",
+      educationDetails: [{ qualification: "", stream: "", yearOfPassing: "" }],
+      professionalDetails: [
+        {
+          appointmentDate: "",
+          employeeType: "",
+          employeeStatus: "",
+          designation: "",
+          department: "",
+          section: "",
+          roles: "",
+        },
+      ],
     },
   });
 
   const { fields, append, remove } = useFieldArray({
     control,
-    name: "educationDetails"
+    name: "educationDetails",
   });
 
-  const watchPin = watch("vesselUserDetails.pin");
-  const watchDesignation = watch("professional.designation");
+  const {
+    fields: professionalFields,
+    append: appendProfessional,
+    remove: removeProfessional,
+  } = useFieldArray({
+    control,
+    name: "professionalDetails",
+  });
 
-  // Auto-populate department based on designation
-  useEffect(() => {
-    if (watchDesignation) {
-      // This is a simplified example - you would need to map designations to departments
-      // based on your business logic or master data
-      setValue("professional.department", "Shipping"); // Default department
-    }
-  }, [watchDesignation, setValue]);
+  const watchPin = watch("pin");
+  const watchAddressProof = watch("addressProof");
+  const watchIdentityProof = watch("identityProof");
+  const watchAppointmentLetter = watch("appointmentLetter");
 
-  // Improved pincode lookup with debounce
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      const fetchAddressDetails = async (pin) => {
-        if (pin?.length === 6) {
-          try {
-            loaderRef.current?.show();
-            const URL = process.env.REACT_APP_PUBLIC_URL + URLS_ENDPOINT.APP_SERVICES.GET_DETAILS_BY_PINCODE + pin;
-            const response = await getData(URL);
-            if (response?.status === 200 && response?.data?.length > 0) {
-              setValue('vesselUserDetails.district', response?.data[0]?.district || "");
-              setValue('vesselUserDetails.stateUt', response?.data[0]?.stateName || "");
-              setValue("vesselUserDetails.country", "India");
-            } else {
-              setValue("vesselUserDetails.district", "");
-              setValue("vesselUserDetails.stateUt", "");
-              setValue("vesselUserDetails.country", "India");
-            }
-          } catch (error) {
-            console.error("Error fetching pincode details:", error);
-            setValue("vesselUserDetails.district", "");
-            setValue("vesselUserDetails.stateUt", "");
-            setValue("vesselUserDetails.country", "India");
-          } finally {
-            loaderRef.current?.hide();
-          }
-        }
-      };
-  
-      if (watchPin) {
-        fetchAddressDetails(watchPin);
+  const fetchAddressDetails = async (pin) => {
+    try {
+      const URL =
+        process.env.REACT_APP_PUBLIC_URL +
+        URLS_ENDPOINT.APP_SERVICES.GET_DETAILS_BY_PINCODE +
+        pin;
+      const response = await getData(URL);
+      if (response?.status === 200 && response?.data?.length > 0) {
+        setValue("district", response?.data[0]?.district);
+        setValue("stateUt", response?.data[0]?.stateName);
+        setValue("country", "India");
+      } else {
+        setValue("district", "");
+        setValue("stateUt", "");
+        setValue("country", "");
+        toast.info("No data found for this PIN code");
       }
-    }, 500); // 500ms debounce
-
-    return () => clearTimeout(timer);
-  }, [watchPin, setValue]);
+      loaderRef.current?.hide();
+    } catch (error) {
+      setValue("district", "");
+      setValue("stateUt", "");
+      setValue("country", "");
+      loaderRef.current?.hide();
+      toast.error("Error fetching address details");
+    }
+  };
 
   const onSubmit = async (data) => {
     try {
-      console.log("Form submitted with data:", data);
       loaderRef.current?.show();
-      
-      // Simulate API call
-      setTimeout(() => {
-        toast.success(isEditMode ? "Employee updated successfully!" : "Employee registered successfully!");
-        loaderRef.current?.hide();
-        navigate("/iwt/employee-management");
-      }, 1000);
-      
+
+      const vesselUserDetails = {
+        id: "",
+        userType: "",
+        userCategory: "",
+        firstName: data.firstName,
+        lastName: data.lastName,
+        emailId: data.email,
+        phoneNumber: data.phoneNumber,
+        panNumber: data.panNumber || "",
+        gstNumber: data.gstNumber || "",
+        addressDetails: data.addressLine1 + (data.addressLine2 ? ", " + data.addressLine2 : ""),
+        addressLine1: data.addressLine1,
+        addressLine2: data.addressLine2,
+        pin: data.pin,
+        district: data.district,
+        stateUt: data.stateUt,
+        country: data.country,
+        isActive: data?.isActive,
+        keycloakId: "",
+        dateOfBirth: data.dateOfBirth,
+        gender: data.gender,
+        authorizedPerson: null,
+        companyRegistration: null,
+        educationDetails: data?.educationDetails?.map((ed) => ({
+          uuid: "",
+          employeeUUID: "",
+          qualification: ed.qualification,
+          stream: ed.stream,
+          yearOfPassing: ed.yearOfPassing,
+          additionalEducationDetails: ed.additionalEducationDetails || "",
+        })),
+        professionalDetails: data?.professionalDetails?.map((pd) => ({
+          uuid: "",
+          employeeUUID: "",
+          appointmentDate: pd.appointmentDate,
+          employeeType: pd.employeeType,
+          employeeStatus: pd.employeeStatus,
+          designation: pd.designation,
+          department: pd.department,
+          section: pd.section,
+          role: pd.roles,
+        })),
+        aadharNumber: data.aadharNumber || "",
+        // password: "admin",
+      };
+
+      const formData = new FormData();
+      formData.append("request", new Blob([JSON.stringify(vesselUserDetails)], { type: 'application/json' }));
+
+      if (watchAddressProof && watchAddressProof[0]) {
+        formData.append("files", watchAddressProof[0]);
+      }
+      if (watchIdentityProof && watchIdentityProof[0]) {
+        formData.append("files", watchIdentityProof[0]);
+      }
+      if (watchAppointmentLetter && watchAppointmentLetter[0]) {
+        formData.append("files", watchAppointmentLetter[0]);
+      }
+      console.log("Submitting payload to API :", formData);
+      await submitEmpDetails(formData);
+
     } catch (error) {
-      console.error("Error submitting form:", error);
-      toast.error("Error submitting form");
       loaderRef.current?.hide();
+      toast.error(
+        error?.response?.data?.message ||
+        "Error submitting form. Please try again."
+      );
+    }
+  };
+
+  const submitEmpDetails = async (payload) => {
+    try {
+      const URL = process.env.REACT_APP_AUTH_URL + URLS_ENDPOINT.USER_SERVICE.CREATE_EMP;
+      loaderRef.current?.show();
+      const response = await postFORMdata(URL, payload);
+      const apiRes = response?.data ? { ...response?.data } : null;
+      if (apiRes?.responseStatus?.status === "200") {
+        loaderRef?.current?.hide();
+        toast.success(
+          apiRes?.responseStatus?.message || "Employee registered successfully!",
+          { position: "top-right" }
+        );
+        handleCancel();
+      } else {
+        loaderRef?.current?.hide();
+        toast.info(
+          apiRes?.responseStatus?.message || "Something went wrong..",
+          { position: "top-right" }
+        );
+      }
+    } catch (err) {
+      console.log(err);
+      loaderRef?.current?.hide();
+      handleErrorMessage(err?.response?.data);
     }
   };
 
@@ -159,8 +233,36 @@ const EmployeeRegistration = () => {
       <NewLoader ref={loaderRef} />
       <Container fluid className="p-4">
         <Card className="mb-4">
-          <Card.Header className="bg-primary text-white">
-            <h5 className="mb-0">{isEditMode ? "Edit Employee" : "Add Employee"}</h5>
+          <Card.Header
+            className="bg-primary text-white d-flex align-items-center justify-content-center position-relative"
+            style={{
+    minHeight: 56,
+    background: "linear-gradient(135deg, rgb(0, 119, 182), rgb(2, 62, 138))",
+    border: "none",
+  }}
+          >
+            {/* Back Button */}
+            <Button
+              variant="link"
+              className="p-0 me-2"
+              style={{
+                color: "white",
+                textDecoration: "none",
+                position: "absolute",
+                left: 0,
+                top: "50%",
+                transform: "translateY(-50%)",
+              }}
+              onClick={() => navigate("/iwt/employee-management")}
+            >
+              <FaArrowLeft size={22} />
+            </Button>
+            {/* Centered Title */}
+            <div style={{ fontWeight: 600, fontSize: 22, color: "#fff" }}>
+              {isEditMode ? "Edit Employee" : "Add Employee"}
+            </div>
+            {/* Empty right side for spacing */}
+            <div style={{ width: 40 }}></div>
           </Card.Header>
           <Card.Body>
             <form onSubmit={handleSubmit(onSubmit)} className="employee-form">
@@ -179,92 +281,108 @@ const EmployeeRegistration = () => {
                     <Row className="g-3">
                       <Col md={4}>
                         <InputText
-                          name="vesselUserDetails.firstName"
+                          name="firstName"
                           label="First Name"
                           placeholder="Enter first name"
                           required={true}
-                          register={register("vesselUserDetails.firstName", {
-                            required: "First Name is required",
-                          })}
-                          errors={errors.vesselUserDetails?.firstName}
+                          register={{
+                            ...register("firstName", {
+                              required: "First Name is required",
+                            }),
+                          }}
+                          errors={errors}
                         />
                       </Col>
                       <Col md={4}>
                         <InputText
-                          name="vesselUserDetails.lastName"
+                          name="lastName"
                           label="Last Name"
                           placeholder="Enter last name"
                           required={true}
-                          register={register("vesselUserDetails.lastName", {
-                            required: "Last Name is required",
-                          })}
-                          errors={errors.vesselUserDetails?.lastName}
+                          register={{
+                            ...register("lastName", {
+                              required: "Last Name is required",
+                            }),
+                          }}
+                          errors={errors}
                         />
                       </Col>
                       <Col md={4}>
                         <InputText
-                          name="vesselUserDetails.email"
+                          name="email"
                           label="Email ID"
                           type="email"
                           placeholder="Enter email address"
                           required={true}
-                          register={register("vesselUserDetails.email", {
-                            required: "Email is required",
-                            pattern: {
-                              value: CONSTANT_REGEX.EMAIL,
-                              message: "Invalid email address",
-                            },
-                          })}
-                          errors={errors.vesselUserDetails?.email}
+                          register={{
+                            ...register("email", {
+                              required: "Email is required",
+                              pattern: {
+                                value: CONSTANT_REGEX.EMAIL,
+                                message: "Invalid email address",
+                              },
+                            }),
+                          }}
+                          errors={errors}
                         />
                       </Col>
                       <Col md={4}>
                         <InputText
-                          name="vesselUserDetails.phoneNumber"
+                          name="phoneNumber"
                           label="Phone Number"
                           placeholder="Enter 10-digit phone number"
                           required={true}
-                          register={register("vesselUserDetails.phoneNumber", {
-                            required: "Phone Number is required",
-                            pattern: {
-                              value: CONSTANT_REGEX.MOBILE,
-                              message: "Phone number must be 10 digits",
-                            },
-                          })}
-                          errors={errors.vesselUserDetails?.phoneNumber}
+                          register={{
+                            ...register("phoneNumber", {
+                              required: "Phone Number is required",
+                              pattern: {
+                                value: CONSTANT_REGEX.MOBILE,
+                                message: "Phone number must be 10 digits",
+                              },
+                            }),
+                          }}
+                          errors={errors}
                         />
                       </Col>
                       <Col md={4}>
                         <InputSelect
-                          name="vesselUserDetails.gender"
+                          name="gender"
                           label="Gender"
                           required={true}
                           options={[
-                            { value: "", label: "Select Gender", disabled: true },
-                            ...(masterData?.genders?.map(type => ({
+                            { value: "", label: "Select Gender" },
+                            ...(masterData?.genders?.map((type) => ({
                               value: type.valueCode,
-                              label: type.valueLabel
-                            })) || [])
+                              label: type.valueLabel,
+                            })) || [
+                                { value: "male", label: "Male" },
+                                { value: "female", label: "Female" },
+                                { value: "other", label: "Other" },
+                              ]),
                           ]}
-                          register={register("vesselUserDetails.gender", {
+                          register={register("gender", {
                             required: "Gender is required",
                           })}
-                          errors={errors.vesselUserDetails?.gender}
-                          value={watch("vesselUserDetails.gender")}
-                          onChange={(value) => setValue("vesselUserDetails.gender", value)}
+                          error={errors.gender?.message}
+                          value={watch("gender")}
+                          onChange={(value) =>
+                            setValue("gender", value, { shouldValidate: true })
+                          }
                         />
                       </Col>
                       <Col md={4}>
                         <InputText
-                          name="vesselUserDetails.dateOfBirth"
+                          name="dateOfBirth"
                           label="Date of Birth"
                           type="date"
                           placeholder="Select date of birth"
                           required={true}
-                          register={register("vesselUserDetails.dateOfBirth", {
-                            required: "Date of Birth is required",
-                          })}
-                          errors={errors.vesselUserDetails?.dateOfBirth}
+                          register={{
+                            ...register("dateOfBirth", {
+                              required: "Date of Birth is required",
+                            }),
+                          }}
+                          errors={errors}
                         />
                       </Col>
                     </Row>
@@ -287,68 +405,87 @@ const EmployeeRegistration = () => {
                     <Row className="g-3">
                       <Col md={6}>
                         <InputText
-                          name="vesselUserDetails.addressLine1"
+                          name="addressLine1"
                           label="Address Line-1"
                           placeholder="Enter address line 1"
                           required={true}
-                          register={register("vesselUserDetails.addressLine1", {
-                            required: "Address Line-1 is required",
-                          })}
-                          errors={errors.vesselUserDetails?.addressLine1}
+                          register={{
+                            ...register("addressLine1", {
+                              required: "Address Line-1 is required",
+                            }),
+                          }}
+                          errors={errors}
                         />
                       </Col>
                       <Col md={6}>
                         <InputText
-                          name="vesselUserDetails.addressLine2"
+                          name="addressLine2"
                           label="Address Line-2"
                           placeholder="Enter address line 2 (optional)"
-                          register={register("vesselUserDetails.addressLine2")}
-                          errors={errors.vesselUserDetails?.addressLine2}
+                          register={{
+                            ...register("addressLine2"),
+                          }}
+                          errors={errors}
                         />
                       </Col>
                       <Col md={3}>
                         <InputText
-                          name="vesselUserDetails.pin"
+                          name="pin"
                           label="PIN"
                           placeholder="Enter 6-digit PIN code"
                           required={true}
-                          register={register("vesselUserDetails.pin", {
-                            required: "PIN Code is required",
-                            pattern: {
-                              value: /^[0-9]{6}$/,
-                              message: "PIN must be 6 digits",
-                            },
-                          })}
-                          errors={errors.vesselUserDetails?.pin}
+                          register={{
+                            ...register("pin", {
+                              required: "PIN Code is required",
+                              pattern: {
+                                value: /^[0-9]{6}$/,
+                                message: "PIN must be 6 digits",
+                              },
+                            }),
+                          }}
+                          onChange={(e) => {
+                            const pinValue = e.target.value;
+                            if (pinValue.length === 6) {
+                              loaderRef.current?.show();
+                              fetchAddressDetails(pinValue);
+                            }
+                          }}
+                          errors={errors}
                         />
                       </Col>
                       <Col md={3}>
                         <InputText
-                          name="vesselUserDetails.district"
+                          name="district"
                           label="District"
                           placeholder="Auto-populated"
-                          register={register("vesselUserDetails.district")}
-                          errors={errors.vesselUserDetails?.district}
+                          register={{
+                            ...register("district"),
+                          }}
+                          errors={errors}
                           readOnly
                         />
                       </Col>
                       <Col md={3}>
                         <InputText
-                          name="vesselUserDetails.stateUt"
+                          name="stateUt"
                           label="State/UT"
                           placeholder="Auto-populated"
-                          register={register("vesselUserDetails.stateUt")}
-                          errors={errors.vesselUserDetails?.stateUt}
+                          register={{
+                            ...register("stateUt"),
+                          }}
+                          errors={errors}
                           readOnly
                         />
                       </Col>
                       <Col md={3}>
                         <InputText
-                          name="vesselUserDetails.country"
+                          name="country"
                           label="Country"
                           placeholder="Auto-populated"
-                          register={register("vesselUserDetails.country")}
-                          errors={errors.vesselUserDetails?.country}
+                          register={{
+                            ...register("country"),
+                          }}
+                          errors={errors}
                           readOnly
                         />
                       </Col>
@@ -371,51 +508,125 @@ const EmployeeRegistration = () => {
                   <Card.Body>
                     {fields.map((field, index) => (
                       <div key={field.id} className="education-entry mb-4">
-                        {index > 0 && <div className="entry-divider mb-3"></div>}
                         <Row className="g-3">
                           <Col md={4}>
                             <InputText
                               name={`educationDetails.${index}.qualification`}
-                              label={`Qualification ${index === 0 ? '*' : ''}`}
+                              label={`Qualification${index === 0 ? " *" : ""}`}
                               placeholder="Enter qualification"
-                              required={index === 0}
-                              register={register(`educationDetails.${index}.qualification`, {
-                                required: index === 0 ? "Qualification is required" : false
-                              })}
-                              errors={errors.educationDetails?.[index]?.qualification}
+                              register={register(
+                                `educationDetails.${index}.qualification`,
+                                {
+                                  required:
+                                    index === 0
+                                      ? "Qualification is required"
+                                      : false,
+                                }
+                              )}
+                              errors={
+                                errors?.educationDetails?.[index]?.qualification
+                                  ? {
+                                    educationDetails: {
+                                      [index]: {
+                                        qualification:
+                                          errors.educationDetails[index]
+                                            .qualification,
+                                      },
+                                    },
+                                  }
+                                  : {}
+                              }
+                              style={{
+                                borderColor:
+                                  errors?.educationDetails?.[index]
+                                    ?.qualification && "#dc3545",
+                                backgroundColor:
+                                  errors?.educationDetails?.[index]
+                                    ?.qualification && "#fff8f8",
+                              }}
                             />
                           </Col>
                           <Col md={4}>
                             <InputText
                               name={`educationDetails.${index}.stream`}
-                              label={`Stream ${index === 0 ? '*' : ''}`}
+                              label={`Stream${index === 0 ? " *" : ""}`}
                               placeholder="Enter stream"
-                              required={index === 0}
-                              register={register(`educationDetails.${index}.stream`, {
-                                required: index === 0 ? "Stream is required" : false
-                              })}
-                              errors={errors.educationDetails?.[index]?.stream}
+                              register={register(
+                                `educationDetails.${index}.stream`,
+                                {
+                                  required:
+                                    index === 0
+                                      ? "Stream is required"
+                                      : false,
+                                }
+                              )}
+                              errors={
+                                errors?.educationDetails?.[index]?.stream
+                                  ? {
+                                    educationDetails: {
+                                      [index]: {
+                                        stream:
+                                          errors.educationDetails[index]
+                                            .stream,
+                                      },
+                                    },
+                                  }
+                                  : {}
+                              }
+                              style={{
+                                borderColor:
+                                  errors?.educationDetails?.[index]?.stream &&
+                                  "#dc3545",
+                                backgroundColor:
+                                  errors?.educationDetails?.[index]?.stream &&
+                                  "#fff8f8",
+                              }}
                             />
                           </Col>
                           <Col md={3}>
                             <InputText
                               name={`educationDetails.${index}.yearOfPassing`}
-                              label={`Year of Passing ${index === 0 ? '*' : ''}`}
+                              label={`Year of Passing${index === 0 ? " *" : ""}`}
                               placeholder="Enter year"
                               type="number"
-                              required={index === 0}
-                              register={register(`educationDetails.${index}.yearOfPassing`, {
-                                required: index === 0 ? "Year of Passing is required" : false,
-                                min: {
-                                  value: 1900,
-                                  message: "Year must be after 1900"
-                                },
-                                max: {
-                                  value: new Date().getFullYear(),
-                                  message: "Year cannot be in the future"
+                              register={register(
+                                `educationDetails.${index}.yearOfPassing`,
+                                {
+                                  required:
+                                    index === 0
+                                      ? "Year of Passing is required"
+                                      : false,
+                                  min: {
+                                    value: 1900,
+                                    message: "Invalid year",
+                                  },
+                                  max: {
+                                    value: new Date().getFullYear(),
+                                    message: "Invalid year",
+                                  },
                                 }
-                              })}
-                              errors={errors.educationDetails?.[index]?.yearOfPassing}
+                              )}
+                              errors={
+                                errors?.educationDetails?.[index]?.yearOfPassing
+                                  ? {
+                                    educationDetails: {
+                                      [index]: {
+                                        yearOfPassing:
+                                          errors.educationDetails[index]
+                                            .yearOfPassing,
+                                      },
+                                    },
+                                  }
+                                  : {}
+                              }
+                              style={{
+                                borderColor:
+                                  errors?.educationDetails?.[index]
+                                    ?.yearOfPassing && "#dc3545",
+                                backgroundColor:
+                                  errors?.educationDetails?.[index]
+                                    ?.yearOfPassing && "#fff8f8",
+                              }}
                             />
                           </Col>
                           <Col md={1} className="d-flex align-items-end">
@@ -435,10 +646,16 @@ const EmployeeRegistration = () => {
                     ))}
                     <Button
                       variant="outline-primary"
-                      onClick={() => append({ qualification: "", stream: "", yearOfPassing: "" })}
-                      className="mt-2"
+                      onClick={() =>
+                        append({
+                          qualification: "",
+                          stream: "",
+                          yearOfPassing: "",
+                        })
+                      }
+                      className="add-education-btn"
                     >
-                      <FaPlus className="me-2" /> Add Education
+                      <FaPlus className="me-2" /> Add Education Details
                     </Button>
                   </Card.Body>
                 </Card>
@@ -449,127 +666,297 @@ const EmployeeRegistration = () => {
                 title={
                   <div className="d-flex align-items-center">
                     <FaBriefcase className="me-2" style={{ color: "#2466BF" }} />
-                    <span style={{ color: "#2466BF" }}>Professional Details</span>
+                    <span style={{ color: "#2466BF" }}>
+                      Professional Details
+                    </span>
                   </div>
                 }
                 defaultOpen={true}
               >
                 <Card className="form-section-card">
                   <Card.Body>
-                    <Row className="g-3">
-                      <Col md={4}>
-                        <InputText
-                          name="professional.appointmentDate"
-                          label="Appointment Date"
-                          type="date"
-                          placeholder="Select appointment date"
-                          required={true}
-                          register={register("professional.appointmentDate", {
-                            required: "Appointment Date is required",
-                          })}
-                          errors={errors.professional?.appointmentDate}
-                        />
-                      </Col>
-                      <Col md={4}>
-                        <InputSelect
-                          name="professional.employeeType"
-                          label="Employee Type"
-                          required={true}
-                          options={[
-                            { value: "", label: "Select Employee Type", disabled: true },
-                            ...(masterData?.employeeTypes?.map(type => ({
-                              value: type.valueCode,
-                              label: type.valueLabel
-                            })) || [])
-                          ]}
-                          register={register("professional.employeeType", {
-                            required: "Employee Type is required",
-                          })}
-                          errors={errors.professional?.employeeType}
-                          value={watch("professional.employeeType")}
-                          onChange={(value) => setValue("professional.employeeType", value)}
-                        />
-                      </Col>
-                      <Col md={4}>
-                        <InputSelect
-                          name="professional.employeeStatus"
-                          label="Employee Status"
-                          required={true}
-                          options={[
-                            { value: "", label: "Select Employee Status", disabled: true },
-                            ...(masterData?.employeeStatuses?.map(type => ({
-                              value: type.valueCode,
-                              label: type.valueLabel
-                            })) || [])
-                          ]}
-                          register={register("professional.employeeStatus", {
-                            required: "Employee Status is required",
-                          })}
-                          errors={errors.professional?.employeeStatus}
-                          value={watch("professional.employeeStatus")}
-                          onChange={(value) => setValue("professional.employeeStatus", value)}
-                        />
-                      </Col>
-                      <Col md={4}>
-                        <InputSelect
-                          name="professional.designation"
-                          label="Designation"
-                          required={true}
-                          options={[
-                            { value: "", label: "Select Designation", disabled: true },
-                            ...(masterData?.designations?.map(type => ({
-                              value: type.valueCode,
-                              label: type.valueLabel
-                            })) || [])
-                          ]}
-                          register={register("professional.designation", {
-                            required: "Designation is required",
-                          })}
-                          errors={errors.professional?.designation}
-                          value={watch("professional.designation")}
-                          onChange={(value) => setValue("professional.designation", value)}
-                        />
-                      </Col>
-                      <Col md={4}>
-                        <InputText
-                          name="professional.department"
-                          label="Department"
-                          placeholder="Auto-populated"
-                          register={register("professional.department")}
-                          errors={errors.professional?.department}
-                          readOnly
-                        />
-                      </Col>
-                      <Col md={4}>
-                        <InputText
-                          name="professional.section"
-                          label="Section"
-                          placeholder="Enter section"
-                          register={register("professional.section")}
-                          errors={errors.professional?.section}
-                        />
-                      </Col>
-                      <Col md={4}>
-                        <InputSelect
-                          name="professional.roles"
-                          label="Roles"
-                          required={true}
-                          options={[
-                            { value: "", label: "Select Role", disabled: true },
-                            ...(masterData?.roles?.map(type => ({
-                              value: type.valueCode,
-                              label: type.valueLabel
-                            })) || [])
-                          ]}
-                          register={register("professional.roles", {
-                            required: "Role is required",
-                          })}
-                          errors={errors.professional?.roles}
-                          value={watch("professional.roles")}
-                          onChange={(value) => setValue("professional.roles", value)}
-                        />
-                      </Col>
-                    </Row>
+                    {professionalFields.map((field, index) => (
+                      <div key={field.id} className="professional-entry mb-4">
+                        <Row className="g-3">
+                          <Col md={4}>
+                            <InputText
+                              name={`professionalDetails.${index}.appointmentDate`}
+                              label="Appointment Date *"
+                              type="date"
+                              placeholder="Select appointment date"
+                              register={register(
+                                `professionalDetails.${index}.appointmentDate`,
+                                { required: "Appointment Date is required" }
+                              )}
+                              errors={
+                                errors?.professionalDetails?.[index]?.appointmentDate
+                                  ? {
+                                    professionalDetails: {
+                                      [index]: {
+                                        appointmentDate:
+                                          errors.professionalDetails[index]
+                                            .appointmentDate,
+                                      },
+                                    },
+                                  }
+                                  : {}
+                              }
+                              style={{
+                                borderColor:
+                                  errors?.professionalDetails?.[index]
+                                    ?.appointmentDate && "#dc3545",
+                                backgroundColor:
+                                  errors?.professionalDetails?.[index]
+                                    ?.appointmentDate && "#fff8f8",
+                              }}
+                            />
+                          </Col>
+                          <Col md={4}>
+                            <InputSelect
+                              name={`professionalDetails.${index}.employeeType`}
+                              label="Employee Type *"
+                              placeholder="Select employee type"
+                              options={
+                                masterData?.employeeTypes?.map((type) => ({
+                                  value: type.valueCode,
+                                  label: type.valueLabel,
+                                })) || []
+                              }
+                              register={register(
+                                `professionalDetails.${index}.employeeType`,
+                                { required: "Employee Type is required" }
+                              )}
+                              errors={
+                                errors?.professionalDetails?.[index]?.employeeType
+                                  ? {
+                                    professionalDetails: {
+                                      [index]: {
+                                        employeeType:
+                                          errors.professionalDetails[index]
+                                            .employeeType,
+                                      },
+                                    },
+                                  }
+                                  : {}
+                              }
+                              value={
+                                watch(
+                                  `professionalDetails.${index}.employeeType`
+                                ) || ""
+                              }
+                              onChange={(val) =>
+                                setValue(
+                                  `professionalDetails.${index}.employeeType`,
+                                  val,
+                                  { shouldValidate: true }
+                                )
+                              }
+                            />
+                          </Col>
+                          <Col md={4}>
+                            <InputSelect
+                              name={`professionalDetails.${index}.employeeStatus`}
+                              label="Employee Status *"
+                              placeholder="Select employee status"
+                              options={
+                                masterData?.employeeStatuses?.map((type) => ({
+                                  value: type.valueCode,
+                                  label: type.valueLabel,
+                                })) || []
+                              }
+                              register={register(
+                                `professionalDetails.${index}.employeeStatus`,
+                                { required: "Employee Status is required" }
+                              )}
+                              errors={
+                                errors?.professionalDetails?.[index]?.employeeStatus
+                                  ? {
+                                    professionalDetails: {
+                                      [index]: {
+                                        employeeStatus:
+                                          errors.professionalDetails[index]
+                                            .employeeStatus,
+                                      },
+                                    },
+                                  }
+                                  : {}
+                              }
+                              value={
+                                watch(
+                                  `professionalDetails.${index}.employeeStatus`
+                                ) || ""
+                              }
+                              onChange={(val) =>
+                                setValue(
+                                  `professionalDetails.${index}.employeeStatus`,
+                                  val,
+                                  { shouldValidate: true }
+                                )
+                              }
+                            />
+                          </Col>
+                          <Col md={4}>
+                            <InputSelect
+                              name={`professionalDetails.${index}.designation`}
+                              label="Designation *"
+                              placeholder="Select designation"
+                              options={
+                                masterData?.designations?.map((type) => ({
+                                  value: type.valueCode,
+                                  label: type.valueLabel,
+                                })) || []
+                              }
+                              register={register(
+                                `professionalDetails.${index}.designation`,
+                                { required: "Designation is required" }
+                              )}
+                              errors={
+                                errors?.professionalDetails?.[index]?.designation
+                                  ? {
+                                    professionalDetails: {
+                                      [index]: {
+                                        designation:
+                                          errors.professionalDetails[index]
+                                            .designation,
+                                      },
+                                    },
+                                  }
+                                  : {}
+                              }
+                              value={
+                                watch(
+                                  `professionalDetails.${index}.designation`
+                                ) || ""
+                              }
+                              onChange={(val) =>
+                                setValue(
+                                  `professionalDetails.${index}.designation`,
+                                  val,
+                                  { shouldValidate: true }
+                                )
+                              }
+                            />
+                          </Col>
+                          <Col md={4}>
+                            <InputText
+                              name={`professionalDetails.${index}.department`}
+                              label="Department"
+                              placeholder="Enter department"
+                              register={register(
+                                `professionalDetails.${index}.department`
+                              )}
+                              errors={
+                                errors?.professionalDetails?.[index]?.department
+                                  ? {
+                                    professionalDetails: {
+                                      [index]: {
+                                        department:
+                                          errors.professionalDetails[index]
+                                            .department,
+                                      },
+                                    },
+                                  }
+                                  : {}
+                              }
+                            />
+                          </Col>
+                          <Col md={4}>
+                            <InputText
+                              name={`professionalDetails.${index}.section`}
+                              label="Section"
+                              placeholder="Enter section"
+                              register={register(
+                                `professionalDetails.${index}.section`
+                              )}
+                              errors={
+                                errors?.professionalDetails?.[index]?.section
+                                  ? {
+                                    professionalDetails: {
+                                      [index]: {
+                                        section:
+                                          errors.professionalDetails[index]
+                                            .section,
+                                      },
+                                    },
+                                  }
+                                  : {}
+                              }
+                            />
+                          </Col>
+                          <Col md={4}>
+                            <InputSelect
+                              name={`professionalDetails.${index}.roles`}
+                              label="Roles *"
+                              placeholder="Select role"
+                              options={
+                                masterData?.roles?.map((type) => ({
+                                  value: type.valueCode,
+                                  label: type.valueLabel,
+                                })) || []
+                              }
+                              register={register(
+                                `professionalDetails.${index}.roles`,
+                                { required: "Role is required" }
+                              )}
+                              errors={
+                                errors?.professionalDetails?.[index]?.roles
+                                  ? {
+                                    professionalDetails: {
+                                      [index]: {
+                                        roles:
+                                          errors.professionalDetails[index]
+                                            .roles,
+                                      },
+                                    },
+                                  }
+                                  : {}
+                              }
+                              value={
+                                watch(
+                                  `professionalDetails.${index}.roles`
+                                ) || ""
+                              }
+                              onChange={(val) =>
+                                setValue(
+                                  `professionalDetails.${index}.roles`,
+                                  val,
+                                  { shouldValidate: true }
+                                )
+                              }
+                            />
+                          </Col>
+                          <Col md={1} className="d-flex align-items-end">
+                            {index > 0 && (
+                              <Button
+                                variant="danger"
+                                size="sm"
+                                onClick={() => removeProfessional(index)}
+                                className="mt-1"
+                              >
+                                <FaTrash />
+                              </Button>
+                            )}
+                          </Col>
+                        </Row>
+                      </div>
+                    ))}
+                    <Button
+                      variant="outline-primary"
+                      onClick={() =>
+                        appendProfessional({
+                          appointmentDate: "",
+                          employeeType: "",
+                          employeeStatus: "",
+                          designation: "",
+                          department: "",
+                          section: "",
+                          roles: "",
+                        })
+                      }
+                      className="add-education-btn"
+                    >
+                      <FaPlus className="me-2" /> Add Professional Details
+                    </Button>
                   </Card.Body>
                 </Card>
               </Collapsible>
@@ -579,7 +966,9 @@ const EmployeeRegistration = () => {
                 title={
                   <div className="d-flex align-items-center">
                     <FaFileUpload className="me-2" style={{ color: "#2466BF" }} />
-                    <span style={{ color: "#2466BF" }}>Documents Upload</span>
+                    <span style={{ color: "#2466BF" }}>
+                      Documents Upload
+                    </span>
                   </div>
                 }
                 defaultOpen={true}
@@ -589,14 +978,14 @@ const EmployeeRegistration = () => {
                     <Row className="g-3">
                       <Col md={4}>
                         <InputText
-                          name="documents.addressProof"
+                          name="addressProof"
                           label="Address Proof"
                           type="file"
                           required={true}
-                          register={register("documents.addressProof", {
+                          register={register("addressProof", {
                             required: "Address Proof is required",
                           })}
-                          errors={errors.documents?.addressProof}
+                          errors={errors}
                         />
                         <small className="text-muted">
                           Upload PDF, JPG or PNG (Max: 2MB)
@@ -604,14 +993,14 @@ const EmployeeRegistration = () => {
                       </Col>
                       <Col md={4}>
                         <InputText
-                          name="documents.identityProof"
+                          name="identityProof"
                           label="Identity Proof"
                           type="file"
                           required={true}
-                          register={register("documents.identityProof", {
+                          register={register("identityProof", {
                             required: "Identity Proof is required",
                           })}
-                          errors={errors.documents?.identityProof}
+                          errors={errors}
                         />
                         <small className="text-muted">
                           Upload PDF, JPG or PNG (Max: 2MB)
@@ -619,14 +1008,14 @@ const EmployeeRegistration = () => {
                       </Col>
                       <Col md={4}>
                         <InputText
-                          name="documents.appointmentLetter"
+                          name="appointmentLetter"
                           label="Appointment Letter"
                           type="file"
                           required={true}
-                          register={register("documents.appointmentLetter", {
+                          register={register("appointmentLetter", {
                             required: "Appointment Letter is required",
                           })}
-                          errors={errors.documents?.appointmentLetter}
+                          errors={errors}
                         />
                         <small className="text-muted">
                           Upload PDF, JPG or PNG (Max: 2MB)
@@ -639,14 +1028,23 @@ const EmployeeRegistration = () => {
 
               {/* Form Actions */}
               <div className="d-flex justify-content-end mt-4 gap-2">
-                <Button 
-                  variant="secondary" 
-                  onClick={handleCancel}
-                >
+                <Col style={{ display: "flex" }}>
+                  <strong style={{ marginTop: "5px" }}>User Status : </strong>
+                  &nbsp; &nbsp;
+                  <Controller
+                    name="toggleChoice"
+                    control={control}
+                    render={({ field }) => (
+                      <AppToggleButton labels={["In-Active", "Active"]} {...field} />
+                    )}
+                  />
+                </Col>
+
+                <Button variant="secondary" onClick={handleCancel}>
                   Cancel
                 </Button>
-                <Button 
-                  variant="primary" 
+                <Button
+                  variant="primary"
                   type="submit"
                   style={{
                     background: "linear-gradient(135deg, #0077b6, #023e8a)",
@@ -667,3 +1065,63 @@ const EmployeeRegistration = () => {
 };
 
 export default EmployeeRegistration;
+//////
+.form-section-card {
+  border: 1px solid #e9ecef;
+  border-radius: 8px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
+  margin-bottom: 1.5rem;
+}
+
+.section-title {
+  display: flex;
+  align-items: center;
+  margin-bottom: 1.5rem;
+  color: #2466BF;
+  font-weight: 600;
+}
+
+.section-icon {
+  margin-right: 0.75rem;
+  font-size: 1.25rem;
+}
+
+/* Custom styling for validation */
+.form-control.is-invalid {
+  border-color: #dc3545 !important;
+  background-color: #fff8f8 !important;
+}
+
+.invalid-feedback {
+  display: block !important;
+  color: #dc3545;
+  font-size: 0.875rem;
+  margin-top: 0.25rem;
+}
+
+/* Ensure error messages are always visible */
+.form-control.is-invalid ~ .invalid-feedback,
+.form-control.is-invalid ~ .invalid-tooltip, 
+.was-validated .form-control:invalid ~ .invalid-feedback,
+.was-validated .form-control:invalid ~ .invalid-tooltip {
+  display: block !important;
+}
+
+/* Style for select inputs with errors */
+.react-select-container.is-invalid .react-select__control {
+  border-color: #dc3545 !important;
+  background-color: #fff8f8 !important;
+}
+
+/* Success state styling */
+.form-control.is-valid {
+  border-color: #198754 !important;
+  background-color: #f8fff9 !important;
+}
+
+.employee-form .btn-primary {
+  background: linear-gradient(135deg, #0077b6, #023e8a);
+  border: none;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  padding: 8px 20px;
+}
