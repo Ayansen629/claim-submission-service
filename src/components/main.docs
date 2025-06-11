@@ -49,14 +49,14 @@ const InputText: React.FC<InputTextProps> = ({
   const isPassword = type === "password";
   const inputType = isPassword ? (showPassword ? "text" : "password") : type;
 
-
+  // Handle nested field names (e.g., "user.name")
   const fieldKey = name.includes(".") ? name.split(".").pop() : name;
   const hasError = errors && errors[fieldKey];
   const errorMessage = hasError?.message;
 
-
   const [inputValue, setInputValue] = useState("");
   const [isComplete, setIsComplete] = useState(false);
+  const [touched, setTouched] = useState(false);
 
   const validationPattern = useRef<RegExp | null>(null);
 
@@ -100,6 +100,7 @@ const InputText: React.FC<InputTextProps> = ({
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
     setInputValue(value);
+    setTouched(true);
 
     if (name.includes("pin") && value.length === 6) {
       setTimeout(() => {
@@ -116,8 +117,11 @@ const InputText: React.FC<InputTextProps> = ({
 
   const togglePasswordVisibility = () => setShowPassword((prev) => !prev);
 
+  // Determine if we should show error styling
+  const showError = hasError || (required && touched && !inputValue);
+  
   const inputClasses = classNames("shadow-sm w-100", {
-    "is-invalid": hasError && !isComplete,
+    "is-invalid": showError,
     "border-start-0": IconComponent,
     "border-end-0": isPassword,
     "disabled": disabled,
@@ -136,7 +140,7 @@ const InputText: React.FC<InputTextProps> = ({
         {IconComponent && (
           <InputGroup.Text
             className={`bg-white border-end-0 ${
-              hasError && inputValue && !isComplete
+              showError
                 ? "border-danger text-danger"
                 : isComplete && inputValue && !hasError
                 ? "border-success text-success"
@@ -144,7 +148,7 @@ const InputText: React.FC<InputTextProps> = ({
             }`}
             style={{
               borderColor:
-                hasError && inputValue && !isComplete
+                showError
                   ? "#dc3545"
                   : isComplete && inputValue && !hasError
                   ? "#198754"
@@ -155,11 +159,11 @@ const InputText: React.FC<InputTextProps> = ({
             <IconComponent
               size={18}
               color={
-                hasError && inputValue && !isComplete
+                showError
                   ? "#dc3545"
                   : isComplete && inputValue && !hasError
                   ? "#198754"
-                  : "#ced4da"
+                  : "#6c757d"
               }
             />
           </InputGroup.Text>
@@ -179,16 +183,17 @@ const InputText: React.FC<InputTextProps> = ({
           min={0}
           className={inputClasses}
           aria-label={label}
+          onBlur={() => setTouched(true)}
           style={{
             ...style,
             borderColor:
-              hasError && !isComplete
+              showError
                 ? "#dc3545"
                 : isComplete && inputValue && !hasError
                 ? "#198754"
                 : "#ced4da",
             backgroundColor:
-              hasError && !isComplete
+              showError
                 ? "#fff8f8"
                 : isComplete && inputValue && !hasError
                 ? "#f8fff9"
@@ -209,7 +214,7 @@ const InputText: React.FC<InputTextProps> = ({
           >
             <InputGroup.Text
               className={`bg-white border-start-0 ${
-                hasError && inputValue && !isComplete
+                showError
                   ? "border-danger text-danger"
                   : isComplete && inputValue && !hasError
                   ? "border-success text-success"
@@ -221,7 +226,7 @@ const InputText: React.FC<InputTextProps> = ({
               style={{
                 cursor: "pointer",
                 borderColor:
-                  hasError && inputValue && !isComplete
+                  showError
                     ? "#dc3545"
                     : isComplete && inputValue && !hasError
                     ? "#198754"
@@ -233,7 +238,7 @@ const InputText: React.FC<InputTextProps> = ({
                 <FaEyeSlash
                   size={18}
                   color={
-                    hasError && inputValue && !isComplete
+                    showError
                       ? "#dc3545"
                       : isComplete && inputValue && !hasError
                       ? "#198754"
@@ -244,7 +249,7 @@ const InputText: React.FC<InputTextProps> = ({
                 <FaEye
                   size={18}
                   color={
-                    hasError && inputValue && !isComplete
+                    showError
                       ? "#dc3545"
                       : isComplete && inputValue && !hasError
                       ? "#198754"
@@ -263,9 +268,9 @@ const InputText: React.FC<InputTextProps> = ({
         </Form.Text>
       )}
 
-      {hasError && !isComplete && (
+      {showError && (
         <Form.Text className="text-danger d-block">
-          {errorMessage}
+          {errorMessage || `${label} is required`}
         </Form.Text>
       )}
     </Form.Group>
@@ -273,262 +278,3 @@ const InputText: React.FC<InputTextProps> = ({
 };
 
 export default InputText;
-
-////
-import React, { useEffect, useRef, useState } from "react";
-import "./Login.css";
-import { useForm } from "react-hook-form";
-import { Row, Col } from "react-bootstrap";
-import { useNavigate, Link } from "react-router-dom";
-import { ToastContainer, toast } from "react-toastify";
-import "react-toastify/dist/ReactToastify.css";
-import { useTranslation } from "react-i18next";
-import InputText from "../../common/InputText.tsx";
-import InputRadio from "../../common/InputRadio.tsx";
-import CustomCaptcha from "../../common/CustomCaptcha.tsx";
-import IWT_FULL_IMG from "../../../assets/images/iwt-whole.jpg";
-import {
-  clearAppStorage,
-  CONSTANT_REGEX_SAMPLE,
-} from "../../../utils/constants.ts";
-import { FaLock, FaUser } from "react-icons/fa";
-import { useAuth } from "../../context/AuthContext.js";
-import { URLS_ENDPOINT } from "../../../utils/urlsConstants.ts";
-import { postData } from "../../../services/http.service.ts";
-import { setToLocalStorage } from "../../../utils/localStorageUtils.js";
-import NewLoader from "../../common/NewLoader";
-import { handleErrorMessage } from "../../../utils/errorMessageHandler.js";
-
-const Login = () => {
-  const { t } = useTranslation();
-  const navigate = useNavigate();
-  const [isCaptchaValid, setIsCaptchaValid] = useState(false);
-  const [submitCaptchaAttempted, setSubmitCaptchaAttempted] = useState(false);
-  const [refreshCaptchakey, setRefreshCaptchakey] = useState(0);
-  const {
-    register,
-    handleSubmit,
-    reset,
-    watch,
-    formState: { errors },
-  } = useForm({
-    defaultValues: {
-      userType: "vessel_owner",
-      username: "",
-      password: "",
-      captchaResponse: "",
-    },
-  });
-  const loaderRef = useRef();
-
-  const selectedUserType = watch("userType");
-  const refreshCaptcha = () => {
-    setRefreshCaptchakey((prev) => prev + 1);
-  };
-
-  const handleUserTypeChange = (e) => {
-    const userType = e.target.value;
-    refreshCaptcha();
-    setSubmitCaptchaAttempted(false);
-    reset({ userType });
-  };
-
-  const onSubmit = async (data) => {
-    setSubmitCaptchaAttempted(true);
-    if (!isCaptchaValid) {
-      toast.error("Please complete the CAPTCHA.", {
-        position: "top-right",
-      });
-      return;
-    }
-    const payload = {
-      username: data.username?.trim(),
-      password: data.password?.trim(),
-      userType: data?.userType,
-    };
-
-    // if (payload.username === "admin" && payload?.password === "12345") {
-    //   toast.success("Login Successful!", { position: "top-right" });
-    //   setTimeout(() => {
-    //     navigate("/dashboard");
-    //   }, 1500);
-    // } else {
-    //   refreshCaptcha();
-    //   setSubmitCaptchaAttempted(false);
-    //   toast.error("Please provide valid details.", { position: "top-right" });
-    // }
-
-    try {
-      const LOGIN_URL =
-        process.env.REACT_APP_AUTH_URL + URLS_ENDPOINT.USER_SERVICE.LOGIN;
-      loaderRef.current?.show();
-      const response = await postData(LOGIN_URL, payload);
-      console.log(response);
-      if (response?.status === 200 && response?.data) {
-        console.log(response?.data);
-
-        toast.success("Login Successful!", { position: "top-right" });
-        const token = response?.data?.data?.tokenCreateResponse;
-        const userDetails = response?.data?.data?.userDetails;
-        setToLocalStorage("access_token", token?.access_token);
-        setToLocalStorage("refresh_token", token?.refresh_token);
-        setToLocalStorage("expires_in", token?.expires_in);
-        setToLocalStorage("userRole", userDetails?.userRole || "admin");
-        setToLocalStorage(
-          "userDetails",
-          userDetails ? JSON.stringify(userDetails) : ""
-        );
-        setToLocalStorage("tokenDetails", token ? JSON.stringify(token) : "");
-        setTimeout(() => {
-          loaderRef.current?.hide();
-          setSubmitCaptchaAttempted(false);
-          navigate("/dashboard");
-        }, 1500);
-      } else {
-        loaderRef.current?.hide();
-        refreshCaptcha();
-        setSubmitCaptchaAttempted(false);
-        toast.error("Please provide valid details.", { position: "top-right" });
-      }
-    } catch (err) {
-      loaderRef.current?.hide();
-      handleErrorMessage(err?.response?.data);
-      refreshCaptcha();
-    }
-  };
-
-  useEffect(() => {
-    clearAppStorage();
-  }, []);
-
-  return (
-    <section className="login-section">
-      <NewLoader ref={loaderRef} />
-      <div className="login">
-        <div className="card login-card">
-          <Row className="g-0">
-            <Col md={12} className="login-image-wrapper">
-              <img src={IWT_FULL_IMG} alt="IWT" className="login-img" />
-            </Col>
-          </Row>
-          <Row className="g-0">
-            <h2 className="text-center login-title">{t("login.Sign In")}</h2>
-            <Col xs={12} className="p-4">
-              <form onSubmit={handleSubmit(onSubmit)} className="login-form">
-                <InputRadio
-                  name="userType"
-                  options={[
-                    { label: "Vessel Owner", value: "vessel_owner" },
-                    { label: "Builder", value: "builder" },
-                    { label: "Employee", value: "employee" },
-                  ]}
-                  rules={{ required: "Please select a user type" }}
-                  register={register}
-                  errors={errors}
-                  onChange={handleUserTypeChange}
-                  className="center-screen"
-                />
-
-                <InputText
-                  type="text"
-                  name="username"
-                  required={true}
-                  label={t("login.Username")}
-                  placeholder={t("login.UserName Place")}
-                  register={{
-                    ...register("username", {
-                      required: t("login.NameRequired"),
-                    }),
-                  }}
-                  errors={errors}
-                  icon={FaUser}
-                />
-
-                <InputText
-                  type="password"
-                  name="password"
-                  required={true}
-                  label={t("login.Password")}
-                  placeholder={t("login.Password Place")}
-                  register={{
-                    ...register("password", {
-                      required: t("login.PasswordRequired"),
-                      minLength: {
-                        value: 5,
-                        message: "Password should be at-least 6 characters.",
-                      },
-                    }),
-                  }}
-                  errors={errors}
-                  icon={FaLock}
-                />
-
-                <Row className="mb-3">
-                  <Col>
-                    <CustomCaptcha
-                      onCaptchaValid={setIsCaptchaValid}
-                      isSubmitAttempted={submitCaptchaAttempted}
-                      refreshTrigger={refreshCaptchakey}
-                    />
-                  </Col>
-                </Row>
-
-                <Row className="mb-3 btn-row">
-                  <Col>
-                    <button
-                      className="generic-btn-submit"
-                      type="submit"
-                      onClick={() => {
-                        setSubmitCaptchaAttempted(true);
-                      }}
-                    >
-                      {t("login.Submit")}
-                    </button>
-                  </Col>
-                  <Col>
-                    <button
-                      className="generic-btn-cancel"
-                      type="reset"
-                      onClick={() => {
-                        reset();
-                        refreshCaptcha();
-                        setSubmitCaptchaAttempted(false);
-                        setIsCaptchaValid(false);
-                      }}
-                    >
-                      {t("login.reset")}
-                    </button>
-                  </Col>
-                </Row>
-
-                <Row className="mt-3">
-                  <Col className="text-center f-14">
-                    <Link to="/iwt/forgot-password">
-                      {t("login.Forgot Password?")}
-                    </Link>
-                  </Col>
-                </Row>
-
-                {selectedUserType !== "employee" && (
-                  <Row className="mt-1">
-                    <Col className="text-center f-14">
-                      <div>
-                        {t("login.newUser")}{" "}
-                        <Link to={`/iwt/register?userType=${selectedUserType}`}>
-                          {t("login.registerHere")}
-                        </Link>
-                      </div>
-                    </Col>
-                  </Row>
-                )}
-              </form>
-            </Col>
-          </Row>
-        </div>
-      </div>
-      <ToastContainer />
-    </section>
-  );
-};
-
-export default Login;
