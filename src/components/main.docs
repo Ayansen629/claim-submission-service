@@ -1,3 +1,1071 @@
+import React, { useRef, useState, useEffect } from "react";
+import { useNavigate, useParams } from "react-router-dom";
+import { useForm, useFieldArray, Controller } from "react-hook-form";
+import { Container, Row, Col, Card, Button } from "react-bootstrap";
+import { toast } from "react-toastify";
+import axios from "axios";
+import {
+  FaUser,
+  FaMapMarkerAlt,
+  FaBriefcase,
+  FaFileUpload,
+  FaGraduationCap,
+  FaPlus,
+  FaTrash,
+  FaArrowLeft,
+} from "react-icons/fa";
+import InputText from "../../../common/InputText.tsx";
+import { handleErrorMessage } from "../../../../utils/errorMessageHandler.js";
+import InputSelect from "../../../common/InputSelect.tsx";
+import Collapsible from "../../../common/Collapsible.js";
+import { CONSTANT_REGEX, renameFile } from "../../../../utils/constants.ts";
+import { useMasterData } from "../../../context/MasterDataContext.js";
+import NewLoader from "../../../common/NewLoader.js";
+import "./EmployeeRegistration.css";
+import { getData, postFORMdata } from "../../../../services/http.service.ts";
+import { URLS_ENDPOINT } from "../../../../utils/urlsConstants.ts";
+import AppToggleButton from "../../../common/AppToggleButton.js";
+
+const EmployeeRegistration = () => {
+  const navigate = useNavigate();
+  const { id } = useParams();
+  const isEditMode = !!id;
+  const loaderRef = useRef();
+  const { masterData } = useMasterData();
+
+  const {
+    register,
+    handleSubmit,
+    control,
+    formState: { errors },
+    setValue,
+    watch,
+    reset,
+  } = useForm({
+    mode: "onSubmit",
+    defaultValues: {
+      firstName: "",
+      lastName: "",
+      email: "",
+      phoneNumber: "",
+      gender: "",
+      dateOfBirth: "",
+      addressLine1: "",
+      addressLine2: "",
+      pin: "",
+      district: "",
+      stateUt: "",
+      country: "India",
+      appointmentDate: "",
+      employeeType: "",
+      designation: "",
+      addressProof: "",
+      identityProof: "",
+      appointmentLetter: "",
+      educationDetails: [{ qualification: "", stream: "", yearOfPassing: "" }],
+      professionalDetails: [
+        {
+          appointmentDate: "",
+          employeeType: "",
+          employeeStatus: "",
+          designation: "",
+          department: "",
+          section: "",
+          roles: "",
+        },
+      ],
+
+    },
+  });
+  const [addressProofFile, setAddressProofFile] = useState(null);
+  const [identityProofFile, setIdentityProofFile] = useState(null);
+  const [appointmentLetterFile, setAppointmentLetterFile] = useState(null);
+
+  const [toggleValue, setToggleValue] = useState(true);
+
+  useEffect(() => {
+    setToggleValue(true);
+  }, []);
+
+  const { fields, append, remove } = useFieldArray({
+    control,
+    name: "educationDetails",
+  });
+
+  const {
+    fields: professionalFields,
+    append: appendProfessional,
+    remove: removeProfessional,
+  } = useFieldArray({
+    control,
+    name: "professionalDetails",
+  });
+
+  const fetchAddressDetails = async (pin) => {
+    try {
+      const URL =
+        process.env.REACT_APP_PUBLIC_URL +
+        URLS_ENDPOINT.APP_SERVICES.GET_DETAILS_BY_PINCODE +
+        pin;
+      const response = await getData(URL);
+      if (response?.status === 200 && response?.data?.length > 0) {
+        setValue("district", response?.data[0]?.district);
+        setValue("stateUt", response?.data[0]?.stateName);
+        setValue("country", "India");
+      } else {
+        setValue("district", "");
+        setValue("stateUt", "");
+        setValue("country", "");
+        toast.info("No data found for this PIN code");
+      }
+      loaderRef.current?.hide();
+    } catch (error) {
+      setValue("district", "");
+      setValue("stateUt", "");
+      setValue("country", "");
+      loaderRef.current?.hide();
+      toast.error("Error fetching address details");
+    }
+  };
+  console.log("field errors", errors);
+  const onSubmit = async (data) => {
+
+    try {
+      loaderRef.current?.show();
+
+      const vesselUserDetails = {
+        vesselUserDetails: {
+          id: "",
+          userType: "",
+          userCategory: "",
+          firstName: data.firstName,
+          lastName: data.lastName,
+          emailId: data.email,
+          phoneNumber: data.phoneNumber,
+          panNumber: data.panNumber || "",
+          gstNumber: data.gstNumber || "",
+          addressDetails: data.addressLine1 + (data.addressLine2 ? ", " + data.addressLine2 : ""),
+          addressLine1: data.addressLine1,
+          addressLine2: data.addressLine2,
+          pin: data.pin,
+          district: data.district,
+          stateUt: data.stateUt,
+          country: data.country,
+          isActive: data?.isActive,
+          keycloakId: "",
+          dateOfBirth: data.dateOfBirth,
+          gender: data.gender,
+          authorizedPerson: null,
+          companyRegistration: null,
+          educationDetails: data?.educationDetails?.map((ed) => ({
+            uuid: "",
+            employeeUUID: "",
+            qualification: ed.qualification,
+            stream: ed.stream,
+            yearOfPassing: ed.yearOfPassing,
+            additionalEducationDetails: ed.additionalEducationDetails || "",
+          })),
+          professionalDetails: data?.professionalDetails?.map((pd) => ({
+            uuid: "",
+            employeeUUID: "",
+            appointmentDate: pd.appointmentDate,
+            employeeType: pd.employeeType,
+            employeeStatus: pd.employeeStatus,
+            designation: pd.designation,
+            department: pd.department,
+            section: pd.section,
+            role: pd.roles,
+          })),
+          aadharNumber: data.aadharNumber || "",
+        }
+      };
+
+      const formData = new FormData();
+      formData.append("request", new Blob([JSON.stringify(vesselUserDetails)], { type: 'application/json' }));
+
+      if (addressProofFile) {
+        formData.append("files", addressProofFile);
+      }
+      if (identityProofFile) {
+        formData.append("files", identityProofFile);
+      }
+      if (appointmentLetterFile) {
+        formData.append("files", appointmentLetterFile);
+      }
+      console.log("Submitting payload to API :", formData);
+      await submitEmpDetails(formData);
+
+    } catch (error) {
+      loaderRef.current?.hide();
+      toast.error(
+        error?.response?.data?.message ||
+        "Error submitting form. Please try again."
+      );
+    }
+  };
+
+  const submitEmpDetails = async (payload) => {
+    try {
+      const URL = process.env.REACT_APP_AUTH_URL + URLS_ENDPOINT.USER_SERVICE.CREATE_EMP;
+      loaderRef.current?.show();
+      const response = await postFORMdata(URL, payload);
+      const apiRes = response?.data ? { ...response?.data } : null;
+      if (apiRes?.responseStatus?.status === "200") {
+        loaderRef?.current?.hide();
+        toast.success(
+          apiRes?.responseStatus?.message || "Employee registered successfully!",
+          { position: "top-right" }
+        );
+        handleCancel();
+      } else {
+        loaderRef?.current?.hide();
+        toast.info(
+          apiRes?.responseStatus?.message || "Something went wrong..",
+          { position: "top-right" }
+        );
+      }
+    } catch (err) {
+      console.log(err);
+      loaderRef?.current?.hide();
+      handleErrorMessage(err?.response?.data);
+    }
+  };
+
+  const handleCancel = () => {
+    navigate("/iwt/employee-management");
+  };
+
+  return (
+    <>
+      <NewLoader ref={loaderRef} />
+      <Container fluid className="p-4">
+        <Card className="mb-4">
+          <Card.Header
+            className="bg-primary text-white d-flex align-items-center justify-content-center position-relative"
+            style={{
+              minHeight: 56,
+              background: "linear-gradient(135deg, rgb(0, 119, 182), rgb(2, 62, 138))",
+              border: "none",
+            }}
+          >
+            {/* Back Button */}
+            <Button
+              variant="link"
+              className="p-0 me-2"
+              style={{
+                color: "white",
+                textDecoration: "none",
+                position: "absolute",
+                left: 0,
+                top: "50%",
+                transform: "translateY(-50%)",
+              }}
+              onClick={() => navigate("/iwt/employee-management")}
+            >
+              <FaArrowLeft size={22} />
+            </Button>
+
+            <div style={{ fontWeight: 600, fontSize: 22, color: "#fff" }}>
+              {isEditMode ? "Edit Employee" : "Add Employee"}
+            </div>
+
+            <div style={{ width: 40 }}></div>
+          </Card.Header>
+          <Card.Body>
+            <form onSubmit={handleSubmit(onSubmit)} className="employee-form">
+              {/* Personal Details Section */}
+              <Collapsible
+                title={
+                  <div className="d-flex align-items-center">
+                    <FaUser className="me-2" style={{ color: "#2466BF" }} />
+                    <span style={{ color: "#2466BF" }}>Personal Details</span>
+                  </div>
+                }
+                defaultOpen={true}
+              >
+                <Card className="form-section-card">
+                  <Card.Body>
+                    <Row className="g-3">
+                      <Col md={4}>
+                        <InputText
+                          name="firstName"
+                          label="First Name"
+                          placeholder="Enter first name"
+                          required={true}
+                          register={{
+                            ...register("firstName", {
+                              required: "First Name is required",
+                            }),
+                          }}
+                          errors={errors}
+                        />
+                      </Col>
+                      <Col md={4}>
+                        <InputText
+                          name="lastName"
+                          label="Last Name"
+                          placeholder="Enter last name"
+                          required={true}
+                          register={{
+                            ...register("lastName", {
+                              required: "Last Name is required",
+                            }),
+                          }}
+                          errors={errors}
+                        />
+                      </Col>
+                      <Col md={4}>
+                        <InputText
+                          name="email"
+                          label="Email ID"
+                          type="email"
+                          placeholder="Enter email address"
+                          required={true}
+                          register={{
+                            ...register("email", {
+                              required: "Email is required",
+                              pattern: {
+                                value: CONSTANT_REGEX.EMAIL,
+                                message: "Invalid email address",
+                              },
+                            }),
+                          }}
+                          errors={errors}
+                        />
+                      </Col>
+                      <Col md={4}>
+                        <InputText
+                          name="phoneNumber"
+                          label="Phone Number"
+                          placeholder="Enter 10-digit phone number"
+                          required={true}
+                          maxlength={10}
+                          register={{
+                            ...register("phoneNumber", {
+                              required: "Phone Number is required",
+                              pattern: {
+                                value: CONSTANT_REGEX.MOBILE,
+                                message: "Phone number must be 10 digits",
+                              },
+                            }),
+                          }}
+                          errors={errors}
+                        />
+                      </Col>
+                      <Col md={4}>
+                        <InputSelect
+                          name="gender"
+                          label="Gender"
+                          required={true}
+                          options={[
+                            { value: "", label: "Select Gender" },
+                            ...(masterData?.genders?.map((type) => ({
+                              value: type.valueCode,
+                              label: type.valueLabel,
+                            })) || [
+                                { value: "MALE", label: "MALE" },
+                                { value: "FEMALE", label: "FEMALE" },
+                                { value: "OTHER", label: "OTHER" },
+                              ]),
+                          ]}
+                          register={register("gender", {
+                            required: "Gender is required",
+                          })}
+                          errors={errors}
+                          value={watch("gender") || ""}
+                          onChange={(value) =>
+                            setValue("gender", value, { shouldValidate: true })
+                          }
+                        />
+                      </Col>
+                      <Col md={4}>
+                        <InputText
+                          name="dateOfBirth"
+                          label="Date of Birth"
+                          type="date"
+                          placeholder="Select date of birth"
+                          required={true}
+                          register={{
+                            ...register("dateOfBirth", {
+                              required: "Date of Birth is required",
+                            }),
+                          }}
+                          errors={errors}
+                        />
+                      </Col>
+                    </Row>
+                  </Card.Body>
+                </Card>
+              </Collapsible>
+
+              {/* Address Details Section */}
+              <Collapsible
+                title={
+                  <div className="d-flex align-items-center">
+                    <FaMapMarkerAlt className="me-2" style={{ color: "#2466BF" }} />
+                    <span style={{ color: "#2466BF" }}>Address Details</span>
+                  </div>
+                }
+                defaultOpen={true}
+              >
+                <Card className="form-section-card">
+                  <Card.Body>
+                    <Row className="g-3">
+                      <Col md={6}>
+                        <InputText
+                          name="addressLine1"
+                          label="Address Line-1"
+                          placeholder="Enter address line 1"
+                          required={true}
+                          register={{
+                            ...register("addressLine1", {
+                              required: "Address Line-1 is required",
+                            }),
+                          }}
+                          errors={errors}
+                        />
+                      </Col>
+                      <Col md={6}>
+                        <InputText
+                          name="addressLine2"
+                          label="Address Line-2"
+                          placeholder="Enter address line 2 (optional)"
+                          register={{
+                            ...register("addressLine2"),
+                          }}
+                          errors={errors}
+                        />
+                      </Col>
+                      <Col md={3}>
+                        <InputText
+                          name="pin"
+                          label="PIN"
+                          placeholder="Enter 6-digit PIN code"
+                          required={true}
+                          register={{
+                            ...register("pin", {
+                              required: "PIN Code is required",
+                              pattern: {
+                                value: /^[0-9]{6}$/,
+                                message: "PIN must be 6 digits",
+                              },
+                            }),
+                          }}
+                          onChange={(e) => {
+                            const pinValue = e.target.value;
+                            if (pinValue.length === 6) {
+                              loaderRef.current?.show();
+                              fetchAddressDetails(pinValue);
+                            }
+                          }}
+                          errors={errors}
+                        />
+                      </Col>
+                      <Col md={3}>
+                        <InputText
+                          name="district"
+                          label="District"
+                          required={true}
+                          placeholder="Auto-populated"
+                          register={{
+                            ...register("district"),
+                          }}
+                          errors={errors}
+                          readOnly
+                        />
+                      </Col>
+                      <Col md={3}>
+                        <InputText
+                          name="stateUt"
+                          label="State/UT"
+                          required={true}
+                          placeholder="Auto-populated"
+                          register={{
+                            ...register("stateUt"),
+                          }}
+                          errors={errors}
+                          readOnly
+                        />
+                      </Col>
+                      <Col md={3}>
+                        <InputText
+                          name="country"
+                          label="Country"
+                          required={true}
+                          placeholder="Auto-populated"
+                          register={{
+                            ...register("country"),
+                          }}
+                          errors={errors}
+                          readOnly
+                        />
+                      </Col>
+                    </Row>
+                  </Card.Body>
+                </Card>
+              </Collapsible>
+
+              {/* Education Details Section */}
+              <Collapsible
+                title={
+                  <div className="d-flex align-items-center">
+                    <FaGraduationCap className="me-2" style={{ color: "#2466BF" }} />
+                    <span style={{ color: "#2466BF" }}>Education Details</span>
+                  </div>
+                }
+                defaultOpen={true}
+              >
+                <Card className="form-section-card">
+                  <Card.Body>
+                    {fields.map((field, index) => (
+                      <Row key={field.id} className="g-3">
+                        <Col md={4}>
+                          <InputText
+                            required={true}
+                            name={`educationDetails.${index}.qualification`}
+                            label="Qualification"
+                            placeholder="Enter qualification"
+                            register={register(`educationDetails.${index}.qualification`, {
+                              required: "Qualification is required",
+                            })}
+                            errors={errors?.educationDetails?.[index] || {}}
+                          />
+                        </Col>
+                        <Col md={4}>
+                          <InputText
+                            name={`educationDetails.${index}.stream`}
+                            label="Stream"
+                            placeholder="Enter stream"
+                            register={register(`educationDetails.${index}.stream`, {
+                              required: "Stream is required",
+                            })}
+                            errors={errors?.educationDetails?.[index] || {}}
+                          />
+                        </Col>
+                        <Col md={4}>
+                          <InputText
+                            name={`educationDetails.${index}.yearOfPassing`}
+                            label="Year of Passing"
+                            required={true}
+                            placeholder="Enter year of passing"
+                            register={register(`educationDetails.${index}.yearOfPassing`, {
+                              required: "Year of Passing is required",
+                            })}
+                            errors={errors?.educationDetails?.[index] || {}}
+                          />
+                        </Col>
+                      </Row>
+                    ))}
+                    <Button
+                      variant="outline-primary"
+                      onClick={() =>
+                        append({
+                          qualification: "",
+                          stream: "",
+                          yearOfPassing: "",
+                        })
+                      }
+                      className="add-education-btn"
+                    >
+                      <FaPlus className="me-2" /> Add Education Details
+                    </Button>
+                  </Card.Body>
+                </Card>
+              </Collapsible>
+
+              {/* Professional Details Section */}
+              <Collapsible
+                title={
+                  <div className="d-flex align-items-center">
+                    <FaBriefcase className="me-2" style={{ color: "#2466BF" }} />
+                    <span style={{ color: "#2466BF" }}>
+                      Professional Details
+                    </span>
+                  </div>
+                }
+                defaultOpen={true}
+              >
+                <Card className="form-section-card">
+                  <Card.Body>
+                    {professionalFields.map((field, index) => (
+                      <div key={field.id} className="professional-entry mb-4">
+                        <Row className="g-3">
+                          <Col md={4}>
+                            <InputText
+                              name={`professionalDetails.${index}.appointmentDate`}
+                              label="Appointment Date *"
+                              type="date"
+                              placeholder="Select appointment date"
+                              register={register(
+                                `professionalDetails.${index}.appointmentDate`,
+                                { required: "Appointment Date is required" }
+                              )}
+                              errors={errors?.professionalDetails?.[index] || {}}
+                              style={{
+                                borderColor:
+                                  errors?.professionalDetails?.[index]?.appointmentDate && "#dc3545",
+                                backgroundColor:
+                                  errors?.professionalDetails?.[index]?.appointmentDate && "#fff8f8",
+                              }}
+                            />
+                          </Col>
+                          <Col md={4}>
+                            <InputSelect
+                              name={`professionalDetails.${index}.employeeType`}
+                              label="Employee Type"
+                              required={true}
+                              placeholder="Select employee type"
+                              options={
+                                masterData?.employeeTypes?.map((type) => ({
+                                  value: type.valueCode,
+                                  label: type.valueLabel,
+                                })) || []
+                              }
+                              register={register(
+                                `professionalDetails.${index}.employeeType`,
+                                { required: "Employee Type is required" }
+                              )}
+                              errors={errors?.professionalDetails?.[index] || {}}
+                              value={watch(`professionalDetails.${index}.employeeType`) || ""}
+                              onChange={(val) =>
+                                setValue(
+                                  `professionalDetails.${index}.employeeType`,
+                                  val,
+                                  { shouldValidate: true }
+                                )
+                              }
+                            />
+                          </Col>
+                          <Col md={4}>
+                            <InputSelect
+                              name={`professionalDetails.${index}.employeeStatus`}
+                              label="Employee Status"
+                              required={true}
+                              placeholder="Select employee status"
+                              options={
+                                masterData?.employeeStatuses?.map((type) => ({
+                                  value: type.valueCode,
+                                  label: type.valueLabel,
+                                })) || []
+                              }
+                              register={register(
+                                `professionalDetails.${index}.employeeStatus`,
+                                { required: "Employee Status is required" }
+                              )}
+                              errors={errors?.professionalDetails?.[index] || {}}
+                              value={
+                                watch(
+                                  `professionalDetails.${index}.employeeStatus`
+                                ) || ""
+                              }
+                              onChange={(val) =>
+                                setValue(
+                                  `professionalDetails.${index}.employeeStatus`,
+                                  val,
+                                  { shouldValidate: true }
+                                )
+                              }
+                            />
+                          </Col>
+                          <Col md={4}>
+                            <InputSelect
+                              name={`professionalDetails.${index}.designation`}
+                              label="Designation"
+                              required={true}
+                              placeholder="Select designation"
+                              options={
+                                masterData?.designations?.map((type) => ({
+                                  value: type.valueCode,
+                                  label: type.valueLabel,
+                                })) || []
+                              }
+                              register={register(
+                                `professionalDetails.${index}.designation`,
+                                { required: "Designation is required" }
+                              )}
+                              errors={errors?.professionalDetails?.[index] || {}}
+                              value={
+                                watch(
+                                  `professionalDetails.${index}.designation`
+                                ) || ""
+                              }
+                              onChange={(val) =>
+                                setValue(
+                                  `professionalDetails.${index}.designation`,
+                                  val,
+                                  { shouldValidate: true }
+                                )
+                              }
+                            />
+                          </Col>
+                          <Col md={4}>
+                            <InputSelect
+                              name={`professionalDetails.${index}.department`}
+                              label="Department"
+                              required={true}
+                              placeholder="Select Department"
+                              options={
+                                masterData?.departments?.map((type) => ({
+                                  value: type.valueCode,
+                                  label: type.valueLabel,
+                                })) || []
+                              }
+                              register={register(
+                                `professionalDetails.${index}.department`,
+                                { required: "Department is required" }
+                              )}
+                              errors={errors?.professionalDetails?.[index] || {}}
+                              value={
+                                watch(
+                                  `professionalDetails.${index}.department`
+                                ) || ""
+                              }
+                              onChange={(val) =>
+                                setValue(
+                                  `professionalDetails.${index}.department`,
+                                  val,
+                                  { shouldValidate: true }
+                                )
+                              }
+                            />
+                          </Col>
+                          <Col md={4}>
+                            <InputText
+                              name={`professionalDetails.${index}.section`}
+                              label="Section"
+                              placeholder="Enter section"
+                              register={register(
+                                `professionalDetails.${index}.section`
+                              )}
+                              errors={
+                                errors?.professionalDetails?.[index]?.section
+                                  ? {
+                                    professionalDetails: {
+                                      [index]: {
+                                        section:
+                                          errors.professionalDetails[index]
+                                            .section,
+                                      },
+                                    },
+                                  }
+                                  : {}
+                              }
+                            />
+                          </Col>
+                          <Col md={4}>
+                            <InputSelect
+                              name={`professionalDetails.${index}.roles`}
+                              label="Roles"
+                              required={true}
+                              placeholder="Select role"
+                              options={
+                                masterData?.roles?.map((type) => ({
+                                  value: type.valueCode,
+                                  label: type.valueLabel,
+                                })) || []
+                              }
+                              register={register(
+                                `professionalDetails.${index}.roles`,
+                                { required: "Role is required" }
+                              )}
+                              errors={errors?.professionalDetails?.[index] || {}}
+                              value={
+                                watch(
+                                  `professionalDetails.${index}.roles`
+                                ) || ""
+                              }
+                              onChange={(val) =>
+                                setValue(
+                                  `professionalDetails.${index}.roles`,
+                                  val,
+                                  { shouldValidate: true }
+                                )
+                              }
+                            />
+                          </Col>
+                          <Col md={1} className="d-flex align-items-end">
+                            {index > 0 && (
+                              <Button
+                                variant="danger"
+                                size="sm"
+                                onClick={() => removeProfessional(index)}
+                                className="mt-1"
+                              >
+                                <FaTrash />
+                              </Button>
+                            )}
+                          </Col>
+                        </Row>
+                      </div>
+                    ))}
+                    <Button
+                      variant="outline-primary"
+                      onClick={() =>
+                        appendProfessional({
+                          appointmentDate: "",
+                          employeeType: "",
+                          employeeStatus: "",
+                          designation: "",
+                          department: "",
+                          section: "",
+                          roles: "",
+                        })
+                      }
+                      className="add-education-btn"
+                    >
+                      <FaPlus className="me-2" /> Add Professional Details
+                    </Button>
+                  </Card.Body>
+                </Card>
+              </Collapsible>
+
+              {/* Documents Upload Section */}
+              <Collapsible
+                title={
+                  <div className="d-flex align-items-center">
+                    <FaFileUpload className="me-2" style={{ color: "#2466BF" }} />
+                    <span style={{ color: "#2466BF" }}>
+                      Documents Upload
+                    </span>
+                  </div>
+                }
+                defaultOpen={true}
+              >
+                <Card className="form-section-card">
+                  <Card.Body>
+                    <Row className="g-3">
+                      <Col md={6}>
+
+                        <InputText
+                          name="addressProof"
+                          label="Address Proof"
+                          type="file"
+                          required={true}
+                          register={register("addressProof", {
+                            required: "Address Proof is required",
+                          })}
+                          errors={errors}
+                          onChange={(e) => {
+                            if (e.target.files && e?.target?.files[0]) {
+                              const file = e.target.files[0];
+                              const extension = file?.name?.substring(file?.name?.lastIndexOf('.'));
+                              const fileName = `Address Proof${extension}`;
+                              file.originalName = fileName;
+                              setAddressProofFile(renameFile(file, fileName))
+                            }
+                          }}
+                        />
+                        <small className="text-muted">
+                          Upload PDF, JPG or PNG (Max: 2MB)
+                        </small>
+                      </Col>
+                      <Col md={6}>
+
+                        <InputText
+                          name="identityProof"
+                          label="Identity Proof"
+                          type="file"
+                          required={true}
+                          register={register("identityProof", {
+                            required: "Identity Proof is required",
+                          })}
+                          errors={errors}
+                          onChange={(e) => {
+                            if (e.target.files && e?.target?.files[0]) {
+                              const file = e.target.files[0];
+                              const extension = file?.name?.substring(file?.name?.lastIndexOf('.'));
+                              const fileName = `Identity Proof${extension}`;
+                              file.originalName = fileName;
+                              setIdentityProofFile(renameFile(file, fileName))
+                            }
+                          }}
+                        />
+                        <small className="text-muted">
+                          Upload PDF, JPG or PNG (Max: 2MB)
+                        </small>
+                      </Col>
+                      <Col md={6}>
+
+                        <InputText
+                          name="appointmentLetter"
+                          label="Appointment Letter"
+                          type="file"
+                          required={true}
+                          register={register("appointmentLetter", {
+                            required: "Appointment Letter is required",
+                          })}
+                          errors={errors}
+
+                          onChange={(e) => {
+                            if (e.target.files && e?.target?.files[0]) {
+                              const file = e.target.files[0];
+                              const extension = file?.name?.substring(file?.name?.lastIndexOf('.'));
+                              const fileName = `Appointment Letter${extension}`;
+                              file.originalName = fileName;
+                              setAppointmentLetterFile(renameFile(file, fileName))
+                            }
+                          }}
+                        />
+                        <small className="text-muted">
+                          Upload PDF, JPG or PNG (Max: 2MB)
+                        </small>
+                      </Col>
+                    </Row>
+                  </Card.Body>
+                </Card>
+              </Collapsible>
+
+              {/* Form Actions */}
+              <div className="d-flex justify-content-end mt-4 gap-2">
+
+                <Col style={{ display: "flex" }}>
+                  <strong style={{ marginTop: "5px" }}>User Status : </strong>
+                  &nbsp; &nbsp;
+                  <Controller
+                    name="toggleChoice"
+                    control={control}
+                    defaultValue={true}
+                    render={({ field }) => (
+                      <AppToggleButton
+                        labels={["In-Active", "Active"]}
+                        value={toggleValue}
+                        onChange={(val) => {
+                          field.onChange(val);
+                          setToggleValue(val);
+                        }}
+                      />
+                    )}
+                  />
+                </Col>
+
+                <Button variant="secondary" onClick={handleCancel}>
+                  Cancel
+                </Button>
+                <Button
+                  variant="primary"
+                  type="submit"
+                  style={{
+                    background: "linear-gradient(135deg, #0077b6, #023e8a)",
+                    border: "none",
+                    boxShadow: "0 4px 6px rgba(0, 0, 0, 0.1)",
+                    padding: "8px 20px",
+                  }}
+                >
+                  {isEditMode ? "Update" : "Submit"}
+                </Button>
+              </div>
+            </form>
+          </Card.Body>
+        </Card>
+      </Container>
+    </>
+  );
+};
+
+export default EmployeeRegistration;
+when handledit row click i open this compoenent
+and now need to proulated data for edit now not have api so i propulated static data as for now
+{
+    "responseStatus": {
+        "status": "200",
+        "message": "Your application has been received. Approval is currently under review."
+    },
+    "data": {
+        "vesselUsers": [
+            {
+                "id": "4778bbe6-a162-445c-ae14-d549e467e2f0",
+                "application_id": null,
+                "userType": "employee",
+                "userCategory": "",
+                "firstName": "Sagnik",
+                "lastName": "Bose",
+                "emailId": "swaraj.bose5@gmail.com",
+                "phoneNumber": "7003631120",
+                "panNumber": "",
+                "gstNumber": "",
+                "addressDetails": "Brsia",
+                "addressLine1": "Brsia",
+                "addressLine2": "",
+                "pin": "721134",
+                "district": "MEDINIPUR EAST",
+                "stateUt": "WEST BENGAL",
+                "country": "India",
+                "isActive": true,
+                "keycloakId": "ba54c5e5-de7a-450f-a356-1c7e0a5be3fd",
+                "dateOfBirth": "1999-02-16",
+                "gender": "MALE",
+                "roleIds": null,
+                "authorizedPerson": null,
+                "companyRegistration": null,
+                "educationDetails": [
+                    {
+                        "uuid": "087aebef-2aab-4f15-941e-72013959d59a",
+                        "employeeUUID": "4778bbe6-a162-445c-ae14-d549e467e2f0",
+                        "qualification": "Btech",
+                        "stream": "CSE",
+                        "yearOfPassing": 2020,
+                        "additionalEducationDetails": ""
+                    }
+                ],
+                "professionalDetails": [
+                    {
+                        "uuid": "79f41631-31ff-42b5-ac63-db341025cf94",
+                        "employeeUUID": "4778bbe6-a162-445c-ae14-d549e467e2f0",
+                        "appointmentDate": "2020-02-16",
+                        "employeeType": "PERMANENT",
+                        "employeeStatus": "ACTIVE",
+                        "designation": "DEPUTY_DIRECTOR",
+                        "department": "",
+                        "section": "",
+                        "role": "ENGINEERING"
+                    }
+                ],
+                "fileStoreMaps": [
+                    {
+                        "fileStoreId": "cd983959-ec1f-47f1-8861-a9dd6459b6d3",
+                        "alfrescoId": "442bb3a2-47ea-4d45-abb3-a247ea5d4567",
+                        "registrationNumber": "4778bbe6-a162-445c-ae14-d549e467e2f0",
+                        "fileName": "Minutes_of_Meeting.pdf",
+                        "module": "iwt.upload",
+                        "tenantId": "iwt.wb",
+                        "tag": null,
+                        "fieldName": "emp_details_Minutes_of_Meeting",
+                        "downLoadFile": "http://3.111.175.246:7002/filestore/v1/files/id?fileStoreId=cd983959-ec1f-47f1-8861-a9dd6459b6d3"
+                    },
+                    {
+                        "fileStoreId": "4c93f8ea-0b49-490b-8dc5-84802fcde61c",
+                        "alfrescoId": "e2ff7d8e-496e-4de8-bf7d-8e496ecde898",
+                        "registrationNumber": "4778bbe6-a162-445c-ae14-d549e467e2f0",
+                        "fileName": "Minutes_of_Meeting.pdf",
+                        "module": "iwt.upload",
+                        "tenantId": "iwt.wb",
+                        "tag": null,
+                        "fieldName": "emp_details_Minutes_of_Meeting",
+                        "downLoadFile": "http://3.111.175.246:7002/filestore/v1/files/id?fileStoreId=4c93f8ea-0b49-490b-8dc5-84802fcde61c"
+                    },
+                    {
+                        "fileStoreId": "421afaf5-9c8d-4855-b16d-ed3ba6d1dc7e",
+                        "alfrescoId": "4088a87a-7a53-4f72-88a8-7a7a537f7216",
+                        "registrationNumber": "4778bbe6-a162-445c-ae14-d549e467e2f0",
+                        "fileName": "Minutes_of_Meeting.pdf",
+                        "module": "iwt.upload",
+                        "tenantId": "iwt.wb",
+                        "tag": null,
+                        "fieldName": "emp_details_Minutes_of_Meeting",
+                        "downLoadFile": "http://3.111.175.246:7002/filestore/v1/files/id?fileStoreId=421afaf5-9c8d-4855-b16d-ed3ba6d1dc7e"
+                    }
+                ],
+                "password": "$2a$10$EO7B0xPBDqTu0uFv9rD5UOul7f5T2y7vvPr6k1BiNLWcPwFuIEBei",
+                "roles": null,
+                "aadharNumber": ""
+            }
+        ]
+    },
+    "errors": null,
+    "timestamp": "2025-06-11T07:58:30.872460Z",
+    "pagination": null 
+}
+please do the code
 import { useNavigate } from "react-router-dom";
 import "react-toastify/dist/ReactToastify.css";
 import { useTranslation } from "react-i18next";
@@ -49,39 +1117,42 @@ const UserManagement = () => {
   }, []);
 
   const columns = USER_REGIS_MASTER.USER_INFO_COLUMNS;
-  const userMockData = USER_REGIS_MASTER.MOCK_USER_DATA;
-  console.log("userMockData", userMockData);
 
   const getUserDetails = async (payload) => {
     try {
-  
       const URL =
         process.env.REACT_APP_AUTH_URL + URLS_ENDPOINT.USER_SERVICE.SEARCH_EMP;
 
       loaderRef.current?.show();
       const result = await postData(URL, payload);
-      const rData =  result?.data?.data?.vesselUsers || [];
+      const rData = result?.data?.data?.vesselUsers || [];
 
       if (result?.status === 200 && rData?.length > 0) {
         loaderRef?.current?.hide();
-
-        setRowData(rData || userMockData);
+        const updatedData = rData?.map(
+          ({ firstName, lastName, isActive, ...rest }) => ({
+            ...rest,
+            firstName,
+            lastName,
+            isActive,
+            empName: `${firstName} ${lastName}`,
+            status: isActive ? "Active" : "Inactive",
+          })
+        );
+        setRowData(updatedData);
       } else {
         loaderRef?.current?.hide();
-       
         toast.info(
           result?.data?.responseStatus?.message || "Something went wrong..",
           { position: "top-right" }
         );
       }
     } catch (err) {
-      setRowData( userMockData);
       console.log(err?.response?.data);
       loaderRef?.current?.hide();
       handleErrorMessage(err?.response?.data);
     }
   };
-  console.log("rowData", rowData);
 
   const handleRowClick = (e) => {};
 
@@ -264,3 +1335,4 @@ const UserManagement = () => {
 };
 
 export default UserManagement;
+
