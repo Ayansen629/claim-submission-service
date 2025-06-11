@@ -1,9 +1,8 @@
 import React, { useRef, useState, useEffect } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useLocation } from "react-router-dom";
 import { useForm, useFieldArray, Controller } from "react-hook-form";
 import { Container, Row, Col, Card, Button } from "react-bootstrap";
 import { toast } from "react-toastify";
-import axios from "axios";
 import {
   FaUser,
   FaMapMarkerAlt,
@@ -13,6 +12,7 @@ import {
   FaPlus,
   FaTrash,
   FaArrowLeft,
+  FaDownload,
 } from "react-icons/fa";
 import InputText from "../../../common/InputText.tsx";
 import { handleErrorMessage } from "../../../../utils/errorMessageHandler.js";
@@ -22,17 +22,31 @@ import { CONSTANT_REGEX, renameFile } from "../../../../utils/constants.ts";
 import { useMasterData } from "../../../context/MasterDataContext.js";
 import NewLoader from "../../../common/NewLoader.js";
 import "./EmployeeRegistration.css";
-import { getData, postData, postFORMdata } from "../../../../services/http.service.ts";
+import { getData, postFORMdata } from "../../../../services/http.service.ts";
 import { URLS_ENDPOINT } from "../../../../utils/urlsConstants.ts";
 import AppToggleButton from "../../../common/AppToggleButton.js";
+
+// Helper for case-insensitive property access
+const getValue = (obj, key) => {
+  if (!obj) return "";
+  if (obj[key] !== undefined) return obj[key];
+  const lowerKey = key.toLowerCase();
+  const foundKey = Object.keys(obj).find(
+    k => k.toLowerCase() === lowerKey
+  );
+  return foundKey ? obj[foundKey] : "";
+};
 
 const EmployeeRegistration = () => {
   const navigate = useNavigate();
   const { id } = useParams();
+  const location = useLocation();
   const isEditMode = !!id;
   const loaderRef = useRef();
   const { masterData } = useMasterData();
-  const [employeeData, setEmployeeData] = useState(null);
+
+  // Get employee data from location.state if present
+  const employeeData = location.state?.employee || null;
 
   const {
     register,
@@ -98,74 +112,54 @@ const EmployeeRegistration = () => {
   });
 
   useEffect(() => {
-    if (isEditMode) {
-      fetchEmployeeById(id);
-    } else {
+    if (isEditMode && employeeData) {
+      reset({
+        firstName: getValue(employeeData, "firstName"),
+        lastName: getValue(employeeData, "lastName"),
+        email: getValue(employeeData, "emailId"),
+        phoneNumber: getValue(employeeData, "phoneNumber"),
+        gender: getValue(employeeData, "gender"),
+        dateOfBirth: getValue(employeeData, "dateOfBirth"),
+        addressLine1: getValue(employeeData, "addressLine1"),
+        addressLine2: getValue(employeeData, "addressLine2"),
+        pin: getValue(employeeData, "pin"),
+        district: getValue(employeeData, "district"),
+        stateUt: getValue(employeeData, "stateUt"),
+        country: getValue(employeeData, "country") || "India",
+        isActive: getValue(employeeData, "isActive") ?? true,
+        educationDetails: Array.isArray(employeeData.educationDetails)
+          ? employeeData.educationDetails.map(ed => ({
+              qualification: getValue(ed, "qualification"),
+              stream: getValue(ed, "stream"),
+              yearOfPassing: getValue(ed, "yearOfPassing"),
+              additionalEducationDetails: getValue(ed, "additionalEducationDetails") || ""
+            }))
+          : [{ qualification: "", stream: "", yearOfPassing: "" }],
+        professionalDetails: Array.isArray(employeeData.professionalDetails)
+          ? employeeData.professionalDetails.map(pd => ({
+              appointmentDate: getValue(pd, "appointmentDate"),
+              employeeType: getValue(pd, "employeeType"),
+              employeeStatus: getValue(pd, "employeeStatus"),
+              designation: getValue(pd, "designation"),
+              department: getValue(pd, "department") || "",
+              section: getValue(pd, "section") || "",
+              roles: getValue(pd, "role") || ""
+            }))
+          : [{
+              appointmentDate: "",
+              employeeType: "",
+              employeeStatus: "",
+              designation: "",
+              department: "",
+              section: "",
+              roles: ""
+            }]
+      });
+      setToggleValue(getValue(employeeData, "isActive") ?? true);
+    } else if (!isEditMode) {
       setToggleValue(true);
     }
-  }, [isEditMode, id]);
-
-  const fetchEmployeeById = async (employeeId) => {
-    try {
-      loaderRef.current?.show();
-      const URL = process.env.REACT_APP_AUTH_URL + URLS_ENDPOINT.USER_SERVICE.SEARCH_EMP;
-      const response = await postData(URL, {});
-      
-      if (response?.status === 200) {
-        const employees = response?.data?.data?.vesselUsers || [];
-        const empData = employees.find(emp => emp.id === employeeId);
-        
-        if (empData) {
-          setEmployeeData(empData);
-          reset({
-            firstName: empData.firstName,
-            lastName: empData.lastName,
-            email: empData.emailId,
-            phoneNumber: empData.phoneNumber,
-            gender: empData.gender,
-            dateOfBirth: empData.dateOfBirth,
-            addressLine1: empData.addressLine1,
-            addressLine2: empData.addressLine2 || "",
-            pin: empData.pin,
-            district: empData.district,
-            stateUt: empData.stateUt,
-            country: empData.country || "India",
-            isActive: empData.isActive,
-            educationDetails: empData.educationDetails?.map(ed => ({
-              uuid: ed.uuid || "",
-              qualification: ed.qualification,
-              stream: ed.stream,
-              yearOfPassing: ed.yearOfPassing,
-              additionalEducationDetails: ed.additionalEducationDetails || ""
-            })) || [],
-            professionalDetails: empData.professionalDetails?.map(pd => ({
-              uuid: pd.uuid || "",
-              appointmentDate: pd.appointmentDate,
-              employeeType: pd.employeeType,
-              employeeStatus: pd.employeeStatus,
-              designation: pd.designation,
-              department: pd.department || "",
-              section: pd.section || "",
-              roles: pd.role || ""
-            })) || []
-          });
-          setToggleValue(empData.isActive);
-        } else {
-          toast.error("Employee not found");
-          navigate("/iwt/employee-management");
-        }
-      } else {
-        toast.error("Failed to fetch employee details");
-        navigate("/iwt/employee-management");
-      }
-      loaderRef.current?.hide();
-    } catch (error) {
-      console.error("Error fetching employee details:", error);
-      toast.error("Error fetching employee details");
-      loaderRef.current?.hide();
-      navigate("/iwt/employee-management");
-    }
-  };
+  }, [isEditMode, reset, employeeData]);
 
   const fetchAddressDetails = async (pin) => {
     try {
@@ -258,7 +252,6 @@ const EmployeeRegistration = () => {
         formData.append("files", appointmentLetterFile);
       }
       
-      console.log("Submitting payload to API :", formData);
       await submitEmpDetails(formData);
 
     } catch (error) {
@@ -277,9 +270,7 @@ const EmployeeRegistration = () => {
         : process.env.REACT_APP_AUTH_URL + URLS_ENDPOINT.USER_SERVICE.CREATE_EMP;
       
       loaderRef.current?.show();
-      const response = isEditMode 
-        ? await postFORMdata(URL, payload) 
-        : await postFORMdata(URL, payload);
+      const response = await postFORMdata(URL, payload);
       
       const apiRes = response?.data ? { ...response?.data } : null;
       if (apiRes?.responseStatus?.status === "200") {
@@ -306,6 +297,17 @@ const EmployeeRegistration = () => {
 
   const handleCancel = () => {
     navigate("/iwt/employee-management");
+  };
+
+  // Helper to download file
+  const handleFileDownload = (url) => {
+    if (!url) return;
+    const link = document.createElement("a");
+    link.href = url;
+    link.setAttribute("download", "");
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   return (
@@ -676,7 +678,7 @@ const EmployeeRegistration = () => {
                         <Row className="g-3">
                           <Col md={4}>
                             <InputText
-                                                        name={`professionalDetails.${index}.appointmentDate`}
+                              name={`professionalDetails.${index}.appointmentDate`}
                               label="Appointment Date *"
                               type="date"
                               placeholder="Select appointment date"
@@ -941,16 +943,16 @@ const EmployeeRegistration = () => {
                         <small className="text-muted">
                           Upload PDF, JPG or PNG (Max: 2MB)
                         </small>
-                        {isEditMode && employeeData?.fileStoreMaps?.length > 0 && (
-                          <div className="mt-2">
-                            <a 
-                              href={employeeData.fileStoreMaps.find(f => f.fieldName.includes('Address'))?.downLoadFile} 
-                              target="_blank" 
-                              rel="noopener noreferrer"
-                              className="text-primary"
+                        {isEditMode && employeeData?.fileStoreMaps?.[0]?.downLoadFile && (
+                          <div className="mt-2" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            <Button
+                              variant="link"
+                              style={{ padding: 0, color: "#2466BF" }}
+                              onClick={() => handleFileDownload(employeeData.fileStoreMaps[0].downLoadFile)}
                             >
-                              View current address proof
-                            </a>
+                              <FaDownload style={{ marginRight: 4 }} />
+                              Download address proof
+                            </Button>
                           </div>
                         )}
                       </Col>
@@ -977,16 +979,16 @@ const EmployeeRegistration = () => {
                         <small className="text-muted">
                           Upload PDF, JPG or PNG (Max: 2MB)
                         </small>
-                        {isEditMode && employeeData?.fileStoreMaps?.length > 0 && (
-                          <div className="mt-2">
-                            <a 
-                              href={employeeData.fileStoreMaps.find(f => f.fieldName.includes('Identity'))?.downLoadFile} 
-                              target="_blank" 
-                              rel="noopener noreferrer"
-                              className="text-primary"
+                        {isEditMode && employeeData?.fileStoreMaps?.[1]?.downLoadFile && (
+                          <div className="mt-2" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            <Button
+                              variant="link"
+                              style={{ padding: 0, color: "#2466BF" }}
+                              onClick={() => handleFileDownload(employeeData.fileStoreMaps[1].downLoadFile)}
                             >
-                              View current identity proof
-                            </a>
+                              <FaDownload style={{ marginRight: 4 }} />
+                              Download identity proof
+                            </Button>
                           </div>
                         )}
                       </Col>
@@ -1013,16 +1015,16 @@ const EmployeeRegistration = () => {
                         <small className="text-muted">
                           Upload PDF, JPG or PNG (Max: 2MB)
                         </small>
-                        {isEditMode && employeeData?.fileStoreMaps?.length > 0 && (
-                          <div className="mt-2">
-                            <a 
-                              href={employeeData.fileStoreMaps.find(f => f.fieldName.includes('Appointment'))?.downLoadFile} 
-                              target="_blank" 
-                              rel="noopener noreferrer"
-                              className="text-primary"
+                        {isEditMode && employeeData?.fileStoreMaps?.[2]?.downLoadFile && (
+                          <div className="mt-2" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            <Button
+                              variant="link"
+                              style={{ padding: 0, color: "#2466BF" }}
+                              onClick={() => handleFileDownload(employeeData.fileStoreMaps[2].downLoadFile)}
                             >
-                              View current appointment letter
-                            </a>
+                              <FaDownload style={{ marginRight: 4 }} />
+                              Download appointment letter
+                            </Button>
                           </div>
                         )}
                       </Col>
@@ -1079,4 +1081,3 @@ const EmployeeRegistration = () => {
 };
 
 export default EmployeeRegistration;
-
