@@ -1,233 +1,270 @@
-// EmployeeRegistration.tsx
-import React, { useRef, useState, useEffect } from "react";
-import { useNavigate, useParams, useLocation } from "react-router-dom";
-import { useForm, useFieldArray, Controller } from "react-hook-form";
-import { Container, Row, Col, Card, Button } from "react-bootstrap";
+import { useNavigate } from "react-router-dom";
+import "react-toastify/dist/ReactToastify.css";
+import { useTranslation } from "react-i18next";
+import { useEffect, useState, useRef } from "react";
+import ActionTable from "../../../common/ActionTable.tsx";
 import { toast } from "react-toastify";
-import axios from "axios";
-import {
-  FaUser,
-  FaMapMarkerAlt,
-  FaBriefcase,
-  FaFileUpload,
-  FaGraduationCap,
-  FaPlus,
-  FaTrash,
-  FaArrowLeft,
-} from "react-icons/fa";
-import InputText from "../../../common/InputText.tsx";
-import { handleErrorMessage } from "../../../../utils/errorMessageHandler.js";
+import { useForm } from "react-hook-form";
+import { USER_REGIS_MASTER } from "./userManagConst.ts";
+import { Card, Row, Col } from "react-bootstrap";
 import InputSelect from "../../../common/InputSelect.tsx";
-import Collapsible from "../../../common/Collapsible.js";
-import { CONSTANT_REGEX, renameFile } from "../../../../utils/constants.ts";
-import { useMasterData } from "../../../context/MasterDataContext.js";
+import InputText from "../../../common/InputText.tsx";
 import NewLoader from "../../../common/NewLoader.js";
-import "./EmployeeRegistration.css";
-import { getData, postFORMdata } from "../../../../services/http.service.ts";
+import { useMasterData } from "../../../context/MasterDataContext.js";
+import { Box, Typography, Stack } from "@mui/material";
+import { handleErrorMessage } from "../../../../utils/errorMessageHandler.js";
+import { postData } from "../../../../services/http.service.ts";
 import { URLS_ENDPOINT } from "../../../../utils/urlsConstants.ts";
-import AppToggleButton from "../../../common/AppToggleButton.js";
+import { allowOnlyInteger } from "../../../../utils/constants.ts";
 
-const EmployeeRegistration = () => {
+const UserManagement = () => {
+  const { t } = useTranslation();
   const navigate = useNavigate();
-  const { id } = useParams();
-  const location = useLocation();
-  const isEditMode = !!id;
+  const [rowData, setRowData] = useState([]);
   const loaderRef = useRef();
   const { masterData } = useMasterData();
-
-  const [addressProofFile, setAddressProofFile] = useState(null);
-  const [identityProofFile, setIdentityProofFile] = useState(null);
-  const [appointmentLetterFile, setAppointmentLetterFile] = useState(null);
-  const [toggleValue, setToggleValue] = useState(true);
-  const [employeeData, setEmployeeData] = useState(null);
 
   const {
     register,
     handleSubmit,
-    control,
     formState: { errors },
+    reset,
     setValue,
     watch,
-    reset,
   } = useForm({
-    mode: "onSubmit",
     defaultValues: {
-      firstName: "",
-      lastName: "",
-      email: "",
-      phoneNumber: "",
-      gender: "",
-      dateOfBirth: "",
-      addressLine1: "",
-      addressLine2: "",
-      pin: "",
-      district: "",
-      stateUt: "",
-      country: "India",
-      appointmentDate: "",
-      employeeType: "",
+      empId: "",
+      userName: "",
       designation: "",
-      addressProof: "",
-      identityProof: "",
-      appointmentLetter: "",
-      educationDetails: [{ qualification: "", stream: "", yearOfPassing: "" }],
-      professionalDetails: [
-        {
-          appointmentDate: "",
-          employeeType: "",
-          employeeStatus: "",
-          designation: "",
-          department: "",
-          section: "",
-          roles: "",
-        },
-      ],
-      isActive: true,
+      status: "",
+      phoneNumber: "",
     },
   });
 
-  const { fields, append, remove } = useFieldArray({
-    control,
-    name: "educationDetails",
-  });
-
-  const {
-    fields: professionalFields,
-    append: appendProfessional,
-    remove: removeProfessional,
-  } = useFieldArray({
-    control,
-    name: "professionalDetails",
-  });
-
+  const fetchedUserDetails = useRef(false);
   useEffect(() => {
-    if (isEditMode) {
-      // Check if we have employee data passed via state
-      if (location.state?.employeeData) {
-        const employeeData = location.state.employeeData;
-        setEmployeeData(employeeData);
-        populateFormData(employeeData);
-      } else {
-        // If not, fetch the employee data
-        fetchEmployeeData();
-      }
-    }
-  }, [isEditMode, id, location.state]);
+    if (fetchedUserDetails.current) return;
+    getUserDetails();
+    fetchedUserDetails.current = true;
+  }, []);
 
-  const fetchEmployeeData = async () => {
+  const columns = USER_REGIS_MASTER.USER_INFO_COLUMNS;
+
+  const getUserDetails = async (payload) => {
     try {
+      const URL =
+        process.env.REACT_APP_AUTH_URL + URLS_ENDPOINT.USER_SERVICE.SEARCH_EMP;
+
       loaderRef.current?.show();
-      const URL = process.env.REACT_APP_AUTH_URL + URLS_ENDPOINT.USER_SERVICE.GET_EMP_BY_ID + id;
-      const response = await getData(URL);
-      
-      if (response?.status === 200) {
-        const employeeData = response.data?.data;
-        setEmployeeData(employeeData);
-        populateFormData(employeeData);
+      const result = await postData(URL, payload);
+      const rData = result?.data?.data?.vesselUsers || [];
+
+      if (result?.status === 200 && rData?.length > 0) {
+        loaderRef?.current?.hide();
+        const updatedData = rData?.map(
+          ({ firstName, lastName, isActive, ...rest }) => ({
+            ...rest,
+            firstName,
+            lastName,
+            isActive,
+            empName: `${firstName} ${lastName}`,
+            status: isActive ? "Active" : "Inactive",
+            designation: rest?.professionalDetails?.[0]?.designation || ''
+          })
+        );
+        setRowData(updatedData);
       } else {
-        toast.error("Failed to fetch employee data");
+        loaderRef?.current?.hide();
+        toast.info(
+          result?.data?.responseStatus?.message || "Something went wrong..",
+          { position: "top-right" }
+        );
       }
-    } catch (error) {
-      console.error("Error fetching employee data:", error);
-      toast.error("Error fetching employee data");
-    } finally {
-      loaderRef.current?.hide();
+    } catch (err) {
+      console.log(err?.response?.data);
+      loaderRef?.current?.hide();
+      handleErrorMessage(err?.response?.data);
     }
   };
 
-  const populateFormData = (employeeData) => {
-    reset({
-      firstName: employeeData.firstName,
-      lastName: employeeData.lastName,
-      email: employeeData.emailId,
-      phoneNumber: employeeData.phoneNumber,
-      gender: employeeData.gender,
-      dateOfBirth: employeeData.dateOfBirth,
-      addressLine1: employeeData.addressLine1,
-      addressLine2: employeeData.addressLine2 || "",
-      pin: employeeData.pin,
-      district: employeeData.district,
-      stateUt: employeeData.stateUt,
-      country: employeeData.country,
-      isActive: employeeData.isActive,
-      educationDetails: employeeData.educationDetails?.map(ed => ({
-        uuid: ed.uuid,
-        qualification: ed.qualification,
-        stream: ed.stream,
-        yearOfPassing: ed.yearOfPassing,
-        additionalEducationDetails: ed.additionalEducationDetails || ""
-      })) || [{ qualification: "", stream: "", yearOfPassing: "" }],
-      professionalDetails: employeeData.professionalDetails?.map(pd => ({
-        uuid: pd.uuid,
-        appointmentDate: pd.appointmentDate,
-        employeeType: pd.employeeType,
-        employeeStatus: pd.employeeStatus,
-        designation: pd.designation,
-        department: pd.department || "",
-        section: pd.section || "",
-        roles: pd.role || ""
-      })) || [{
-        appointmentDate: "",
-        employeeType: "",
-        employeeStatus: "",
-        designation: "",
-        department: "",
-        section: "",
-        roles: ""
-      }]
-    });
-    setToggleValue(employeeData.isActive);
+  const handleRowClick = (e) => {};
+
+  const handleAddEmployee = () => {
+    navigate("/employee-registration");
   };
 
-  // Rest of your component code remains the same...
-  // Only replace the static data references with employeeData
+  // Pass full row data to edit page
+  const handleEditRow = (row) => {
+    navigate(`/employee-registration/edit/${row.id}`, { state: { employee: row } });
+  };
 
-  // In the documents upload section, replace the static links with:
-  {isEditMode && employeeData?.fileStoreMaps?.[0]?.downLoadFile && (
-    <div className="mt-2">
-      <a 
-        href={employeeData.fileStoreMaps[0].downLoadFile} 
-        target="_blank" 
-        rel="noopener noreferrer"
-        className="text-primary"
-      >
-        View current address proof
-      </a>
-    </div>
-  )}
-
-  // Similarly for identity proof and appointment letter
-  {isEditMode && employeeData?.fileStoreMaps?.[1]?.downLoadFile && (
-    <div className="mt-2">
-      <a 
-        href={employeeData.fileStoreMaps[1].downLoadFile} 
-        target="_blank" 
-        rel="noopener noreferrer"
-        className="text-primary"
-      >
-        View current identity proof
-      </a>
-    </div>
-  )}
-
-  {isEditMode && employeeData?.fileStoreMaps?.[2]?.downLoadFile && (
-    <div className="mt-2">
-      <a 
-        href={employeeData.fileStoreMaps[2].downLoadFile} 
-        target="_blank" 
-        rel="noopener noreferrer"
-        className="text-primary"
-      >
-        View current appointment letter
-      </a>
-    </div>
-  )}
-
-  // ... rest of your component code
+  const onSubmitFilterForm = async (data) => {
+    if (data && Object.keys(data)?.length > 0) {
+      getUserDetails(data);
+    }
+  };
 
   return (
-    // Your existing JSX
+    <>
+      <NewLoader ref={loaderRef} />
+
+      <Row className="mt-2">
+        <Col md={9}>
+          <Stack spacing={0.5} style={{ padding: "0.5rem" }}>
+            <Typography
+              sx={{
+                fontWeight: 550,
+                color: "#2E57A7",
+                fontSize: "1.2rem",
+              }}
+            >
+              Manage Employee(s) &nbsp;
+              <span style={{ color: "#666", fontSize: "0.65rem" }}>
+                (Fill in the employee details to complete registration)
+              </span>
+            </Typography>
+          </Stack>
+        </Col>
+        <Col md={3} className="d-flex justify-content-end">
+          <button
+            className="generic-btn-submit"
+            type="button"
+            onClick={handleAddEmployee}
+          >
+            <i className="fa fa-plus" aria-hidden="true"></i> New Employee
+          </button>
+        </Col>
+      </Row>
+
+      <div className="w-full">
+        <Card>
+          <form
+            style={{ padding: "2rem", margin: 0 }}
+            onSubmit={handleSubmit(onSubmitFilterForm)}
+          >
+            <Row>
+              <Col md={2}>
+                <InputText
+                  type="text"
+                  name="empId"
+                  maxlength={10}
+                  label="Employee Id"
+                  placeholder="Employee Id.."
+                  register={{
+                    ...register("empId", {}),
+                  }}
+                  errors={errors}
+                  onKeyDown={(e) => {
+                    if (!allowOnlyInteger(e)) e.preventDefault();
+                  }}
+                />
+              </Col>
+
+              <Col md={2}>
+                <InputText
+                  type="text"
+                  name="userName"
+                  label="Employee Name"
+                  maxlength={80}
+                  placeholder="Employee name.."
+                  register={{
+                    ...register("userName", {}),
+                  }}
+                  errors={errors}
+                />
+              </Col>
+
+              <Col md={3}>
+                <InputSelect
+                  label="Designation"
+                  name="designation"
+                  options={
+                    masterData?.designations?.map((type) => ({
+                      value: type.valueCode,
+                      label: type.valueLabel,
+                    })) || []
+                  }
+                  register={register}
+                  errors={errors}
+                  value={watch("designation")}
+                  onChange={(val) => setValue("designation", val)}
+                />
+              </Col>
+
+              <Col md={2}>
+                <InputSelect
+                  label="Status"
+                  name="status"
+                  placeholder="Status"
+                  options={[
+                    { value: "", label: "--Select--" },
+                    { value: "active", label: "Active" },
+                    { value: "inactive", label: "Inactive" },
+                  ]}
+                  register={register}
+                  errors={errors}
+                  value={watch("status")}
+                  onChange={(val) => setValue("status", val)}
+                />
+              </Col>
+
+              <Col md={3}>
+                <InputText
+                  type="text"
+                  name="phoneNumber"
+                  label="Phone Number"
+                  maxlength={10}
+                  placeholder="Enter Phone Number"
+                  register={{
+                    ...register("phoneNumber", {}),
+                  }}
+                  onKeyDown={(e) => {
+                    if (!allowOnlyInteger(e)) e.preventDefault();
+                  }}
+                  errors={errors}
+                />
+              </Col>
+            </Row>
+
+            <Col
+              md={4}
+              style={{ display: "flex", gap: "10px", float: "right" }}
+            >
+              <div className="w48">
+                <button
+                  className="generic-btn-cancel"
+                  type="reset"
+                  onClick={() => {
+                    reset();
+                  }}
+                >
+                  {t("login.reset")}
+                </button>
+              </div>
+              <div className="w48">
+                <button className="generic-btn-submit" type="submit">
+                  Filter
+                </button>
+              </div>
+            </Col>
+          </form>
+        </Card>
+
+        <ActionTable
+          tableHeader="Employee List"
+          columns={columns}
+          rowData={rowData}
+          additionalMethod={handleRowClick}
+          showCustomBtn={true}
+          btnName={t("Add")}
+          handleBtnClick={handleAddEmployee}
+          handleEditRow={handleEditRow}
+          hideExportBtn={true}
+          searchBarPlaceholder={t("Table.SEARCH_BY")}
+        />
+      </div>
+    </>
   );
 };
 
-export default EmployeeRegistration;
+export default UserManagement;
