@@ -1,3 +1,923 @@
+
+import React, { useRef, useState, useEffect } from "react";
+import { useNavigate, useParams, useLocation } from "react-router-dom";
+import { useForm, useFieldArray, Controller } from "react-hook-form";
+import { Container, Row, Col, Card, Button } from "react-bootstrap";
+import { toast } from "react-toastify";
+import {
+  FaUser,
+  FaMapMarkerAlt,
+  FaBriefcase,
+  FaFileUpload,
+  FaGraduationCap,
+  FaPlus,
+  FaTrash,
+  FaArrowLeft,
+  FaDownload,
+} from "react-icons/fa";
+import InputText from "../../../common/InputText.tsx";
+import { handleErrorMessage } from "../../../../utils/errorMessageHandler.js";
+import InputSelect from "../../../common/InputSelect.tsx";
+import Collapsible from "../../../common/Collapsible.js";
+import { CONSTANT_REGEX, renameFile } from "../../../../utils/constants.ts";
+import { useMasterData } from "../../../context/MasterDataContext.js";
+import NewLoader from "../../../common/NewLoader.js";
+import "./EmployeeRegistration.css";
+import { getData, postFORMdata } from "../../../../services/http.service.ts";
+import { URLS_ENDPOINT } from "../../../../utils/urlsConstants.ts";
+import AppToggleButton from "../../../common/AppToggleButton.js";
+
+
+const getValue = (obj, key) => {
+  if (!obj) return "";
+  if (obj[key] !== undefined) return obj[key];
+  const lowerKey = key.toLowerCase();
+  const foundKey = Object.keys(obj).find(
+    k => k.toLowerCase() === lowerKey
+  );
+  return foundKey ? obj[foundKey] : "";
+};
+
+const EmployeeRegistration = () => {
+  const navigate = useNavigate();
+  const { id } = useParams();
+  const location = useLocation();
+  const isEditMode = !!id;
+  const loaderRef = useRef();
+  const { masterData } = useMasterData();
+  const [employeeData, setEmployeeData] = useState("");
+
+
+  useEffect(() => {
+    setEmployeeData(location?.state?.employee || "");
+  }, []);
+  console.log(employeeData);
+
+
+  const {
+    register,
+    handleSubmit,
+    control,
+    formState: { errors },
+    setValue,
+    watch,
+    reset,
+  } = useForm({
+    mode: "onSubmit",
+    defaultValues: {
+      firstName: "",
+      lastName: "",
+      email: "",
+      phoneNumber: "",
+      gender: "",
+      dateOfBirth: "",
+      addressLine1: "",
+      addressLine2: "",
+      pin: "",
+      district: "",
+      stateUt: "",
+      country: "India",
+      appointmentDate: "",
+      employeeType: "",
+      designation: "",
+      addressProof: "",
+      identityProof: "",
+      appointmentLetter: "",
+      educationDetails: [{ qualification: "", stream: "", yearOfPassing: "", employeeUUID: '', uuid: '' }],
+      professionalDetails: [
+        {
+          appointmentDate: "",
+          employeeType: "",
+          employeeStatus: "",
+          designation: "",
+          department: "",
+          section: "",
+          roles: "",
+          employeeUUID: "",
+          uuid: ""
+        },
+      ],
+      isActive: true,
+    },
+  });
+  const [addressProofFile, setAddressProofFile] = useState(null);
+  const [identityProofFile, setIdentityProofFile] = useState(null);
+  const [appointmentLetterFile, setAppointmentLetterFile] = useState(null);
+  const [toggleValue, setToggleValue] = useState(true);
+
+  const { fields, append, remove } = useFieldArray({
+    control,
+    name: "educationDetails",
+  });
+
+  const {
+    fields: professionalFields,
+    append: appendProfessional,
+    remove: removeProfessional,
+  } = useFieldArray({
+    control,
+    name: "professionalDetails",
+  });
+
+  useEffect(() => {
+    if (isEditMode && employeeData) {
+      reset({
+        firstName: getValue(employeeData, "firstName"),
+        lastName: getValue(employeeData, "lastName"),
+        email: getValue(employeeData, "emailId"),
+        phoneNumber: getValue(employeeData, "phoneNumber"),
+        gender: getValue(employeeData, "gender"),
+        dateOfBirth: getValue(employeeData, "dateOfBirth"),
+        addressLine1: getValue(employeeData, "addressLine1"),
+        addressLine2: getValue(employeeData, "addressLine2"),
+        pin: getValue(employeeData, "pin"),
+        district: getValue(employeeData, "district"),
+        stateUt: getValue(employeeData, "stateUt"),
+        country: getValue(employeeData, "country") || "India",
+        isActive: getValue(employeeData, "isActive") ?? true,
+        educationDetails: Array.isArray(employeeData.educationDetails)
+          ? employeeData.educationDetails.map(ed => ({
+            qualification: getValue(ed, "qualification"),
+            stream: getValue(ed, "stream"),
+            yearOfPassing: getValue(ed, "yearOfPassing"),
+            additionalEducationDetails: getValue(ed, "additionalEducationDetails") || "",
+            uuid: ed?.uuid || "",
+            employeeUUID: ed?.uuid || "",
+          }))
+          : [{ qualification: "", stream: "", yearOfPassing: "" }],
+        professionalDetails: Array.isArray(employeeData.professionalDetails)
+          ? employeeData.professionalDetails.map(pd => ({
+            appointmentDate: getValue(pd, "appointmentDate"),
+            employeeType: getValue(pd, "employeeType"),
+            employeeStatus: getValue(pd, "employeeStatus"),
+            designation: getValue(pd, "designation"),
+            department: getValue(pd, "department") || "",
+            section: getValue(pd, "section") || "",
+            roles: getValue(pd, "role") || "",
+            uuid: pd?.uuid || "",
+            employeeUUID: pd?.uuid || "",
+          }))
+          : [{
+            appointmentDate: "",
+            employeeType: "",
+            employeeStatus: "",
+            designation: "",
+            department: "",
+            section: "",
+            roles: ""
+          }]
+      });
+      setToggleValue(getValue(employeeData, "isActive") ?? true);
+    } else if (!isEditMode) {
+      setToggleValue(true);
+    }
+  }, [isEditMode, reset, employeeData]);
+
+  const fetchAddressDetails = async (pin) => {
+    try {
+      const URL =
+        process.env.REACT_APP_PUBLIC_URL +
+        URLS_ENDPOINT.APP_SERVICES.GET_DETAILS_BY_PINCODE +
+        pin;
+      const response = await getData(URL);
+      if (response?.status === 200 && response?.data?.length > 0) {
+        setValue("district", response?.data[0]?.district);
+        setValue("stateUt", response?.data[0]?.stateName);
+        setValue("country", "India");
+      } else {
+        setValue("district", "");
+        setValue("stateUt", "");
+        setValue("country", "");
+        toast.info("No data found for this PIN code");
+      }
+      loaderRef.current?.hide();
+    } catch (error) {
+      setValue("district", "");
+      setValue("stateUt", "");
+      setValue("country", "");
+      loaderRef.current?.hide();
+      toast.error("Error fetching address details");
+    }
+  };
+  console.log("employeeData", employeeData);
+
+  const onSubmit = async (data) => {
+    try {
+      loaderRef.current?.show();
+
+      const vesselUserDetails = {
+        vesselUserDetails: {
+          id: isEditMode ? employeeData?.id : "",
+          userId: isEditMode ? employeeData?.userId : "",
+          userType: "employee",
+          userCategory: "",
+          firstName: data.firstName,
+          lastName: data.lastName,
+          emailId: data.email,
+          phoneNumber: data.phoneNumber,
+          panNumber: data.panNumber || "",
+          gstNumber: data.gstNumber || "",
+          addressDetails: data.addressLine1 + (data.addressLine2 ? ", " + data.addressLine2 : ""),
+          addressLine1: data.addressLine1,
+          addressLine2: data.addressLine2,
+          pin: data.pin,
+          district: data.district,
+          stateUt: data.stateUt,
+          country: data.country,
+          isActive: data?.isActive,
+          keycloakId: isEditMode ? employeeData?.keycloakId : "",
+          dateOfBirth: data.dateOfBirth,
+          gender: data.gender,
+          roleIds: isEditMode ? employeeData?.roleIds : [],
+          authorizedPerson: null,
+          companyRegistration: null,
+          educationDetails: data?.educationDetails?.map((ed) => ({
+            uuid: isEditMode ? ed.uuid : "",
+            employeeUUID: isEditMode ? ed?.employeeUUID : "",
+            qualification: ed.qualification,
+            stream: ed.stream,
+            yearOfPassing: ed.yearOfPassing,
+            additionalEducationDetails: ed.additionalEducationDetails || "",
+          })),
+          professionalDetails: data?.professionalDetails?.map((pd) => ({
+            uuid: isEditMode ? pd.uuid : "",
+            employeeUUID: isEditMode ? pd?.employeeUUID : "",
+            appointmentDate: pd.appointmentDate,
+            employeeType: pd.employeeType,
+            employeeStatus: pd.employeeStatus,
+            designation: pd.designation,
+            department: pd.department,
+            section: pd.section,
+            role: pd.roles,
+          })),
+          aadharNumber: data.aadharNumber || "",
+        }
+      };
+
+      const formData = new FormData();
+      formData.append("request", new Blob([JSON.stringify(vesselUserDetails)], { type: 'application/json' }));
+
+      [addressProofFile, identityProofFile, appointmentLetterFile].forEach((file) => {
+        if (file) {
+          formData.append("files", file);
+        }
+      });
+      
+      await submitEmpDetails(formData);
+
+    } catch (error) {
+      loaderRef.current?.hide();
+      toast.error(
+        error?.response?.data?.message ||
+        "Error submitting form. Please try again."
+      );
+    }
+  };
+
+
+  const submitEmpDetails = async (payload) => {
+    try {
+      const URL = process.env.REACT_APP_AUTH_URL + URLS_ENDPOINT.USER_SERVICE.CREATE_EMP;
+
+      loaderRef.current?.show();
+      const response = await postFORMdata(URL, payload);
+      const apiRes = response?.data ? { ...response?.data } : null;
+      console.log("API Response:employee", apiRes);
+
+      if (apiRes?.responseStatus?.status === "200") {
+        loaderRef?.current?.hide();
+        toast.success(
+          apiRes?.responseStatus?.message ||
+          (isEditMode ? "Employee updated successfully!" : "Employee registered successfully!"),
+          { position: "top-right" }
+        );
+        handleCancel();
+      } else {
+        loaderRef?.current?.hide();
+        toast.info(
+          apiRes?.responseStatus?.message || "Something went wrong..",
+          { position: "top-right" }
+        );
+      }
+    } catch (err) {
+      console.log(err);
+      loaderRef?.current?.hide();
+      handleErrorMessage(err?.response?.data);
+    }
+  };
+
+  const handleCancel = () => {
+    navigate("/iwt/employee-management");
+  };
+
+  const handleFileDownload = (url) => {
+    if (!url) return;
+    const link = document.createElement("a");
+    link.href = url;
+    link.setAttribute("download", "");
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  return (
+    <>
+      <NewLoader ref={loaderRef} />
+      <Container fluid className="p-4">
+        <Card className="mb-4">
+          <Card.Header
+            className="bg-primary text-white d-flex align-items-center justify-content-center position-relative"
+            style={{
+              minHeight: 56,
+              background: "linear-gradient(135deg, rgb(0, 119, 182), rgb(2, 62, 138))",
+              border: "none",
+            }}
+          >
+            <Button
+              variant="link"
+              className="p-0 me-2"
+              style={{
+                color: "white",
+                textDecoration: "none",
+                position: "absolute",
+                left: 0,
+                top: "50%",
+                transform: "translateY(-50%)",
+              }}
+              onClick={() => navigate("/iwt/employee-management")}
+            >
+              <FaArrowLeft size={22} />
+            </Button>
+
+            <div style={{ fontWeight: 600, fontSize: 22, color: "#fff" }}>
+              {isEditMode ? "Edit Employee" : "Add Employee"}
+            </div>
+
+            <div style={{ width: 40 }}></div>
+          </Card.Header>
+          <Card.Body>
+            <form onSubmit={handleSubmit(onSubmit)} className="employee-form">
+              {/* Personal Details Section */}
+              <Collapsible
+                title={
+                  <div className="d-flex align-items-center">
+                    <FaUser className="me-2" style={{ color: "#2466BF" }} />
+                    <span style={{ color: "#2466BF" }}>Personal Details</span>
+                  </div>
+                }
+                defaultOpen={true}
+              >
+                <Card className="form-section-card">
+                  <Card.Body>
+                    <Row className="g-3">
+                      <Col md={4}>
+                        <InputText
+                          name="firstName"
+                          label="First Name"
+                          placeholder="Enter first name"
+                          required={true}
+                          register={{
+                            ...register("firstName", {
+                              required: "First Name is required",
+                            }),
+                          }}
+                          errors={errors}
+                        />
+                      </Col>
+                      <Col md={4}>
+                        <InputText
+                          name="lastName"
+                          label="Last Name"
+                          placeholder="Enter last name"
+                          required={true}
+                          register={{
+                            ...register("lastName", {
+                              required: "Last Name is required",
+                            }),
+                          }}
+                          errors={errors}
+                        />
+                      </Col>
+                      <Col md={4}>
+                        <InputText
+                          name="email"
+                          label="Email ID"
+                          type="email"
+                          placeholder="Enter email address"
+                          required={true}
+                          register={{
+                            ...register("email", {
+                              required: "Email is required",
+                              pattern: {
+                                value: CONSTANT_REGEX.EMAIL,
+                                message: "Invalid email address",
+                              },
+                            }),
+                          }}
+                          errors={errors}
+                        />
+                      </Col>
+                      <Col md={4}>
+                        <InputText
+                          name="phoneNumber"
+                          label="Phone Number"
+                          placeholder="Enter 10-digit phone number"
+                          required={true}
+                          maxlength={10}
+                          register={{
+                            ...register("phoneNumber", {
+                              required: "Phone Number is required",
+                              pattern: {
+                                value: CONSTANT_REGEX.MOBILE,
+                                message: "Phone number must be 10 digits",
+                              },
+                            }),
+                          }}
+                          errors={errors}
+                        />
+                      </Col>
+                      <Col md={4}>
+                        <InputSelect
+                          name="gender"
+                          label="Gender"
+                          required={true}
+                          options={[
+                            { value: "", label: "Select Gender" },
+                            ...(masterData?.genders?.map((type) => ({
+                              value: type.valueCode,
+                              label: type.valueLabel,
+                            })) || [
+                                { value: "MALE", label: "MALE" },
+                                { value: "FEMALE", label: "FEMALE" },
+                                { value: "OTHER", label: "OTHER" },
+                              ]),
+                          ]}
+                          register={register("gender", {
+                            required: "Gender is required",
+                          })}
+                          errors={errors}
+                          value={watch("gender") || ""}
+                          onChange={(value) =>
+                            setValue("gender", value, { shouldValidate: true })
+                          }
+                        />
+                      </Col>
+                      <Col md={4}>
+                        <InputText
+                          name="dateOfBirth"
+                          label="Date of Birth"
+                          type="date"
+                          placeholder="Select date of birth"
+                          required={true}
+                          register={{
+                            ...register("dateOfBirth", {
+                              required: "Date of Birth is required",
+                            }),
+                          }}
+                          errors={errors}
+                        />
+                      </Col>
+                    </Row>
+                  </Card.Body>
+                </Card>
+              </Collapsible>
+
+              {/* Address Details Section */}
+              <Collapsible
+                title={
+                  <div className="d-flex align-items-center">
+                    <FaMapMarkerAlt className="me-2" style={{ color: "#2466BF" }} />
+                    <span style={{ color: "#2466BF" }}>Address Details</span>
+                  </div>
+                }
+                defaultOpen={true}
+              >
+                <Card className="form-section-card">
+                  <Card.Body>
+                    <Row className="g-3">
+                      <Col md={6}>
+                        <InputText
+                          name="addressLine1"
+                          label="Address Line-1"
+                          placeholder="Enter address line 1"
+                          required={true}
+                          register={{
+                            ...register("addressLine1", {
+                              required: "Address Line-1 is required",
+                            }),
+                          }}
+                          errors={errors}
+                        />
+                      </Col>
+                      <Col md={6}>
+                        <InputText
+                          name="addressLine2"
+                          label="Address Line-2"
+                          placeholder="Enter address line 2 (optional)"
+                          register={{
+                            ...register("addressLine2"),
+                          }}
+                          errors={errors}
+                        />
+                      </Col>
+                      <Col md={3}>
+                        <InputText
+                          name="pin"
+                          label="PIN"
+                          placeholder="Enter 6-digit PIN code"
+                          required={true}
+                          register={{
+                            ...register("pin", {
+                              required: "PIN Code is required",
+                              pattern: {
+                                value: /^[0-9]{6}$/,
+                                message: "PIN must be 6 digits",
+                              },
+                            }),
+                          }}
+                          onChange={(e) => {
+                            const pinValue = e.target.value;
+                            if (pinValue.length === 6) {
+                              loaderRef.current?.show();
+                              fetchAddressDetails(pinValue);
+                            }
+                          }}
+                          errors={errors}
+                        />
+                      </Col>
+                      <Col md={3}>
+                        <InputText
+                          name="district"
+                          label="District"
+                          required={true}
+                          placeholder="Auto-populated"
+                          register={{
+                            ...register("district"),
+                          }}
+                          errors={errors}
+                          readOnly
+                        />
+                      </Col>
+                      <Col md={3}>
+                        <InputText
+                          name="stateUt"
+                          label="State/UT"
+                          required={true}
+                          placeholder="Auto-populated"
+                          register={{
+                            ...register("stateUt"),
+                          }}
+                          errors={errors}
+                          readOnly
+                        />
+                      </Col>
+                      <Col md={3}>
+                        <InputText
+                          name="country"
+                          label="Country"
+                          required={true}
+                          placeholder="Auto-populated"
+                          register={{
+                            ...register("country"),
+                          }}
+                          errors={errors}
+                          readOnly
+                        />
+                      </Col>
+                    </Row>
+                  </Card.Body>
+                </Card>
+              </Collapsible>
+
+              {/* Education Details Section */}
+              <Collapsible
+                title={
+                  <div className="d-flex align-items-center">
+                    <FaGraduationCap className="me-2" style={{ color: "#2466BF" }} />
+                    <span style={{ color: "#2466BF" }}>Education Details</span>
+                  </div>
+                }
+                defaultOpen={true}
+              >
+                <Card className="form-section-card">
+                  <Card.Body>
+                    {fields.map((field, index) => (
+                      <Row key={field.id} className="g-3">
+                        <Col md={4}>
+                          <InputText
+                            required={true}
+                            name={`educationDetails.${index}.qualification`}
+                            label="Qualification"
+                            placeholder="Enter qualification"
+                            register={register(`educationDetails.${index}.qualification`, {
+                              required: "Qualification is required",
+                            })}
+                            errors={errors?.educationDetails?.[index] || {}}
+                          />
+                        </Col>
+                        <Col md={4}>
+                          <InputText
+                            name={`educationDetails.${index}.stream`}
+                            label="Stream"
+                            placeholder="Enter stream"
+                            register={register(`educationDetails.${index}.stream`, {
+                              required: "Stream is required",
+                            })}
+                            errors={errors?.educationDetails?.[index] || {}}
+                          />
+                        </Col>
+                        <Col md={4}>
+                          <InputText
+                            name={`educationDetails.${index}.yearOfPassing`}
+                            label="Year of Passing"
+                            required={true}
+                            placeholder="Enter year of passing"
+                            register={register(`educationDetails.${index}.yearOfPassing`, {
+                              required: "Year of Passing is required",
+                            })}
+                            errors={errors?.educationDetails?.[index] || {}}
+                          />
+                        </Col>
+                        {index > 0 && (
+                          <Col md={12} className="text-end">
+                            <Button
+                              variant="danger"
+                              size="sm"
+                              onClick={() => remove(index)}
+                              className="mt-1"
+                            >
+                              <FaTrash /> Remove
+                            </Button>
+                          </Col>
+                        )}
+                      </Row>
+                    ))}
+                    <Button
+                      variant="outline-primary"
+                      onClick={() =>
+                        append({
+                          qualification: "",
+                          stream: "",
+                          yearOfPassing: "",
+                        })
+                      }
+                      className="add-education-btn"
+                    >
+                      <FaPlus className="me-2" /> Add Education Details
+                    </Button>
+                  </Card.Body>
+                </Card>
+              </Collapsible>
+
+              {/* Professional Details Section */}
+              <Collapsible
+                title={
+                  <div className="d-flex align-items-center">
+                    <FaBriefcase className="me-2" style={{ color: "#2466BF" }} />
+                    <span style={{ color: "#2466BF" }}>
+                      Professional Details
+                    </span>
+                  </div>
+                }
+                defaultOpen={true}
+              >
+                <Card className="form-section-card">
+                  <Card.Body>
+                    {professionalFields.map((field, index) => (
+                      <div key={field.id} className="professional-entry mb-4">
+                        <Row className="g-3">
+                          <Col md={4}>
+                            <InputText
+                              name={`professionalDetails.${index}.appointmentDate`}
+                              label="Appointment Date *"
+                              type="date"
+                              placeholder="Select appointment date"
+                              register={register(
+                                `professionalDetails.${index}.appointmentDate`,
+                                { required: "Appointment Date is required" }
+                              )}
+                              errors={errors?.professionalDetails?.[index] || {}}
+                              style={{
+                                borderColor:
+                                  errors?.professionalDetails?.[index]?.appointmentDate && "#dc3545",
+                                backgroundColor:
+                                  errors?.professionalDetails?.[index]?.appointmentDate && "#fff8f8",
+                              }}
+                            />
+                          </Col>
+                          <Col md={4}>
+                            <InputSelect
+                              name={`professionalDetails.${index}.employeeType`}
+                              label="Employee Type"
+                              required={true}
+                              placeholder="Select employee type"
+                              options={
+                                masterData?.employeeTypes?.map((type) => ({
+                                  value: type.valueCode,
+                                  label: type.valueLabel,
+                                })) || []
+                              }
+                              register={register(
+                                `professionalDetails.${index}.employeeType`,
+                                { required: "Employee Type is required" }
+                              )}
+                              errors={errors?.professionalDetails?.[index] || {}}
+                              value={watch(`professionalDetails.${index}.employeeType`) || ""}
+                              onChange={(val) =>
+                                setValue(
+                                  `professionalDetails.${index}.employeeType`,
+                                  val,
+                                  { shouldValidate: true }
+                                )
+                              }
+                            />
+                          </Col>
+                          <Col md={4}>
+                            <InputSelect
+                              name={`professionalDetails.${index}.employeeStatus`}
+                              label="Employee Status"
+                              required={true}
+                              placeholder="Select employee status"
+                              options={
+                                masterData?.employeeStatuses?.map((type) => ({
+                                  value: type.valueCode,
+                                  label: type.valueLabel,
+                                })) || []
+                              }
+                              register={register(
+                                `professionalDetails.${index}.employeeStatus`,
+                                { required: "Employee Status is required" }
+                              )}
+                              errors={errors?.professionalDetails?.[index] || {}}
+                              value={
+                                watch(
+                                  `professionalDetails.${index}.employeeStatus`
+                                ) || ""
+                              }
+                              onChange={(val) =>
+                                setValue(
+                                  `professionalDetails.${index}.employeeStatus`,
+                                  val,
+                                  { shouldValidate: true }
+                                )
+                              }
+                            />
+                          </Col>
+                          <Col md={4}>
+                            <InputSelect
+                              name={`professionalDetails.${index}.designation`}
+                              label="Designation"
+                              required={true}
+                              placeholder="Select designation"
+                              options={
+                                masterData?.designations?.map((type) => ({
+                                  value: type.valueCode,
+                                  label: type.valueLabel,
+                                })) || []
+                              }
+                              register={register(
+                                `professionalDetails.${index}.designation`,
+                                { required: "Designation is required" }
+                              )}
+                              errors={errors?.professionalDetails?.[index] || {}}
+                              value={
+                                watch(
+                                  `professionalDetails.${index}.designation`
+                                ) || ""
+                              }
+                              onChange={(val) =>
+                                setValue(
+                                  `professionalDetails.${index}.designation`,
+                                  val,
+                                  { shouldValidate: true }
+                                )
+                              }
+                            />
+                          </Col>
+                          <Col md={4}>
+                            <InputSelect
+                              name={`professionalDetails.${index}.department`}
+                              label="Department"
+                              required={true}
+                              placeholder="Select Department"
+                              options={
+                                masterData?.departments?.map((type) => ({
+                                  value: type.valueCode,
+                                  label: type.valueLabel,
+                                })) || []
+                              }
+                              register={register(
+                                `professionalDetails.${index}.department`,
+                                { required: "Department is required" }
+                              )}
+                              errors={errors?.professionalDetails?.[index] || {}}
+                              value={
+                                watch(
+                                  `professionalDetails.${index}.department`
+                                ) || ""
+                              }
+                              onChange={(val) =>
+                                setValue(
+                                  `professionalDetails.${index}.department`,
+                                  val,
+                                  { shouldValidate: true }
+                                )
+                              }
+                            />
+                          </Col>
+                          <Col md={4}>
+                            <InputText
+                              name={`professionalDetails.${index}.section`}
+                              label="Section"
+                              placeholder="Enter section"
+                              register={register(
+                                `professionalDetails.${index}.section`
+                              )}
+                              errors={
+                                errors?.professionalDetails?.[index]?.section
+                                  ? {
+                                    professionalDetails: {
+                                      [index]: {
+                                        section:
+                                          errors.professionalDetails[index]
+                                            .section,
+                                      },
+                                    },
+                                  }
+                                  : {}
+                              }
+                            />
+                          </Col>
+                          <Col md={4}>
+                            <InputSelect
+                              name={`professionalDetails.${index}.roles`}
+                              label="Roles"
+                              required={true}
+                              placeholder="Select role"
+                              options={
+                                masterData?.roles?.map((type) => ({
+                                  value: type.valueCode,
+                                  label: type.valueLabel,
+                                })) || []
+                              }
+                              register={register(
+                                `professionalDetails.${index}.roles`,
+                                { required: "Role is required" }
+                              )}
+                              errors={errors?.professionalDetails?.[index] || {}}
+                              value={
+                                watch(
+                                  `professionalDetails.${index}.roles`
+                                ) || ""
+                              }
+                              onChange={(val) =>
+                                setValue(
+                                  `professionalDetails.${index}.roles`,
+                                  val,
+                                  { shouldValidate: true }
+                                )
+                              }
+                            />
+                          </Col>
+                          <Col md={1} className="d-flex align-items-end">
+                            {index > 0 && (
+                              <Button
+                                variant="danger"
+                                size="sm"
+                                onClick={() => removeProfessional(index)}
+                                className="mt-1"
+                              >
+                                <FaTrash />
+                              </Button>
+                            )}
+
+
+                          </Col>
+                        </Row>
+                      </div>
+                    ))}
+                    <Button
+                      variant="outline-primary"
+                      onClick={() =>
+                        appendProfessional({
+                          appointmentDate: "",
+                          employeeType: "",
+                          employeeStatus: "",
+                          designation: "",
+                          department: "",
+                          section: "",
+                          roles: "",
+                        })
+                      }
+                      className="add-education-btn"
+                    >
+                      <FaPlus className="me-2" /> Add Professional Details
+                    </Button>
+                  </Card.Body>
+                </Card>
+              </Collapsible>
+
+          
 {/* Documents Upload Section */}
 <Collapsible
   title={
@@ -35,17 +955,17 @@
             onChange={(e) => {
               if (e.target.files && e.target.files[0]) {
                 const file = e.target.files[0];
-                // Validate file type
+                
                 const validTypes = ['image/jpeg', 'image/png', 'application/pdf'];
                 if (!validTypes.includes(file.type)) {
                   toast.error("Only JPG, PNG, and PDF files are allowed");
-                  e.target.value = ''; // Clear the file input
+                  e.target.value = ''; 
                   return;
                 }
-                // Validate file size (2MB max)
+                
                 if (file.size > 2 * 1024 * 1024) {
                   toast.error("File size must be less than 2MB");
-                  e.target.value = ''; // Clear the file input
+                  e.target.value = ''; 
                   return;
                 }
                 const extension = file.name.substring(file.name.lastIndexOf('.'));
@@ -191,3 +1111,668 @@
     </Card.Body>
   </Card>
 </Collapsible>
+
+
+              {/* Form Actions */}
+              <div className="d-flex justify-content-end mt-4 gap-2">
+                <Col style={{ display: "flex" }}>
+                  <strong style={{ marginTop: "5px" }}>User Status : </strong>
+                  &nbsp; &nbsp;
+                  <Controller
+                    name="isActive"
+                    control={control}
+                    defaultValue={true}
+                    render={({ field }) => (
+                      <AppToggleButton
+                        labels={["In-Active", "Active"]}
+                        value={toggleValue}
+                        onChange={(val) => {
+                          field.onChange(val);
+                          setToggleValue(val);
+                          setValue("isActive", val);
+                        }}
+                      />
+                    )}
+                  />
+                </Col>
+
+                <Button variant="secondary" onClick={handleCancel}>
+                  Cancel
+                </Button>
+                <Button
+                  variant="primary"
+                  type="submit"
+                  style={{
+                    background: "linear-gradient(135deg, #0077b6, #023e8a)",
+                    border: "none",
+                    boxShadow: "0 4px 6px rgba(0, 0, 0, 0.1)",
+                    padding: "8px 20px",
+                  }}
+                >
+                  {isEditMode ? "Update" : "Submit"}
+                </Button>
+              </div>
+            </form>
+          </Card.Body>
+        </Card>
+      </Container>
+    </>
+  );
+};
+
+export default EmployeeRegistration;
+
+
+import React, { useState } from "react";
+import { useForm } from "react-hook-form";
+import { Row, Col, Card, Button, Form } from "react-bootstrap";
+import InputText from "../../../common/InputText.tsx";
+import InputSelect from "../../../common/InputSelect.tsx";
+import InputRadio from "../../../common/InputRadio.tsx";
+import InputFile from "../../../common/InputFile";
+import { headerStyle } from "../../../../utils/constants.ts";
+import Collapsible from "../../../common/Collapsible.js"; // Import the Collapsible component
+
+const MultipleFileUpload = ({
+  title,
+  description = true,
+  required = true,
+  register,
+  errors,
+  setValue,
+  clearErrors,
+  watch,
+}) => {
+  const [files, setFiles] = useState([{ id: 1 }]);
+
+  const addFileInput = () => {
+    const newId = files.length > 0 ? Math.max(...files.map(f => f.id)) + 1 : 1;
+    setFiles([...files, { id: newId }]);
+  };
+
+  const removeFileInput = (id) => {
+    setFiles(files.filter(file => file.id !== id));
+    setValue(`${title.replace(/\s+/g, '')}_file_${id}`, null);
+    setValue(`${title.replace(/\s+/g, '')}_desc_${id}`, "");
+    clearErrors([`${title.replace(/\s+/g, '')}_file_${id}`, `${title.replace(/\s+/g, '')}_desc_${id}`]);
+  };
+
+  return (
+    <div className="mb-4">
+      <div className="d-flex justify-content-between align-items-center mb-2">
+        <h6 className="mb-0">{title}</h6>
+        {description && (
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={addFileInput}
+            style={{ backgroundColor: "#2466BF", borderColor: "#2466BF" }}
+          >
+            + Add
+          </Button>
+        )}
+      </div>
+      {files.map((fileInput, idx) => (
+        <Row key={fileInput.id} className="mb-2 align-items-center">
+          <Col md={description ? 8 : 12}>
+            <InputFile
+              label=""
+              name={`${title.replace(/\s+/g, '')}_file_${fileInput.id}`}
+              register={register(`${title.replace(/\s+/g, '')}_file_${fileInput.id}`)}
+              errors={errors}
+              value={watch(`${title.replace(/\s+/g, '')}_file_${fileInput.id}`)?.[0]}
+              onChange={e => {
+                setValue(`${title.replace(/\s+/g, '')}_file_${fileInput.id}`, e.target.files);
+                clearErrors(`${title.replace(/\s+/g, '')}_file_${fileInput.id}`);
+              }}
+            />
+          </Col>
+          {description && (
+            <Col md={4}>
+              <InputText
+                label=""
+                name={`${title.replace(/\s+/g, '')}_desc_${fileInput.id}`}
+                placeholder="Description of File"
+                register={register(`${title.replace(/\s+/g, '')}_desc_${fileInput.id}`)}
+                errors={errors}
+                onChange={() => clearErrors(`${title.replace(/\s+/g, '')}_desc_${fileInput.id}`)}
+              />
+            </Col>
+          )}
+          {description && files.length > 1 && (
+            <Col md={12}>
+              <Button
+                variant="outline-danger"
+                size="sm"
+                onClick={() => removeFileInput(fileInput.id)}
+                className="mt-2"
+              >
+                Remove
+              </Button>
+            </Col>
+          )}
+        </Row>
+      ))}
+    </div>
+  );
+};
+
+const VesselDetails = ({ formMethods }) => {
+  const defaultValues = {
+    ownerName: "",
+    ownerAddress: "",
+    mobile: "",
+    email: "",
+    pan: "",
+    aadhar: "",
+    tradeLicence: "",
+    gst: "",
+    grt: "",
+    vesselType: "",
+    category: "",
+    zone: "",
+    supervisionAuthority: "",
+    purchaseType: "",
+    classificationSociety: "",
+    constructedBy: "",
+    builder: "",
+    builderName: "",
+    builderAddress: "",
+    builderEmail: "",
+    builderMobile: "",
+    builderTradeLicence: "",
+    builderGST: "",
+    builderAuth: "",
+    authLetter: "",
+    workOrderValue: "",
+    termsAccepted: false,
+    tonnageBooklets: null,
+    stabilityBooklets: null,
+  };
+
+  const internalFormMethods = useForm({
+    defaultValues,
+    mode: "onTouched",
+  });
+
+  const methods = formMethods || internalFormMethods;
+
+  const {
+    register,
+    handleSubmit,
+    watch,
+    setValue,
+    clearErrors,
+    formState: { errors },
+  } = methods;
+
+  const constructedBy = watch("constructedBy");
+  const supervisionAuthority = watch("supervisionAuthority");
+  const tonnageBooklets = watch("tonnageBooklets");
+  const stabilityBooklets = watch("stabilityBooklets");
+
+  const onSubmit = (data) => {
+    console.log("Form Submitted:", data);
+  };
+
+  return (
+    <form onSubmit={handleSubmit(onSubmit)} autoComplete="off">
+      {/* Basic Information Collapsible */}
+      <Collapsible title="Basic Information" openStat={true}>
+        <Row className="gy-3" style={{ padding: "1rem" }}>
+          <Col md={4}>
+            <InputText
+              label="Name of Owner"
+              name="ownerName"
+              placeholder="Please enter Name of Owner"
+              required
+              register={register("ownerName", { required: "Name is required" })}
+              errors={errors}
+              onChange={() => clearErrors("ownerName")}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label="Address of Owner"
+              name="ownerAddress"
+              placeholder="Please enter Address of Owner"
+              required
+              register={register("ownerAddress", { required: "Address is required" })}
+              errors={errors}
+              onChange={() => clearErrors("ownerAddress")}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label="Mobile"
+              name="mobile"
+              placeholder="Please enter Mobile"
+              required
+              register={register("mobile", { required: "Mobile is required" })}
+              errors={errors}
+              onChange={() => clearErrors("mobile")}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label="Email Id"
+              name="email"
+              placeholder="Please enter Email Id"
+              required
+              register={register("email", { required: "Email is required" })}
+              errors={errors}
+              onChange={() => clearErrors("email")}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label="PAN"
+              name="pan"
+              placeholder="Please enter PAN"
+              required
+              register={register("pan", { required: "PAN is required" })}
+              errors={errors}
+              onChange={() => clearErrors("pan")}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label="Aadhar"
+              name="aadhar"
+              placeholder="Please enter Aadhar"
+              required
+              register={register("aadhar", { required: "Aadhar is required" })}
+              errors={errors}
+              onChange={() => clearErrors("aadhar")}
+            />
+          </Col>
+        </Row>
+        <Row className="gy-3" style={{ padding: "1rem" }}>
+          <Col md={4}>
+            <InputText
+              label="Trade Licence"
+              name="tradeLicence"
+              placeholder="Please enter Trade Licence"
+              required
+              register={register("tradeLicence", { required: "Trade Licence is required" })}
+              errors={errors}
+              onChange={() => clearErrors("tradeLicence")}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label="GST"
+              name="gst"
+              placeholder="Please enter GST"
+              required
+              register={register("gst", { required: "GST is required" })}
+              errors={errors}
+              onChange={() => clearErrors("gst")}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label="Gross Tonnage (GRT)"
+              name="grt"
+              placeholder="Please enter GRT"
+              required
+              register={register("grt", { required: "GRT is required" })}
+              errors={errors}
+              onChange={() => clearErrors("grt")}
+            />
+          </Col>
+        </Row>
+        <Row className="gy-3" style={{ padding: "1rem" }}>
+          <Col md={4}>
+            <InputSelect
+              label="Type of Vessel"
+              name="vesselType"
+              required
+              options={[
+                { value: "new", label: "New Vessel" },
+                { value: "old", label: "Old Vessel" },
+              ]}
+              register={register}
+              errors={errors}
+              defaultValue={""}
+              onChange={() => clearErrors("vesselType")}
+            />
+          </Col>
+          <Col md={4}>
+            <InputSelect
+              label="Category"
+              name="category"
+              required
+              options={[
+                { value: "A", label: "Category A" },
+                { value: "B", label: "Category B" },
+                { value: "C", label: "Category C" },
+              ]}
+              register={register}
+              errors={errors}
+              defaultValue={""}
+              onChange={() => clearErrors("category")}
+            />
+          </Col>
+          <Col md={4}>
+            <InputSelect
+              label="Zone"
+              name="zone"
+              options={[
+                { value: "1", label: "Zone 1" },
+                { value: "2", label: "Zone 2" },
+                { value: "3", label: "Zone 3" },
+              ]}
+              register={register}
+              errors={errors}
+              defaultValue={""}
+              onChange={() => clearErrors("zone")}
+            />
+          </Col>
+          <Col md={4}>
+            <InputSelect
+              label="Supervision Authority"
+              name="supervisionAuthority"
+              options={[
+                { value: "iwt", label: "IWT" },
+                { value: "classificationSociety", label: "Classification Society" },
+              ]}
+              register={register}
+              errors={errors}
+              defaultValue={""}
+              onChange={() => clearErrors("supervisionAuthority")}
+            />
+          </Col>
+          <Col md={4}>
+            <InputSelect
+              label="Purchase Type"
+              name="purchaseType"
+              options={[
+                { value: "new", label: "New" },
+                { value: "used", label: "Used" },
+              ]}
+              register={register}
+              errors={errors}
+              defaultValue={""}
+              onChange={() => clearErrors("purchaseType")}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label="Name of the Classification Society"
+              name="classificationSociety"
+              placeholder="Please enter Name of the Classification Society"
+              register={register("classificationSociety")}
+              errors={errors}
+              onChange={() => clearErrors("classificationSociety")}
+            />
+          </Col>
+        </Row>
+        <Row className="gy-3" style={{ padding: "1rem" }}>
+          <Col md={6}>
+            <InputRadio
+              name="constructedBy"
+              label="Constructed By ?"
+              options={[
+                { label: "Self", value: "1" },
+                { label: "Builder", value: "2" },
+              ]}
+              register={register}
+              rules={{ required: "Please select a Contructor Type" }}
+              errors={errors}
+              onChange={() => clearErrors("constructedBy")}
+            />
+          </Col>
+          {constructedBy === "2" && (
+            <Col md={6}>
+              <InputSelect
+                label="Builder"
+                name="builder"
+                required
+                options={[
+                  { value: "builder1", label: "Builder 1" },
+                  { value: "builder2", label: "Builder 2" },
+                ]}
+                register={register}
+                errors={errors}
+                defaultValue={""}
+                onChange={() => clearErrors("builder")}
+              />
+            </Col>
+          )}
+        </Row>
+      </Collapsible>
+
+      {/* Builder Details Collapsible  */}
+      {constructedBy === "2" && (
+        <Collapsible title="Builder Details" openStat={true}>
+          <Row className="gy-3" style={{ padding: "1rem" }}>
+            <Col md={4}>
+              <InputText
+                label="Builder Name"
+                name="builderName"
+                required
+                placeholder="Please enter Builder Name"
+                register={register("builderName", {
+                  required: constructedBy === "2" && "Builder Name is required",
+                })}
+                errors={errors}
+                onChange={() => clearErrors("builderName")}
+              />
+            </Col>
+            <Col md={4}>
+              <InputText
+                label="Builder Address"
+                name="builderAddress"
+                required
+                placeholder="Please enter Builder Address"
+                register={register("builderAddress", {
+                  required: constructedBy === "2" && "Builder Address is required",
+                })}
+                errors={errors}
+                onChange={() => clearErrors("builderAddress")}
+              />
+            </Col>
+            <Col md={4}>
+              <InputText
+                label="Builder Email Id"
+                name="builderEmail"
+                required
+                placeholder="Please enter Builder Email Id"
+                register={register("builderEmail", {
+                  required: constructedBy === "2" && "Builder Email is required",
+                  pattern: constructedBy === "2" && {
+                    value: /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i,
+                    message: "Invalid email address",
+                  },
+                })}
+                errors={errors}
+                onChange={() => clearErrors("builderEmail")}
+              />
+            </Col>
+            <Col md={4}>
+              <InputText
+                label="Mobile"
+                name="builderMobile"
+                required
+                placeholder="Please enter Mobile"
+                register={register("builderMobile", {
+                  required: constructedBy === "2" && "Builder Mobile is required",
+                  pattern: constructedBy === "2" && {
+                    value: /^[0-9]{10}$/,
+                    message: "Invalid mobile number",
+                  },
+                })}
+                errors={errors}
+                onChange={() => clearErrors("builderMobile")}
+              />
+            </Col>
+            <Col md={4}>
+              <InputText
+                label="Trade Licence"
+                name="builderTradeLicence"
+                required
+                placeholder="Please enter Trade Licence"
+                register={register("builderTradeLicence", {
+                  required: constructedBy === "2" && "Builder Trade Licence is required",
+                })}
+                errors={errors}
+                onChange={() => clearErrors("builderTradeLicence")}
+              />
+            </Col>
+            <Col md={4}>
+              <InputText
+                label="GST"
+                name="builderGST"
+                required
+                placeholder="Please enter GST"
+                register={register("builderGST", {
+                  required: constructedBy === "2" && "Builder GST is required",
+                })}
+                errors={errors}
+                onChange={() => clearErrors("builderGST")}
+              />
+            </Col>
+            <Col md={4}>
+              <InputSelect
+                label="Builder Authorization"
+                name="builderAuth"
+                required
+                options={[
+                  { value: "auth", label: "Authorized" },
+                  { value: "rejected", label: "Rejected" },
+                ]}
+                register={register}
+                errors={errors}
+                defaultValue={""}
+                onChange={() => clearErrors("builderAuth")}
+              />
+            </Col>
+            <Col md={4}>
+              <InputFile
+                label="Authorisation Letter"
+                name="authLetter"
+                required={constructedBy === "2"}
+                placeholder="Please upload Authorisation Letter"
+                register={register("authLetter", {
+                  required: constructedBy === "2" && "Authorization Letter is required",
+                })}
+                errors={errors}
+                value={watch("authLetter")?.[0]}
+                onChange={e => {
+                  setValue("authLetter", e.target.files);
+                  clearErrors("authLetter");
+                }}
+              />
+            </Col>
+            <Col md={4}>
+              <InputText
+                label="Work Order Value"
+                name="workOrderValue"
+                required
+                placeholder="Enter Work Order Value"
+                register={register("workOrderValue", {
+                  required: constructedBy === "2" && "Work Order Value is required",
+                  pattern: constructedBy === "2" && {
+                    value: /^[0-9]+$/,
+                    message: "Please enter a valid number",
+                  },
+                })}
+                errors={errors}
+                onChange={() => clearErrors("workOrderValue")}
+              />
+            </Col>
+          </Row>
+        </Collapsible>
+      )}
+
+      {/* Documents Collapsible */}
+      <Collapsible title="Documents" openStat={true}>
+        <Row className="gy-4">
+          {/* Work Order & Drawings in one row */}
+          <Col md={6}>
+            <MultipleFileUpload
+              title="Work Order"
+              required={false}
+              register={register}
+              errors={errors}
+              setValue={setValue}
+              clearErrors={clearErrors}
+              watch={watch}
+            />
+          </Col>
+          <Col md={6}>
+            <MultipleFileUpload
+              title="Drawings"
+              required={false}
+              register={register}
+              errors={errors}
+              setValue={setValue}
+              clearErrors={clearErrors}
+              watch={watch}
+            />
+          </Col>
+        </Row>
+        <Row className="gy-4 mt-2">
+          {/* Tonnage Booklets & Stability Booklets in one row */}
+          <Col md={6}>
+            <InputFile
+              label="Tonnage Booklets"
+              name="tonnageBooklets"
+              register={register("tonnageBooklets")}
+              errors={errors}
+              value={tonnageBooklets?.[0]}
+              onChange={e => {
+                setValue("tonnageBooklets", e.target.files);
+                clearErrors("tonnageBooklets");
+              }}
+            />
+          </Col>
+          <Col md={6}>
+            <InputFile
+              label="Stability Booklets"
+              name="stabilityBooklets"
+              register={register("stabilityBooklets")}
+              errors={errors}
+              value={stabilityBooklets?.[0]}
+              onChange={e => {
+                setValue("stabilityBooklets", e.target.files);
+                clearErrors("stabilityBooklets");
+              }}
+            />
+          </Col>
+        </Row>
+      </Collapsible>
+
+      {/* Declaration Collapsible */}
+      <Collapsible title="Declaration" openStat={true}>
+        <Form.Group className="mb-0 d-flex align-items-center">
+          <Form.Check
+            type="checkbox"
+            id="termsAccepted"
+            className="me-2"
+            {...register("termsAccepted", {
+              required: "You must accept the terms and conditions",
+            })}
+            isInvalid={!!errors.termsAccepted}
+            onChange={() => clearErrors("termsAccepted")}
+          />
+          <Form.Label
+            htmlFor="termsAccepted"
+            className="mb-0"
+            style={{ fontWeight: 500, color: "#333", cursor: "pointer" }}
+          >
+            I have thoroughly read and understood all the terms and conditions as mentioned in the Schedule.
+          </Form.Label>
+          {errors.termsAccepted && (
+            <Form.Control.Feedback type="invalid" style={{ display: "block" }}>
+              {errors.termsAccepted.message}
+            </Form.Control.Feedback>
+          )}
+        </Form.Group>
+      </Collapsible>
+    </form>
+  );
+};
+
+export default VesselDetails;
