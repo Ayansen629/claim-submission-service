@@ -1,171 +1,447 @@
-// Updated InputFile.tsx component
-import React, { useState, useEffect, useRef } from "react";
-import { Form } from "react-bootstrap";
-import { FaUpload, FaFile, FaFilePdf, FaFileImage, FaCheckCircle } from "react-icons/fa";
+import React, { useState, useEffect, useRef } from 'react';
+import { useForm, FormProvider } from 'react-hook-form';
+import { Container, Row, Col, Button, Card, Image } from 'react-bootstrap';
+import {
+  FaBuilding, FaFileUpload, FaCheck, FaArrowRight,
+  FaArrowLeft
+} from 'react-icons/fa';
+import './UserRegistration.css';
+import IWT_FULL_IMG from "../../../assets/images/iwt-whole.jpg";
+import { toast } from "react-toastify";
+import NewLoader from '../../common/NewLoader.js';
+import { getData, postFORMdata } from "../../../services/http.service.ts";
+import { URLS_ENDPOINT } from '../../../utils/urlsConstants.ts';
+import { handleErrorMessage } from '../../../utils/errorMessageHandler.js';
+import { mapToVesselUserDetails } from '../model/mapToVesselModel.ts';
+import ApprovalModal from '../../common/ApprovalModal.js';
+import ActionDropdown from '../../common/ActionDropdown.js';
+import DynamicFormFields from '../../common/DynamicFormFields';
+import createFormFieldsConfig from '../../common/FormFieldsConfig';
 
-interface InputFileProps {
-  label: string;
-  required?: boolean;
-  name: string;
-  errors?: any;
-  onChange?: (e: React.ChangeEvent<HTMLInputElement>) => void;
-  accept?: string;
-  disabled?: boolean;
-  className?: string;
-  style?: React.CSSProperties;
-  watch?: any;
-  defaultValue?: string | File;
-  autoFocus?: boolean;
-  register?: any;
-}
+const VesselBuilderRegistrationPage = () => {
+  const [currentStep, setCurrentStep] = useState(1);
+  const [formData, setFormData] = useState({});
+  const [isSubmitted, setIsSubmitted] = useState(false);
+  const [successMessage, setSuccessMessage] = useState("");
+  const [validationMessage, setValidationMessage] = useState("");
+  const loaderRef = useRef();
+  const PUBLIC_URL = process.env.REACT_APP_PUBLIC_URL;
 
-const InputFile: React.FC<InputFileProps> = ({
-  label,
-  required,
-  name,
-  errors,
-  onChange,
-  accept = ".pdf,.jpg,.jpeg,.png",
-  disabled,
-  className = "",
-  style = {},
-  watch,
-  defaultValue,
-  autoFocus = false,
-  register
-}) => {
-  const hasError = errors && errors[name];
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  // Always get the current value from watch (could be File or string)
-  let watchedValue = watch ? watch(name) : undefined;
-  let fileName = "";
-  let fileExtension = "";
+  const actionsFromAPI = ["Accept", "Reject", "Send Back"];
+  const [showApprovalModal, setShowApprovalModal] = useState(false);
+  const [selectedAction, setSelectedAction] = useState("");
   
+  const handleActionClick = (action) => {
+    setSelectedAction(action);
+    setShowApprovalModal(true);
+  };
+
+  const handleActionSubmit = (formData) => {
+    const payload = {
+      action: selectedAction,
+      ...formData,
+    };
+    console.log("Submitted Data:", payload);
+    setShowApprovalModal(false);
+    setSelectedAction("");
+    // we need to API call here
+  };
+
+  const handleCloseModal = () => {
+    setShowApprovalModal(false);
+    setSelectedAction("");
+  };
+
+  const methods = useForm({
+    mode: 'onBlur',
+    defaultValues: { country: 'India' }
+  });
+
+  const { 
+    handleSubmit, 
+    formState: { errors }, 
+    trigger, 
+    setValue, 
+    getValues, 
+    watch, 
+    setError,
+    clearErrors 
+  } = methods;
+  
+  const totalSteps = 2;
+
   useEffect(() => {
-    if (autoFocus && fileInputRef.current) {
-      fileInputRef.current.focus();
-    }
-  }, [autoFocus]);
+    setTimeout(() => {
+      Object.keys(formData).forEach(key => {
+        if (formData[key]) {
+          setValue(key, formData[key], { shouldValidate: false });
+        }
+      });
+    }, 0);
+  }, [currentStep, setValue, formData]);
 
-  if (watchedValue instanceof File) {
-    // Use the custom originalName if available, otherwise use the actual file name
-    fileName = watchedValue.originalName || watchedValue.name;
-    if (!fileName.includes('.')) {
-      fileExtension = watchedValue.name.substring(watchedValue.name.lastIndexOf('.'));
-      fileName = fileName + fileExtension;
-    }
-  } else if (typeof watchedValue === "string" && watchedValue.trim() !== "") {
-    fileName = watchedValue;
-  } else if (defaultValue) {
-    if (defaultValue instanceof File) {
-      fileName = defaultValue.originalName || defaultValue.name;
-      if (!fileName.includes('.')) {
-        fileExtension = defaultValue.name.substring(defaultValue.name.lastIndexOf('.'));
-        fileName = fileName + fileExtension;
+  const getDetailsByPIN = async (pinCode) => {
+    try {
+      const URL = PUBLIC_URL + URLS_ENDPOINT.APP_SERVICES.GET_DETAILS_BY_PINCODE + pinCode;
+      loaderRef.current?.show();
+      const response = await getData(URL);
+      if (response?.status === 200 && response?.data?.length > 0) {
+        setValue('district', response?.data[0]?.district);
+        setValue('stateUt', response?.data[0]?.stateName);
+        loaderRef?.current?.hide();
+      } else {
+        loaderRef?.current?.hide();
+        toast.info("No Data Found! Pleasee enter manually..", { position: "top-right" });
       }
-    } else if (typeof defaultValue === "string") {
-      fileName = defaultValue;
-    }
-  }
-
-  // Handle file change internally
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (onChange) {
-      onChange(e);
+    } catch (err) {
+      console.log(err);
+      loaderRef?.current?.hide();
+      handleErrorMessage(err?.response?.data);
     }
   };
 
-  // Get file icon based on extension
-  const getFileIcon = () => {
-    if (!fileName || typeof fileName !== 'string') return <FaFile color="#0d6efd" />;
-    const extension = fileName.split('.').pop()?.toLowerCase();
-    if (extension === 'pdf') return <FaFilePdf color="#dc3545" />;
-    if (['jpg', 'jpeg', 'png', 'gif'].includes(extension || '')) return <FaFileImage color="#28a745" />;
-    return <FaFile color="#0d6efd" />;
+  const formFields = createFormFieldsConfig(getDetailsByPIN);
+
+  const getCurrentStepFields = () => {
+    switch (currentStep) {
+      case 1: return formFields.step1;
+      case 2: return formFields.step2;
+      default: return [];
+    }
   };
+
+  const validateStep = async () => {
+    const currentFields = getCurrentStepFields();
+    const requiredFields = currentFields
+      .filter(field => field.required && (!field.showIf || field.showIf()));
+
+    // Validate required fields
+    let hasErrors = false;
+    
+    requiredFields.forEach(field => {
+      const value = getValues(field.name);
+      
+      // Check if field is empty
+      if (!value || value === '') {
+        setError(field.name, {
+          type: 'required',
+          message: `${field.label} is required`
+        });
+        hasErrors = true;
+      } 
+      // Validate file fields
+      else if (field.type === 'file' && value instanceof File) {
+        const file = value;
+        const validTypes = ['application/pdf', 'image/jpeg', 'image/png', 'image/jpg'];
+        
+        if (!validTypes.includes(file.type)) {
+          setError(field.name, {
+            type: 'fileType',
+            message: 'Only PDF, JPG or PNG files are allowed'
+          });
+          hasErrors = true;
+        }
+
+        if (file.size > 2 * 1024 * 1024) {
+          setError(field.name, {
+            type: 'fileSize',
+            message: 'File size should not exceed 2MB'
+          });
+          hasErrors = true;
+        }
+      } 
+      // Validate pattern for text fields
+      else if (field.validation && field.validation.pattern && typeof value === 'string') {
+        const pattern = field.validation.pattern.value;
+        if (!pattern.test(value)) {
+          setError(field.name, {
+            type: 'pattern',
+            message: field.validation.pattern.message
+          });
+          hasErrors = true;
+        }
+      }
+    });
+
+    // Trigger validation for all fields in current step
+    const fieldsToValidate = currentFields
+      .filter(field => !field.showIf || field.showIf())
+      .map(field => field.name);
+
+    const result = await trigger(fieldsToValidate);
+    return result && !hasErrors;
+  };
+
+  const handleNext = async () => {
+    // Clear all errors first
+    Object.keys(errors).forEach(fieldName => {
+      clearErrors(fieldName);
+    });
+
+    const isStepValid = await validateStep();
+
+    if (isStepValid) {
+      setValidationMessage("");
+      const currentValues = getValues();
+      const fileFields = getCurrentStepFields().filter(field => field.type === 'file');
+      fileFields.forEach(field => {
+        if (currentValues[field.name]) {
+          setFormData(prev => ({
+            ...prev,
+            [field.name]: currentValues[field.name]
+          }));
+        }
+      });
+
+      setFormData(prev => ({ ...prev, ...currentValues }));
+
+      if (currentStep < totalSteps) {
+        setCurrentStep(currentStep + 1);
+        window.scrollTo(0, 0);
+      } else {
+        handleSubmit(onSubmit)();
+      }
+    }
+  };
+
+  const handlePrevious = () => {
+    // Clear errors when going back
+    Object.keys(errors).forEach(fieldName => {
+      clearErrors(fieldName);
+    });
+    
+    const currentValues = getValues();
+    const fileFields = getCurrentStepFields().filter(field => field.type === 'file');
+    fileFields.forEach(field => {
+      if (currentValues[field.name]) {
+        setFormData(prev => ({
+          ...prev,
+          [field.name]: currentValues[field.name]
+        }));
+      }
+    });
+
+    setFormData(prev => ({ ...prev, ...currentValues }));
+    setCurrentStep(Math.max(1, currentStep - 1));
+    window.scrollTo(0, 0);
+    setValidationMessage("");
+  };
+
+  const onSubmit = (data) => {
+    // Clear all errors before submission
+    Object.keys(errors).forEach(fieldName => {
+      clearErrors(fieldName);
+    });
+    
+    const finalData = { ...formData, ...data };
+    finalData.userCategory = 'Ship-Builder';
+    finalData.userType = 'Builder';
+    const formDetails = mapToVesselUserDetails({ ...finalData });
+    
+    const filesToUpload = [
+      finalData?.companyDetails,
+      finalData?.gstCertificate,
+      finalData?.panCardUpload,
+      finalData?.factoryLicense,
+      finalData?.addressProof,
+      finalData?.fireCertificate,
+      finalData?.esipfRegistration,
+      finalData?.iso9001,
+      finalData?.iso14001,
+      finalData?.iso45001,
+      finalData?.pollutionCertificate,
+      finalData?.experienceCertificate
+    ].filter(file => file); 
+
+    const fd = new FormData();
+    fd.append("request", new Blob([JSON.stringify(formDetails)], { type: 'application/json' }));
+    filesToUpload?.forEach((file) => {
+      if (file) {
+        fd.append(`files`, file);
+      }
+    });
+    submitUserDetails(fd);
+  };
+
+  const submitUserDetails = async (payload) => {
+    try {
+      const URL = process.env.REACT_APP_AUTH_URL + URLS_ENDPOINT.USER_SERVICE.CREATE_USER;
+      loaderRef.current?.show();
+      const response = await postFORMdata(URL, payload);
+      const apiRes = { ...response?.data }
+      if (response?.status === 200 && apiRes?.responseStatus?.status === '200') {
+        loaderRef?.current?.hide();
+        setIsSubmitted(true);
+        setSuccessMessage(apiRes?.responseStatus?.message);
+        window.scrollTo(0, 0);
+      } else {
+        loaderRef?.current?.hide();
+        toast.info(apiRes?.responseStatus?.message || "Something went wrong..", { position: "top-right" });
+      }
+    } catch (err) {
+      console.log(err,"builder-error");
+      loaderRef?.current?.hide();
+      handleErrorMessage(err?.response?.data);
+    }
+  };
+
+  const stepTitles = [
+    { title: "Vessel Builder Details", icon: FaBuilding },
+    { title: "Documents Upload", icon: FaFileUpload }
+  ];
 
   return (
-    <Form.Group className={`mb-4 ${className}`} controlId={name}>
-      <Form.Label className="fw-bold text-dark">
-        {label}
-        {required && <span className="text-danger ms-1">*</span>}
-      </Form.Label>
-      <div
-        className={`file-upload border rounded p-3 ${hasError ? 'border-danger' : ''}`}
-        style={{
-          ...style,
-          backgroundColor: hasError ? '#fff8f8' : 'white',
-          borderColor: hasError ? '#dc3545' : '#ced4da',
-          borderRadius: '8px',
-          transition: 'all 0.3s ease'
-        }}
-      >
-        <div className="d-flex align-items-center">
-          <label
-            htmlFor={name}
-            className={`file-label btn ${hasError ? 'btn-outline-danger' : 'btn-primary'} mb-0 d-inline-flex align-items-center`}
-            style={{
-              borderRadius: '6px',
-              padding: '8px 16px',
-              cursor: disabled ? 'not-allowed' : 'pointer',
-              boxShadow: '0 2px 5px rgba(0,0,0,0.1)',
-              transition: 'all 0.3s ease',
-              minWidth: '120px',
-              color: 'white!important',
-              flexShrink: 0,
-              opacity: disabled ? 0.65 : 1
-            }}
-          >
-            <FaUpload className="file-icon me-2" />
-            <span className="file-text">Choose File</span>
-          </label>
-          <div
-            className={`file-name-container ms-3 flex-grow-1 border rounded px-3 py-2 ${fileName ? 'bg-light-success' : 'bg-light'} d-flex align-items-center ${hasError ? 'border-danger' : fileName ? 'border-success' : ''}`}
-            style={{
-              backgroundColor: fileName ? '#f0f9f0' : '#f8f9fa',
-              overflow: 'hidden'
-            }}
-          >
-            {fileName ? (
-              <>
-                <FaCheckCircle className="text-success me-2 flex-shrink-0" />
-                <div className="overflow-hidden">
-                  <span className="text-success fw-bold" style={{ fontSize: '0.8rem' }}>Selected File:</span>
-                  <div className="d-flex align-items-center">
-                    <span className="file-icon-preview me-2 flex-shrink-0">{getFileIcon()}</span>
-                    <span className="text-dark fw-semibold" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {fileName}
-                    </span>
+    <>
+      <NewLoader ref={loaderRef} />
+      <Container fluid className="registration-container py-5">
+        <Row className="justify-content-center">
+          <Col md={10} xl={9}>
+            <Card className="registration-card">
+              <Card.Header className="registration-header p-0">
+                <div className="registration-header-content">
+                  <div className="header-logo-container">
+                    <Image
+                      src={IWT_FULL_IMG}
+                      alt="IWT Logo"
+                      className="header-logo"
+                    />
                   </div>
+                  <h3 className="header-title">
+                    Vessel Builder Registration
+                  </h3>
                 </div>
-              </>
-            ) : (
-              <span className="text-muted">No file chosen</span>
-            )}
-          </div>
-        </div>
-        <input
-          ref={fileInputRef}
-          type="file"
-          id={name}
-          {...register}
-          onChange={handleFileChange}
-          accept={accept}
-          disabled={disabled}
-          className="file-input d-none"
-        />
-      </div>
-      <Form.Text className="text-muted small mt-1">
-        Upload PDF, JPG or PNG file (Max size: 2MB)
-      </Form.Text>
-      {hasError && (
-        <Form.Text className="text-danger small mt-1 d-block">
-          {errors[name]?.message}
-        </Form.Text>
-      )}
-    </Form.Group>
+              </Card.Header>
+
+              <Card.Body className="registration-body p-4 p-md-5">
+                {isSubmitted ? (
+                  <div className="success-container text-center py-5">
+                    <div className="success-icon-container bg-success rounded-circle d-flex align-items-center justify-content-center mx-auto mb-4" style={{ width: '90px', height: '90px', boxShadow: '0 10px 20px rgba(40, 167, 69, 0.3)' }}>
+                      <FaCheck className="success-icon text-white fs-1" />
+                    </div>
+                    <h4 className="success-title text-success mb-3 fw-bold">Registration Successful!</h4>
+                    <div className="registration-id p-4 bg-light rounded mb-4" style={{ borderLeft: '4px solid #0077b6' }}>
+                      {successMessage ||
+                        'Your vessel builder registration has been submitted successfully. You will receive a confirmation email shortly.'
+                      }
+                    </div>
+                    <Button
+                      variant="primary"
+                      size="lg"
+                      className="mt-2 d-flex align-items-center justify-content-center mx-auto"
+                      style={{
+                        background: 'linear-gradient(135deg, #0077b6, #023e8a)',
+                        border: 'none',
+                        boxShadow: '0 4px 15px rgba(0, 119, 182, 0.3)',
+                        borderRadius: '8px',
+                        padding: '12px 30px',
+                        fontWeight: '600',
+                        transition: 'all 0.3s ease',
+                        minWidth: '150px',
+                        height: '50px'
+                      }}
+                      onClick={() => window.location.href = '/'}
+                    >
+                      Go to Home
+                    </Button>
+                  </div>
+                ) : (
+                  <FormProvider {...methods}>
+                    <form>
+                      <div className="text-center mb-4">
+                        <p className="text-muted">Please complete all required information to register as a vessel builder</p>
+                      </div>
+
+                      <div className="stepper-container mb-5">
+                        <div className="stepper d-flex justify-content-between">
+                          {[1, 2].map((step) => (
+                            <React.Fragment key={step}>
+                              <div className={`step ${currentStep >= step ? 'active' : ''} ${currentStep > step ? 'completed' : ''} flex-grow-1 text-center`}>
+                                <div
+                                  className="step-icon d-flex align-items-center justify-content-center mx-auto mb-2"
+                                  style={{
+                                    width: '60px',
+                                    height: '60px',
+                                    borderRadius: '50%',
+                                    fontSize: '20px',
+                                    fontWeight: 'bold',
+                                    boxShadow: currentStep >= step ? '0 5px 15px rgba(0, 119, 182, 0.3)' : '0 4px 10px rgba(0, 0, 0, 0.1)',
+                                    background: currentStep >= step ?
+                                      (currentStep > step ? 'linear-gradient(135deg, #28a745, #20c997)' : 'linear-gradient(135deg, #0077b6, #023e8a)') :
+                                      '#ffffff',
+                                    border: currentStep >= step ? 'none' : '2px solid #e9ecef',
+                                    color: currentStep >= step ? '#fff' : '#6c757d',
+                                    transition: 'all 0.4s ease'
+                                  }}>
+                                  {currentStep > step ? <FaCheck size={22} /> : React.createElement(stepTitles[step - 1].icon, { size: 18 })}
+                                </div>
+                                <div className="step-label fw-bold"
+                                  style={{
+                                    color: currentStep >= step ? (currentStep > step ? '#28a745' : '#0077b6') : '#6c757d',
+                                    fontSize: '0.9em',
+                                    transition: 'all 0.3s ease'
+                                  }}>
+                                  {stepTitles[step - 1].title}
+                                </div>
+                              </div>
+                              {step < 2 && (
+                                <div className="step-connector flex-grow-1 d-flex align-items-center px-2">
+                                  <div className={`connector-line w-100 ${currentStep > step ? 'active' : ''}`}
+                                    style={{
+                                      height: '4px',
+                                      background: currentStep > step ? 'linear-gradient(to right, #28a745, #20c997)' : '#e9ecef',
+                                      borderRadius: '2px',
+                                      transition: 'all 0.5s ease'
+                                    }}></div>
+                                </div>
+                              )}
+                            </React.Fragment>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="step-content">
+                        <div className="form-section p-4 rounded mb-4">
+                          <div className="form-content">
+                            <DynamicFormFields 
+                              fields={getCurrentStepFields()} 
+                              setFormData={setFormData} 
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="form-navigation mt-4" style={{ display: 'block' }}>
+                        {currentStep > 1 &&
+                          <Button
+                            variant="outline-secondary"
+                            onClick={handlePrevious}
+                            className="prev-btn"
+                            style={{ 'float': 'left' }}
+                          >
+                            <FaArrowLeft className="btn-icon me-2" /> Previous
+                          </Button>
+                        }
+
+                        <Button
+                          variant="primary"
+                          onClick={handleNext}
+                          className="next-btn"
+                          style={{ 'float': 'right' }}
+                        >
+                          {currentStep === totalSteps ? 'Submit Registration' : 'Next'}
+                          {currentStep !== totalSteps && <FaArrowRight className="btn-icon ms-2" />}
+                        </Button>
+                      </div>
+                    </form>
+                  </FormProvider>
+                )}
+              </Card.Body>
+            </Card>
+          </Col>
+        </Row>
+      </Container>
+    </>
   );
 };
 
-export default InputFile;
+export default VesselBuilderRegistrationPage;
