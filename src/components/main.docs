@@ -1,113 +1,47 @@
-import React from 'react';
-import { Row, Col } from 'react-bootstrap';
-import { useFormContext } from 'react-hook-form';
-import InputText from './InputText.tsx';
-import InputFile from './InputFile.tsx';
-import { renameFile } from '../../utils/constants.ts';
-
-const DynamicFormFields = ({ fields, setFormData }) => {
-  const { register, formState: { errors }, setValue, watch, setError, clearErrors } = useFormContext();
-
-  const renderField = (field) => {
-    if (field.showIf && !field.showIf()) return null;
-
-    const handleChange = (e) => {
-      if (field?.onChange) field.onChange(e, setValue, watch);
-    };
-
-    switch (field.type) {
-      case 'file':
-        return (
-          <InputFile
-            label={field.label}
-            required={field.required}
-            name={field.name}
-            key={field.name}
-            register={register(field.name, {
-              required: field.required ? `${field.label} is required` : false
-            })}
-            errors={errors}
-            onChange={(e) => {
-              if (e.target.files && e?.target?.files[0]) {
-                // Clear any existing errors for this field
-                clearErrors(field.name);
-                
-                const file = e.target.files[0];
-                const extension = file?.name?.substring(file?.name?.lastIndexOf('.'));
-                const fileName = `${field.label}${extension}`;
-                file.originalName = fileName;
-                
-                // Set the value in the form
-                setValue(field.name, renameFile(file, fileName), { 
-                  shouldValidate: true 
-                });
-                
-                // Update the form data
-                setFormData(prev => ({
-                  ...prev,
-                  [field.name]: renameFile(file, fileName)
-                }));
-                
-                // Validate file type and size
-                const validTypes = ['application/pdf', 'image/jpeg', 'image/png', 'image/jpg'];
-                if (!validTypes.includes(file.type)) {
-                  setError(field.name, {
-                    type: 'manual',
-                    message: 'Only PDF, JPG or PNG files are allowed'
-                  });
-                } else if (file.size > 2 * 1024 * 1024) {
-                  setError(field.name, {
-                    type: 'manual',
-                    message: 'File size should not exceed 2MB'
-                  });
-                }
-              }
-            }}
-            className="mb-4"
-            watch={watch}
-            accept=".pdf,.jpg,.jpeg,.png"
-            defaultValue={watch(field.name)}
-          />
-        );
-
-      default:
-        return (
-          <InputText
-            label={field.label}
-            required={field.required}
-            name={field.name}
-            key={field.name}
-            type={field.type}
-            placeholder={field.placeholder}
-            register={register(field?.name, {
-              ...field.validation,
-            })}
-            onChange={handleChange}
-            errors={errors}
-            readOnly={field.readOnly}
-            icon={field.icon}
-            maxlength={field?.maxlength}
-            onKeyDown={field?.keyDown}
-            disabled={field?.disabled || false}
-            className="mb-4"
-            style={{
-              borderColor: errors[field.name] ? '#dc3545' : '#ced4da',
-              backgroundColor: errors[field.name] ? '#fff8f8' : 'white'
-            }}
-          />
-        );
-    }
-  };
-
-  return (
-    <Row className="g-3">
-      {fields.map((field, index) => (
-        <Col key={index} md={field.colSize || 12}>
-          {renderField(field)}
-        </Col>
-      ))}
-    </Row>
+const validateStep = async () => {
+  const currentFields = getCurrentStepFields();
+  
+  // Get all required fields for this step
+  const requiredFields = currentFields.filter(field => 
+    field.required && (!field.showIf || field.showIf())
   );
+  
+  let hasErrors = false;
+  
+  // Check each required field
+  for (const field of requiredFields) {
+    const value = getValues(field.name);
+    
+    // Check if field is empty
+    if (!value || value === '') {
+      setError(field.name, {
+        type: 'required',
+        message: `${field.label} is required`
+      });
+      hasErrors = true;
+    } 
+    // For file fields, check if we have a valid file
+    else if (field.type === 'file' && value instanceof File) {
+      // File exists, check if it's valid
+      const validTypes = ['application/pdf', 'image/jpeg', 'image/png', 'image/jpg'];
+      if (!validTypes.includes(value.type)) {
+        setError(field.name, {
+          type: 'fileType',
+          message: 'Only PDF, JPG or PNG files are allowed'
+        });
+        hasErrors = true;
+      } else if (value.size > 2 * 1024 * 1024) {
+        setError(field.name, {
+          type: 'fileSize',
+          message: 'File size should not exceed 2MB'
+        });
+        hasErrors = true;
+      } else {
+        // Valid file, clear any errors
+        clearErrors(field.name);
+      }
+    }
+  }
+  
+  return !hasErrors;
 };
-
-export default DynamicFormFields;
