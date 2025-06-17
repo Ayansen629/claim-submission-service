@@ -1,152 +1,109 @@
-import React, { useState, useEffect, useRef } from "react";
-import { Form } from "react-bootstrap";
-import { FaUpload, FaFile, FaFilePdf, FaFileImage, FaCheckCircle } from "react-icons/fa";
+import React from 'react';
+import { Row, Col } from 'react-bootstrap';
+import { useFormContext } from 'react-hook-form';
+import InputText from './InputText.tsx';
+import InputFile from './InputFile.tsx';
+import { renameFile } from '../../utils/constants.ts';
 
-const InputFile = ({
-  label,
-  required,
-  name,
-  errors,
-  onChange,
-  accept = ".pdf,.jpg,.jpeg,.png",
-  disabled,
-  className = "",
-  style = {},
-  watch,
-  defaultValue,
-  autoFocus = false,
-  register
-}) => {
-  const fileInputRef = useRef();
-  const [selectedFile, setSelectedFile] = useState(null);
-  
-  // Get the current value from watch
-  const watchedValue = watch ? watch(name) : null;
-  
-  // Update local state when watched value changes
-  useEffect(() => {
-    if (watchedValue instanceof File) {
-      setSelectedFile(watchedValue);
-    } else if (typeof watchedValue === "string" && watchedValue.trim() !== "") {
-      setSelectedFile({ name: watchedValue });
-    } else if (defaultValue instanceof File) {
-      setSelectedFile(defaultValue);
-    } else if (typeof defaultValue === "string" && defaultValue.trim() !== "") {
-      setSelectedFile({ name: defaultValue });
-    } else {
-      setSelectedFile(null);
-    }
-  }, [watchedValue, defaultValue]);
+const DynamicFormFields = ({ fields, setFormData }) => {
+  const { register, formState: { errors }, setValue, watch, setError, clearErrors } = useFormContext();
 
-  // Handle file change
-  const handleFileChange = (e) => {
-    if (e.target.files && e.target.files[0]) {
-      const file = e.target.files[0];
-      setSelectedFile(file);
-    } else {
-      setSelectedFile(null);
-    }
-    
-    if (onChange) {
-      onChange(e);
+  const renderField = (field) => {
+    if (field.showIf && !field.showIf()) return null;
+
+    const handleChange = (e) => {
+      if (field?.onChange) field.onChange(e, setValue, watch);
+    };
+
+    switch (field.type) {
+      case 'file':
+        return (
+          <InputFile
+            label={field.label}
+            required={field.required}
+            name={field.name}
+            key={field.name}
+            register={register(field.name, {
+              required: field.required ? `${field.label} is required` : false
+            })}
+            errors={errors}
+            onChange={(e) => {
+              if (e.target.files && e?.target?.files[0]) {
+                // Clear any existing errors for this field
+                if (errors[field.name]) {
+                  clearErrors(field.name);
+                }
+                
+                const file = e.target.files[0];
+                const extension = file?.name?.substring(file?.name?.lastIndexOf('.'));
+                const fileName = `${field.label}${extension}`;
+                file.originalName = fileName;
+                
+                setValue(field.name, renameFile(file, fileName));
+                setFormData(prev => ({
+                  ...prev,
+                  [field.name]: renameFile(file, fileName)
+                }));
+                
+                const validTypes = ['application/pdf', 'image/jpeg', 'image/png', 'image/jpg'];
+                if (!validTypes.includes(file.type)) {
+                  setError(field.name, {
+                    type: 'manual',
+                    message: 'Only PDF, JPG or PNG files are allowed'
+                  });
+                } else if (file.size > 2 * 1024 * 1024) {
+                  setError(field.name, {
+                    type: 'manual',
+                    message: 'File size should not exceed 2MB'
+                  });
+                }
+              }
+            }}
+            className="mb-4"
+            watch={watch}
+            accept=".pdf,.jpg,.jpeg,.png"
+            defaultValue={watch(field.name)}
+          />
+        );
+
+      default:
+        return (
+          <InputText
+            label={field.label}
+            required={field.required}
+            name={field.name}
+            key={field.name}
+            type={field.type}
+            placeholder={field.placeholder}
+            register={register(field?.name, {
+              ...field.validation,
+            })}
+            onChange={handleChange}
+            errors={errors}
+            readOnly={field.readOnly}
+            icon={field.icon}
+            maxlength={field?.maxlength}
+            onKeyDown={field?.keyDown}
+            disabled={field?.disabled || false}
+            className="mb-4"
+            style={{
+              borderColor: errors[field.name] ? '#dc3545' : '#ced4da',
+              backgroundColor: errors[field.name] ? '#fff8f8' : 'white'
+            }}
+          />
+        );
     }
   };
-
-  // Get file icon based on extension
-  const getFileIcon = () => {
-    if (!selectedFile) return <FaFile color="#0d6efd" />;
-    const fileName = selectedFile.name || "";
-    const extension = fileName.split('.').pop()?.toLowerCase();
-    if (extension === 'pdf') return <FaFilePdf color="#dc3545" />;
-    if (['jpg', 'jpeg', 'png', 'gif'].includes(extension || '')) return <FaFileImage color="#28a745" />;
-    return <FaFile color="#0d6efd" />;
-  };
-
-  // Determine if we should show an error
-  const hasError = errors && errors[name] && required && !selectedFile;
-  const fileName = selectedFile ? (selectedFile.originalName || selectedFile.name) : "";
 
   return (
-    <Form.Group className={`mb-4 ${className}`} controlId={name}>
-      <Form.Label className="fw-bold text-dark">
-        {label}
-        {required && <span className="text-danger ms-1">*</span>}
-      </Form.Label>
-      <div
-        className={`file-upload border rounded p-3 ${hasError ? 'border-danger' : ''}`}
-        style={{
-          backgroundColor: hasError ? '#fff8f8' : 'white',
-          borderColor: hasError ? '#dc3545' : selectedFile ? '#28a745' : '#ced4da',
-          borderRadius: '8px',
-          transition: 'all 0.3s ease',
-          ...style
-        }}
-      >
-        <div className="d-flex align-items-center">
-          <label
-            htmlFor={name}
-            className={`file-label btn ${hasError ? 'btn-outline-danger' : 'btn-primary'} mb-0 d-inline-flex align-items-center`}
-            style={{
-              borderRadius: '6px',
-              padding: '8px 16px',
-              cursor: disabled ? 'not-allowed' : 'pointer',
-              boxShadow: '0 2px 5px rgba(0,0,0,0.1)',
-              transition: 'all 0.3s ease',
-              minWidth: '120px',
-              color: 'white!important',
-              flexShrink: 0,
-              opacity: disabled ? 0.65 : 1
-            }}
-          >
-            <FaUpload className="file-icon me-2" />
-            <span className="file-text">Choose File</span>
-          </label>
-          <div
-            className={`file-name-container ms-3 flex-grow-1 border rounded px-3 py-2 ${selectedFile ? 'bg-light-success' : 'bg-light'} d-flex align-items-center ${hasError ? 'border-danger' : selectedFile ? 'border-success' : ''}`}
-            style={{
-              backgroundColor: selectedFile ? '#f0f9f0' : '#f8f9fa',
-              overflow: 'hidden'
-            }}
-          >
-            {selectedFile ? (
-              <>
-                <FaCheckCircle className="text-success me-2 flex-shrink-0" />
-                <div className="overflow-hidden">
-                  <span className="text-success fw-bold" style={{ fontSize: '0.8rem' }}>Selected File:</span>
-                  <div className="d-flex align-items-center">
-                    <span className="file-icon-preview me-2 flex-shrink-0">{getFileIcon()}</span>
-                    <span className="text-dark fw-semibold" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {fileName}
-                    </span>
-                  </div>
-                </div>
-              </>
-            ) : (
-              <span className="text-muted">No file chosen</span>
-            )}
-          </div>
-        </div>
-        <input
-          ref={fileInputRef}
-          type="file"
-          id={name}
-          onChange={handleFileChange}
-          accept={accept}
-          disabled={disabled}
-          className="file-input d-none"
-          {...register}
-        />
-      </div>
-      <Form.Text className="text-muted small mt-1">
-        Upload PDF, JPG or PNG file (Max size: 2MB)
-      </Form.Text>
-      {hasError && (
-        <Form.Text className="text-danger small mt-1 d-block">
-          {required ? `${label} is required` : errors[name]?.message}
-        </Form.Text>
-      )}
-    </Form.Group>
+    <Row className="g-3">
+      {fields.map((field, index) => (
+        <Col key={index} md={field.colSize || 12}>
+          {renderField(field)}
+        </Col>
+      ))}
+    </Row>
   );
 };
 
-export default InputFile;
+export default DynamicFormFields;
