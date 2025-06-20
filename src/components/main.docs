@@ -1,55 +1,106 @@
-const handleFileDownload = async (url) => {
-  try {
-    if (!url) return;
-    loaderRef.current?.show();
+import axiosInstance from "./axios/config";
 
+export const getData = async (url: string) => {
+  return await axiosInstance.get(url);
+};
+
+export const postData = async (url: any, payload?: any, headers?: any) => {
+  return await axiosInstance.post(url, payload || {});
+};
+
+export const postFORMdata = async (url: any, payload?: any, headers?: any) => {
+  const requestHeaders = {
+    headers: {
+      "Content-Type": "multipart/form-data",
+    },
+  };
+  return await axiosInstance.post(url, payload || {}, requestHeaders);
+};
+
+export const updateData = async (url: string, payload?: any) => {
+  return await axiosInstance.put(url, payload || {});
+};
+
+config
+import axios from "axios";
+import {
+  getFromLocalStorage,
+  setToLocalStorage,
+} from "../../utils/localStorageUtils.js";
+import { refreshAccessToken } from "../authService.js";
+import { clearAppStorage } from "../../utils/constants.ts";
+import { toast } from "react-toastify";
+import { isJwtExpired } from "../../utils/jwtUtils.js";
+
+const axiosInstance = axios.create({
+  baseURL: process.env.REACT_APP_BASE_URL,
+  headers: {
+    "content-type": "application/json",
+  },
+  responseType: "json",
+});
+
+axiosInstance.interceptors.request.use(
+  (config) => {
     const accessToken = getFromLocalStorage("access_token");
     const tokenDetails = getFromLocalStorage("tokenDetails");
-    const sessionState = tokenDetails ? JSON.parse(tokenDetails)?.session_state : "";
-    
-    const response = await axios({
-      method: 'GET',
-      url: url,
-      responseType: 'blob', // Important for file downloads
-      headers: {
-        'Authorization': `Bearer ${accessToken}`,
-        'X-Request-ID': sessionState,
-        'Accept': 'application/octet-stream', // Explicitly request binary data
-      }
-    });
 
-    if (response.data) {
-      // Extract filename from Content-Disposition header or use a default
-      let filename = 'document';
-      const contentDisposition = response.headers['content-disposition'];
-      if (contentDisposition) {
-        const filenameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
-        if (filenameMatch && filenameMatch[1]) {
-          filename = filenameMatch[1].replace(/['"]/g, '');
-        }
-      }
-
-      // Create blob URL for the file
-      const blob = new Blob([response.data], { type: response.headers['content-type'] || 'application/octet-stream' });
-      const blobUrl = window.URL.createObjectURL(blob);
-
-      // Create download link and trigger click
-      const link = document.createElement('a');
-      link.href = blobUrl;
-      link.setAttribute('download', filename);
-      document.body.appendChild(link);
-      link.click();
-
-      // Clean up
-      setTimeout(() => {
-        document.body.removeChild(link);
-        window.URL.revokeObjectURL(blobUrl);
-      }, 100);
+    if (accessToken) {
+      config.headers.Authorization = `Bearer ${accessToken}`;
+      config.headers["X-Request-ID"] = JSON.parse(tokenDetails)?.session_state;
     }
-  } catch (error) {
-    console.error("Error downloading file:", error);
-    toast.error("Failed to download file. Please try again.");
-  } finally {
-    loaderRef.current?.hide();
+    return config;
+  },
+  (error) => Promise.reject(error)
+);
+
+axiosInstance.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    const originalRequest = error?.config;
+
+    if (
+      error.response &&
+      error.response.status === 401 &&
+      !originalRequest._retry
+    ) {
+      originalRequest._retry = true;
+
+      try {
+        const refreshToken = getFromLocalStorage("refresh_token");
+
+        if (isJwtExpired(refreshToken)) {
+          toast.error("Session Expired. Please login again to continue..");
+          setTimeout(() => {
+            clearAppStorage();
+            window.location.href = "/";
+          }, 1500);
+          return;
+        }
+
+        const newTokens = await refreshAccessToken(refreshToken);
+        const tokenDetails = getFromLocalStorage("tokenDetails");
+
+        setToLocalStorage("access_token", newTokens?.access_token);
+        setToLocalStorage("refresh_token", newTokens?.refresh_token);
+
+        originalRequest.headers.Authorization = `Bearer ${newTokens?.access_token}`;
+        originalRequest.headers["X-Request-ID"] = JSON.parse(tokenDetails)?.session_state;
+
+        return axiosInstance(originalRequest); 
+      } catch (err) {
+        console.error("Error refreshing token", err);
+        toast.error("Something went wrong. Please login again to continue...");
+        setTimeout(() => {
+          clearAppStorage();
+          window.location.href = "/";
+        }, 1500);
+        return Promise.reject(err);
+      }
+    }
+
+    return Promise.reject(error);
   }
-}
+);
+
+export default axiosInstance;
