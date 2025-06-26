@@ -1,238 +1,306 @@
-import React, { useState } from "react";
-import { Box, Button, Typography, Paper, Divider, Stack } from "@mui/material";
-import { ChevronRight, CheckCircleFill } from "react-bootstrap-icons";
-import { toast } from "react-toastify";
+import React from "react";
+import { Row, Col, Form } from "react-bootstrap";
+import Collapsible from "../../../common/Collapsible.js";
 import { useTranslation } from "react-i18next";
-import { useLanguageContext } from "../common/LanguageContext";
+import InputFile from "../../../common/InputFile";
+import InputText from "../../../common/InputText.tsx";
 
-const themeColor = "#2E57A7";
-const successColor = "#28a745";
-
-const Stepper = ({ steps, onSave, formMethods }) => {
+const Documents = ({ formMethods, viewMode = false }) => {
   const { t } = useTranslation();
-  const { changeLanguage } = useLanguageContext();
-  const [activeStep, setActiveStep] = useState(0);
-  const [completed, setCompleted] = useState({});
-  const [errors, setErrors] = useState({});
+  const {
+    register,
+    watch,
+    setValue,
+    clearErrors,
+    formState: { errors },
+  } = formMethods;
 
-  const totalSteps = steps.length;
+  const constructedBy = watch("constructedBy");
+  const [fileStates, setFileStates] = React.useState({
+    tonnageBooklets: null,
+    stabilityBooklets: null,
+    authLetter: null,
+    workOrderFiles: [],
+    drawingsFiles: []
+  });
 
-  const validateCurrentStep = async () => {
-    const currentStep = steps[activeStep];
-    if (!currentStep.validate) return true;
+  // Update file states when form values change
+  React.useEffect(() => {
+    const subscription = watch((value) => {
+      setFileStates({
+        tonnageBooklets: value.tonnageBooklets,
+        stabilityBooklets: value.stabilityBooklets,
+        authLetter: value.authLetter,
+        workOrderFiles: value.workOrderFiles || [],
+        drawingsFiles: value.drawingsFiles || []
+      });
+    });
+    return () => subscription.unsubscribe();
+  }, [watch]);
 
-    // First try standard validation
-    let isValid = await currentStep.validate();
+  const handleFileChange = (fieldName, e) => {
+    const file = e.target.files?.[0];
     
-    // Special handling for documents step
-    if (activeStep === 1 && !isValid) {
-      const values = formMethods.getValues();
-      
-      // Manually verify if files exist
-      const hasTonnageBooklets = !!values.tonnageBooklets;
-      const hasStabilityBooklets = !!values.stabilityBooklets;
-      const hasAuthLetter = values.constructedBy !== "2" || !!values.authLetter;
-      const hasTermsAccepted = !!values.termsAccepted;
-
-      if (hasTonnageBooklets && hasStabilityBooklets && hasAuthLetter && hasTermsAccepted) {
-        // Clear any lingering errors
-        formMethods.clearErrors([
-          "tonnageBooklets",
-          "stabilityBooklets",
-          "authLetter",
-          "termsAccepted"
-        ]);
-        return true;
+    if (file) {
+      // Validate file type
+      const validTypes = ['application/pdf', 'image/jpeg', 'image/png', 'image/jpg'];
+      if (!validTypes.includes(file.type)) {
+        toast.error(t("Only PDF, JPG or PNG files are allowed"));
+        return;
       }
-    }
 
-    return isValid;
+      // Validate file size
+      if (file.size > 2 * 1024 * 1024) {
+        toast.error(t("File size should not exceed 2MB"));
+        return;
+      }
+
+      setValue(fieldName, file);
+      clearErrors(fieldName);
+    }
   };
 
-  const handleNext = async () => {
-    const isValid = await validateCurrentStep();
-    setErrors((prev) => ({ ...prev, [activeStep]: !isValid }));
+  const handleMultiFileChange = (fieldName, index, e) => {
+    const currentFiles = watch(fieldName) || [];
+    const newFiles = [...currentFiles];
+    const file = e.target.files?.[0];
     
-    if (isValid) {
-      setCompleted({ ...completed, [activeStep]: true });
-      setActiveStep((prev) => Math.min(prev + 1, totalSteps - 1));
-    } else {
-      const errorFields = Object.keys(formMethods.formState.errors);
-      if (errorFields.length > 0) {
-        toast.error(t("Please fix the errors before proceeding."));
+    if (file) {
+      // Validate file type
+      const validTypes = ['application/pdf', 'image/jpeg', 'image/png', 'image/jpg'];
+      if (!validTypes.includes(file.type)) {
+        toast.error(t("Only PDF, JPG or PNG files are allowed"));
+        return;
       }
+
+      // Validate file size
+      if (file.size > 2 * 1024 * 1024) {
+        toast.error(t("File size should not exceed 2MB"));
+        return;
+      }
+
+      newFiles[index] = file;
+      setValue(fieldName, newFiles);
+      clearErrors(`${fieldName}_${index}`);
     }
   };
 
-  const handleBack = () => {
-    setActiveStep((prev) => Math.max(prev - 1, 0));
+  const handleFileAdd = (fieldName) => {
+    const currentFiles = watch(fieldName) || [];
+    setValue(fieldName, [...currentFiles, null]);
   };
 
-  const handleSave = async () => {
-    const isValid = await validateCurrentStep();
-    
-    if (isValid) {
-      setCompleted({ ...completed, [activeStep]: true });
-      if (activeStep < totalSteps - 1) {
-        setActiveStep((prev) => prev + 1);
-      } else {
-        onSave();
-      }
-    } else {
-      // Get current errors to show specific messages
-      const errors = formMethods.formState.errors;
-      let errorMessage = t("Please fix the following errors:");
-      
-      if (errors.tonnageBooklets) errorMessage += `\n- ${errors.tonnageBooklets.message}`;
-      if (errors.stabilityBooklets) errorMessage += `\n- ${errors.stabilityBooklets.message}`;
-      if (errors.authLetter) errorMessage += `\n- ${errors.authLetter.message}`;
-      if (errors.termsAccepted) errorMessage += `\n- ${errors.termsAccepted.message}`;
-
-      toast.error(errorMessage);
-    }
+  const handleFileRemove = (fieldName, index) => {
+    const currentFiles = watch(fieldName) || [];
+    const newFiles = currentFiles.filter((_, i) => i !== index);
+    setValue(fieldName, newFiles.length ? newFiles : null);
+    clearErrors(`${fieldName}_${index}`);
   };
 
   return (
-    <Box sx={{ width: "100%", padding: "1rem" }}>
-      {/* Step Header */}
-      <Paper
-        elevation={3}
-        sx={{
-          padding: "0.75rem 1.5rem",
-          borderRadius: "0.75rem",
-          overflowX: "auto",
-          whiteSpace: "nowrap",
-          backgroundColor: "#fafafa",
-        }}
-      >
-        <Stack direction="row" alignItems="center" spacing={1}>
-          {steps.map((step, index) => (
-            <React.Fragment key={index}>
-              <Stack
-                direction="row"
-                alignItems="center"
-                spacing={0.5}
-                sx={{ cursor: "pointer" }}
-                onClick={() => setActiveStep(index)}
+    <div>
+      {/* Documents Collapsible */}
+      <Collapsible title={t("Documents")} openStat={true}>
+        <Row className="gy-4">
+          {/* Work Order Section */}
+          <Col md={6}>
+            <Form.Group>
+              <Form.Label className="fw-bold">{t("Work Order")}</Form.Label>
+              {(fileStates.workOrderFiles.length === 0 ? [null] : fileStates.workOrderFiles).map((file, index) => (
+                <div key={index} className="mb-3">
+                  <div className="d-flex align-items-center gap-2">
+                    <InputFile
+                      label=""
+                      name={`workOrderFiles_${index}`}
+                      register={register(`workOrderFiles_${index}`)}
+                      errors={errors}
+                      value={file}
+                      onChange={(e) => handleMultiFileChange("workOrderFiles", index, e)}
+                      disabled={viewMode}
+                      className="flex-grow-1"
+                    />
+                    {index === fileStates.workOrderFiles.length - 1 && !viewMode && (
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-outline-primary"
+                        onClick={() => handleFileAdd("workOrderFiles")}
+                      >
+                        +
+                      </button>
+                    )}
+                    {fileStates.workOrderFiles.length > 1 && !viewMode && (
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-outline-danger"
+                        onClick={() => handleFileRemove("workOrderFiles", index)}
+                      >
+                        -
+                      </button>
+                    )}
+                  </div>
+                  <InputText
+                    label=""
+                    name={`workOrder_desc_${index}`}
+                    placeholder={t("Description of File")}
+                    register={register(`workOrder_desc_${index}`)}
+                    errors={errors}
+                    disabled={viewMode}
+                    className="mt-2"
+                  />
+                </div>
+              ))}
+            </Form.Group>
+          </Col>
+
+          {/* Drawings Section */}
+          <Col md={6}>
+            <Form.Group>
+              <Form.Label className="fw-bold">{t("Drawings")}</Form.Label>
+              {(fileStates.drawingsFiles.length === 0 ? [null] : fileStates.drawingsFiles).map((file, index) => (
+                <div key={index} className="mb-3">
+                  <div className="d-flex align-items-center gap-2">
+                    <InputFile
+                      label=""
+                      name={`drawingsFiles_${index}`}
+                      register={register(`drawingsFiles_${index}`)}
+                      errors={errors}
+                      value={file}
+                      onChange={(e) => handleMultiFileChange("drawingsFiles", index, e)}
+                      disabled={viewMode}
+                      className="flex-grow-1"
+                    />
+                    {index === fileStates.drawingsFiles.length - 1 && !viewMode && (
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-outline-primary"
+                        onClick={() => handleFileAdd("drawingsFiles")}
+                      >
+                        +
+                      </button>
+                    )}
+                    {fileStates.drawingsFiles.length > 1 && !viewMode && (
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-outline-danger"
+                        onClick={() => handleFileRemove("drawingsFiles", index)}
+                      >
+                        -
+                      </button>
+                    )}
+                  </div>
+                  <InputText
+                    label=""
+                    name={`drawings_desc_${index}`}
+                    placeholder={t("Description of File")}
+                    register={register(`drawings_desc_${index}`)}
+                    errors={errors}
+                    disabled={viewMode}
+                    className="mt-2"
+                  />
+                </div>
+              ))}
+            </Form.Group>
+          </Col>
+        </Row>
+
+        <Row className="gy-4 mt-2">
+          {/* Tonnage Booklets */}
+          <Col md={6}>
+            <InputFile
+              label={t("Tonnage Booklets")}
+              name="tonnageBooklets"
+              required
+              register={register("tonnageBooklets", { 
+                required: t("Tonnage Booklets are required") 
+              })}
+              errors={errors}
+              value={fileStates.tonnageBooklets}
+              onChange={(e) => {
+                if (viewMode) return;
+                handleFileChange("tonnageBooklets", e);
+              }}
+              disabled={viewMode}
+            />
+          </Col>
+
+          {/* Stability Booklets */}
+          <Col md={6}>
+            <InputFile
+              label={t("Stability Booklets")}
+              name="stabilityBooklets"
+              required
+              register={register("stabilityBooklets", { 
+                required: t("Stability Booklets are required") 
+              })}
+              errors={errors}
+              value={fileStates.stabilityBooklets}
+              onChange={(e) => {
+                if (viewMode) return;
+                handleFileChange("stabilityBooklets", e);
+              }}
+              disabled={viewMode}
+            />
+          </Col>
+        </Row>
+      </Collapsible>
+
+      {/* Builder Documents - Only shown if constructed by builder */}
+      {constructedBy === "2" && (
+        <Collapsible title={t("Builder Documents")} openStat={true}>
+          <Row className="gy-4">
+            <Col md={6}>
+              <InputFile
+                label={t("Authorisation Letter")}
+                name="authLetter"
+                required
+                register={register("authLetter", {
+                  required: constructedBy === "2" && t("Authorization Letter is required"),
+                })}
+                errors={errors}
+                value={fileStates.authLetter}
+                onChange={(e) => {
+                  if (viewMode) return;
+                  handleFileChange("authLetter", e);
+                }}
+                disabled={viewMode}
+              />
+            </Col>
+          </Row>
+        </Collapsible>
+      )}
+
+      {/* Declaration Collapsible */}
+      <Collapsible title={t("Declaration")} openStat={true}>
+        <div className="mb-3">
+          <div className="d-flex align-items-start">
+            <input
+              type="checkbox"
+              id="termsAccepted"
+              className="me-2 mt-1"
+              {...register("termsAccepted", {
+                required: t("You must accept the terms and conditions"),
+              })}
+              disabled={viewMode}
+            />
+            <div>
+              <label
+                htmlFor="termsAccepted"
+                className="mb-0"
+                style={{ fontWeight: 500, color: "#333", cursor: "pointer" }}
               >
-                {completed[index] ? (
-                  <CheckCircleFill size={18} color={successColor} />
-                ) : (
-                  <Typography
-                    sx={{
-                      fontSize: "0.875rem",
-                      width: "1.5rem",
-                      height: "1.5rem",
-                      textAlign: "center",
-                      borderRadius: "50%",
-                      backgroundColor: "#e0e0e0",
-                      display: "inline-flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      fontWeight: "bold",
-                      color: "#666",
-                    }}
-                  >
-                    {index + 1}
-                  </Typography>
-                )}
-                <Typography
-                  sx={{
-                    fontWeight: index === activeStep ? "bold" : "normal",
-                    color: index === activeStep ? themeColor : "#999",
-                    fontSize: "0.875rem",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {step.label}
-                </Typography>
-              </Stack>
-              {index < steps.length - 1 && <ChevronRight size={14} color="#ccc" />}
-            </React.Fragment>
-          ))}
-        </Stack>
-      </Paper>
-
-      {/* Step Content */}
-      <Paper
-        elevation={2}
-        sx={{
-          marginTop: "1rem",
-          borderRadius: "0.75rem",
-          backgroundColor: "#fff",
-          width: "100%",
-        }}
-      >
-        {steps[activeStep].component}
-      </Paper>
-
-      <Divider sx={{ margin: "2rem 0" }} />
-
-      {/* Navigation Buttons */}
-      <Box
-        sx={{
-          display: "flex",
-          justifyContent: "space-between",
-          gap: "1rem",
-          flexWrap: "wrap",
-        }}
-      >
-        <Button
-          variant="outlined"
-          onClick={handleBack}
-          disabled={activeStep === 0}
-          sx={{
-            color: themeColor,
-            borderColor: themeColor,
-            fontWeight: "bold",
-            borderRadius: "0.5rem",
-            minWidth: "8rem",
-            fontSize: "0.9rem",
-          }}
-        >
-          {t("Previous")}
-        </Button>
-        
-        {activeStep === totalSteps - 1 ? (
-          <Button
-            variant="contained"
-            onClick={handleSave}
-            sx={{
-              backgroundColor: themeColor,
-              fontWeight: "bold",
-              borderRadius: "0.5rem",
-              minWidth: "8rem",
-              fontSize: "0.9rem",
-              color: "#fff",
-              "&:hover": {
-                backgroundColor: "#1f4ea0",
-              },
-            }}
-          >
-            {t("Pay Now")}
-          </Button>
-        ) : (
-          <Button
-            variant="contained"
-            onClick={activeStep === 1 ? handleSave : handleNext}
-            sx={{
-              backgroundColor: themeColor,
-              fontWeight: "bold",
-              borderRadius: "0.5rem",
-              minWidth: "8rem",
-              fontSize: "0.9rem",
-              color: "#fff",
-              "&:hover": {
-                backgroundColor: "#1f4ea0",
-              },
-            }}
-          >
-            {activeStep === 1 ? t("Save & Next") : t("Next")}
-          </Button>
-        )}
-      </Box>
-    </Box>
+                {t("I have thoroughly read and understood all the terms and conditions as mentioned in the Schedule.")}
+              </label>
+              {errors.termsAccepted && (
+                <div className="text-danger small mt-1" style={{ display: "block" }}>
+                  {errors.termsAccepted.message}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </Collapsible>
+    </div>
   );
 };
 
-export default Stepper;
+export default Documents;
