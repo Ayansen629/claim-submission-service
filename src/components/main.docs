@@ -1,187 +1,174 @@
-import React, { useState, useEffect } from "react";
-import { useForm, FormProvider } from "react-hook-form";
-import { Row, Col, Form } from "react-bootstrap";
-import Collapsible from "../../../common/Collapsible.js";
+import React, { useState } from "react";
+import { Box, Typography, Stack } from "@mui/material";
+import Stepper from "../../../common/Stepper.jsx";
+import VesselDetails from "./VesselDetails.js";
+import Documents from "./Documents.js";
+import { useForm } from "react-hook-form";
+import Invoicing from "../../../common/Invoicing.js";
+import PaymentModal from "../../../common/PaymentModal.js"; 
+import PreviewPage from "../../../common/PreviewPage";
+import { vesselData, previewSections } from "./vesselData";
 import { useTranslation } from "react-i18next";
-import InputFile from "../../../common/InputFile";
-import InputText from "../../../common/InputText.tsx";
+import { useLanguageContext } from "../../../common/LanguageContext.js";
 
-const Documents = ({ formMethods, viewMode = false }) => {
+const NewVesselRegistration = () => {
   const { t } = useTranslation();
-  const [formData, setFormData] = useState({});
-  
-  const {
-    register,
-    watch,
-    setValue,
-    clearErrors,
-    getValues,
-    setError,
-    formState: { errors },
-  } = formMethods;
+  const { changeLanguage } = useLanguageContext();
+  const methods = useForm({ mode: "onTouched" });
+  const { trigger, getValues, setError } = methods;
 
-  const constructedBy = watch("constructedBy");
+  // Payment modal state
+  const [showModal, setShowModal] = useState(false);
+  const [paymentMode, setPaymentMode] = useState("offline");
+  const [challanFile, setChallanFile] = useState(null);
+  const [showPreview, setShowPreview] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
 
-  useEffect(() => {
-    setTimeout(() => {
-      Object.keys(formData).forEach(key => {
-        if (formData[key] !== undefined) {
-          setValue(key, formData[key], { shouldValidate: false });
-        }
-      });
-    }, 0);
-  }, [setValue, formData]);
-
-  const formFields = [
-    {
-      name: 'workOrderFiles',
-      label: t('Work Order'),
-      type: 'file',
-      required: false,
-      colSize: 6
-    },
-    {
-      name: 'drawingsFiles',
-      label: t('Drawings'),
-      type: 'file',
-      required: false,
-      colSize: 6
-    },
-    {
-      name: 'tonnageBooklets',
-      label: t('Tonnage Booklets'),
-      type: 'file',
-      required: true,
-      colSize: 6,
-      validation: { required: t('Tonnage Booklets are required') }
-    },
-    {
-      name: 'stabilityBooklets',
-      label: t('Stability Booklets'),
-      type: 'file',
-      required: true,
-      colSize: 6,
-      validation: { required: t('Stability Booklets are required') }
-    },
-    {
-      name: 'authLetter',
-      label: t('Authorisation Letter'),
-      type: 'file',
-      required: false,
-      colSize: 6,
-      showIf: () => constructedBy === "2",
-      validation: { required: constructedBy === "2" && t('Authorization Letter is required') }
-    },
-    {
-      name: 'termsAccepted',
-      label: t('I have thoroughly read and understood all the terms and conditions as mentioned in the Schedule.'),
-      type: 'checkbox',
-      required: true,
-      colSize: 12,
-      validation: { required: t('You must accept the terms and conditions') }
-    }
-  ];
-
-  const DynamicField = ({ field }) => {
-    if (field.showIf && !field.showIf()) return null;
-
-    switch (field.type) {
-      case 'file':
-        return (
-          <InputFile
-            label={field.label}
-            required={field.required}
-            name={field.name}
-            register={register(field.name)}
-            errors={errors}
-            onChange={(e) => {
-              if (viewMode) return;
-              if (e.target.files && e.target.files[0]) {
-                const file = e.target.files[0];
-                const extension = file?.name?.substring(file?.name?.lastIndexOf('.'));
-                const customFileName = `${field.label}${extension}`;
-                file.originalName = customFileName;
-                setValue(field.name, file);
-
-                setFormData(prev => ({
-                  ...prev,
-                  [field.name]: file
-                }));
-
-                if (errors[field.name]) {
-                  clearErrors(field.name);
-                }
-
-                const validTypes = ['application/pdf', 'image/jpeg', 'image/png', 'image/jpg'];
-                if (!validTypes.includes(file.type)) {
-                  setError(field.name, {
-                    type: 'manual',
-                    message: 'Only PDF, JPG or PNG files are allowed'
-                  });
-                } else if (file.size > 2 * 1024 * 1024) {
-                  setError(field.name, {
-                    type: 'manual',
-                    message: 'File size should not exceed 2MB'
-                  });
-                }
-              }
-            }}
-            className="mb-4"
-            watch={watch}
-            accept=".pdf,.jpg,.jpeg,.png"
-            defaultValue={formData[field.name]}
-            clearErrors={clearErrors}
-            setValue={setValue}
-          />
-        );
-
-      case 'checkbox':
-        return (
-          <div className="mb-3">
-            <div className="d-flex align-items-start">
-              <input
-                type="checkbox"
-                id={field.name}
-                className="me-2 mt-1"
-                {...register(field.name, field.validation)}
-                disabled={viewMode}
-              />
-              <div>
-                <label
-                  htmlFor={field.name}
-                  className="mb-0"
-                  style={{ fontWeight: 500, color: "#333", cursor: "pointer" }}
-                >
-                  {field.label}
-                </label>
-                {errors[field.name] && (
-                  <div className="text-danger small mt-1" style={{ display: "block" }}>
-                    {errors[field.name].message}
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        );
-
-      default:
-        return null;
-    }
+  const validateVesselDetails = async () => {
+    const valid = await trigger([
+      "ownerName", "ownerAddress", "mobile", "email", "pan", 
+      "aadhar", "tradeLicence", "gst", "grt", "workOrderValue",
+      "vesselType", "category", "purchaseType", "constructedBy"
+    ]);
+    return valid;
   };
 
+  const validateDocuments = async () => {
+    const requiredFields = ['tonnageBooklets', 'stabilityBooklets', 'termsAccepted'];
+    const constructedBy = getValues("constructedBy");
+    
+    if (constructedBy === "2") {
+      requiredFields.push('authLetter');
+    }
+    
+    let hasErrors = false;
+    
+    requiredFields.forEach(fieldName => {
+      const fieldValue = getValues(fieldName);
+      
+      if (!fieldValue || (fieldValue instanceof FileList && fieldValue.length === 0)) {
+        setError(fieldName, {
+          type: 'required',
+          message: `${fieldName} is required`
+        });
+        hasErrors = true;
+      }
+    });
+    
+    return !hasErrors;
+  };
+
+  const supervisionAuthority = methods.watch("supervisionAuthority");
+
+  const handleChallanUpload = (e) => {
+    setChallanFile(e.target.files?.[0] || null);
+  };
+  
+  const handleShowPreview = () => {
+    setShowPreview(true);
+  };
+
+  const handleOnlinePay = () => {
+    setIsLoading(true);
+    setShowModal(false);
+   
+    setTimeout(() => {
+      setIsLoading(false);
+      setShowPreview(true);
+    }, 1500);
+  };
+
+  const steps = [
+    {
+      label: t("Vessel Details"),
+      component: <VesselDetails formMethods={methods} viewMode={showPreview} />,
+      validate: validateVesselDetails,
+    },
+    {
+      label: t("Documents"),
+      component: <Documents formMethods={methods} viewMode={showPreview} />,
+      validate: validateDocuments,
+    },
+    {
+      label: t("Invoicing"),
+      component: (
+        <Invoicing
+          supervisionAuthority={supervisionAuthority}
+          onPayNow={() => setShowModal(true)}
+        />
+      ),
+      validate: () => true,
+    },
+  ];
+
+  const handleSave = () => {
+    setIsLoading(true);
+    setTimeout(() => {
+      setIsLoading(false);
+      setShowPreview(true);
+    }, 1500);
+  };
+
+  if (showPreview) {
+    return (
+      <PreviewPage
+        data={vesselData}
+        sections={previewSections}
+        title="Vessel Registration Preview"
+        subtitle="Registration details submitted successfully"
+        onBack={() => setShowPreview(false)}
+        submitButtonText="Take Action"
+        onSubmit={() => alert("Taking action...")}
+        icons={{ title: "vessel" }}
+        viewMode={true}
+      />
+    );
+  }
+
   return (
-    <div>
-      <Collapsible title={t("Documents")} openStat={true}>
-        <Row className="gy-4" style={{ padding: "1rem" }}>
-          {formFields.map((field, index) => (
-            <Col key={index} md={field.colSize || 12} className="mb-2">
-              <DynamicField field={field} />
-            </Col>
-          ))}
-        </Row>
-      </Collapsible>
-    </div>
+    <Box sx={{ padding: "1rem 0 0 0.75rem", backgroundColor: "#f5f6fa", minHeight: "100vh" }}>
+      {isLoading ? (
+        <div className="d-flex justify-content-center align-items-center" style={{ height: "80vh" }}>
+          <div className="text-center">
+            <div className="spinner-border text-primary" role="status" style={{ width: "3rem", height: "3rem" }}>
+              <span className="visually-hidden">Loading...</span>
+            </div>
+            <p className="mt-3">Processing your request...</p>
+          </div>
+        </div>
+      ) : (
+        <>
+          <Stack spacing={0.5}>
+            <Typography
+              sx={{
+                fontWeight: 550,
+                color: "#2E57A7",
+                fontSize: "1.2rem",
+              }}
+            >
+             {t("New Vessel Registration")}
+              &nbsp;
+              <span style={{ color: "#666", fontSize: "0.65rem" }}>
+                {t("(Fill in the vessel details to complete registration)")}
+              </span>
+            </Typography>
+          </Stack>
+          <Stepper steps={steps} onSave={handleSave} />
+          <PaymentModal
+            show={showModal}
+            onHide={() => setShowModal(false)}
+            paymentMode={paymentMode}
+            setPaymentMode={setPaymentMode}
+            challanFile={challanFile}
+            onChallanUpload={handleChallanUpload}
+            onOnlinePay={handleOnlinePay}
+            isLoading={isLoading}
+            formMethods={methods}
+          />
+        </>
+      )}
+    </Box>
   );
 };
 
-export default Documents;
+export default NewVesselRegistration;
