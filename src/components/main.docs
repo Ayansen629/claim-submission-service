@@ -1,174 +1,1371 @@
+import React, { useState } from "react";
+import { Box, Typography, Stack } from "@mui/material";
+import Stepper from "../../../common/Stepper.jsx";
+import VesselDetails from "./VesselDetails.js";
+import { useForm } from "react-hook-form";
+import Invoicing from "../../../common/Invoicing.js";
+import PaymentModal from "../../../common/PaymentModal.js"; 
+import PreviewPage from "../../../common/PreviewPage";
+import { vesselData, previewSections } from "./vesselData";
+import { useTranslation } from "react-i18next";
+import { useLanguageContext } from "../../../common/LanguageContext.js";
+import Documents from "./Documents.js";
+
+const NewVesselRegistration = () => {
+  const { t } = useTranslation();
+  const { changeLanguage } = useLanguageContext();
+  const methods = useForm({ mode: "onTouched" });
+  const { trigger } = methods;
+
+  // Payment modal state
+  const [showModal, setShowModal] = useState(false);
+  const [paymentMode, setPaymentMode] = useState("offline");
+  const [challanFile, setChallanFile] = useState(null);
+  const [showPreview, setShowPreview] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+
+  const validateVesselDetails = async () => {
+    const valid = await trigger([
+      "ownerName", "ownerAddress", "mobile", "email", "pan", 
+      "aadhar", "tradeLicence", "gst", "grt", "workOrderValue",
+      "vesselType", "category", "purchaseType", "constructedBy"
+    ]);
+    return valid;
+  };
+
+  const validateDocuments = async () => {
+    const valid = await trigger([
+      "authLetter", "tonnageBooklets", "stabilityBooklets", "termsAccepted"
+    ]);
+    return valid;
+  };
+
+  const supervisionAuthority = methods.watch("supervisionAuthority");
+
+  const handleChallanUpload = (e) => {
+    setChallanFile(e.target.files?.[0] || null);
+  };
+  
+  const handleShowPreview = () => {
+    setShowPreview(true);
+  };
+
+  const handleOnlinePay = () => {
+    setIsLoading(true);
+    setShowModal(false);
+   
+    setTimeout(() => {
+      setIsLoading(false);
+      setShowPreview(true);
+    }, 1500);
+  };
+
+  const steps = [
+    {
+      label: t("Vessel Details"),
+      component: <VesselDetails formMethods={methods} viewMode={showPreview} />,
+      validate: validateVesselDetails,
+    },
+    {
+      label: t("Documents"),
+      component: <Documents formMethods={methods} viewMode={showPreview} />,
+      validate: validateDocuments,
+    },
+    {
+      label: t("Invoicing"),
+      component: (
+        <Invoicing
+          supervisionAuthority={supervisionAuthority}
+          onPayNow={() => setShowModal(true)}
+        />
+      ),
+      validate: () => true,
+    },
+  ];
+
+  const handleSave = () => {
+    setIsLoading(true);
+    setTimeout(() => {
+      setIsLoading(false);
+      setShowPreview(true);
+    }, 1500);
+  };
+
+  if (showPreview) {
+    return (
+      <PreviewPage
+        data={vesselData}
+        sections={previewSections}
+        title="Vessel Registration Preview"
+        subtitle="Registration details submitted successfully"
+        onBack={() => setShowPreview(false)}
+        submitButtonText="Take Action"
+        onSubmit={() => alert("Taking action...")}
+        icons={{ title: "vessel" }}
+        viewMode={true}
+      />
+    );
+  }
+
+  return (
+    <Box sx={{ padding: "1rem 0 0 0.75rem", backgroundColor: "#f5f6fa", minHeight: "100vh" }}>
+      {isLoading ? (
+        <div className="d-flex justify-content-center align-items-center" style={{ height: "80vh" }}>
+          <div className="text-center">
+            <div className="spinner-border text-primary" role="status" style={{ width: "3rem", height: "3rem" }}>
+              <span className="visually-hidden">Loading...</span>
+            </div>
+            <p className="mt-3">Processing your request...</p>
+          </div>
+        </div>
+      ) : (
+        <>
+          <Stack spacing={0.5}>
+            <Typography
+              sx={{
+                fontWeight: 550,
+                color: "#2E57A7",
+                fontSize: "1.2rem",
+              }}
+            >
+             {t("New Vessel Registration")}
+              &nbsp;
+              <span style={{ color: "#666", fontSize: "0.65rem" }}>
+                {t("(Fill in the vessel details to complete registration)")}
+              </span>
+            </Typography>
+          </Stack>
+          <Stepper steps={steps} onSave={handleSave} />
+          <PaymentModal
+            show={showModal}
+            onHide={() => setShowModal(false)}
+            paymentMode={paymentMode}
+            setPaymentMode={setPaymentMode}
+            challanFile={challanFile}
+            onChallanUpload={handleChallanUpload}
+            onOnlinePay={handleOnlinePay}
+            isLoading={isLoading}
+            formMethods={methods}
+          />
+        </>
+      )}
+    </Box>
+  );
+};
+
+export default NewVesselRegistration;
 import React, { useState, useEffect, useRef } from "react";
-import { Form } from "react-bootstrap";
-import { FaUpload, FaFilePdf, FaFileImage, FaCheckCircle } from "react-icons/fa";
+import { useForm } from "react-hook-form";
+import { Row, Col } from "react-bootstrap";
+import InputText from "../../../common/InputText.tsx";
+import InputSelect from "../../../common/InputSelect.tsx";
+import InputRadio from "../../../common/InputRadio.tsx";
+import Collapsible from "../../../common/Collapsible.js";
+import { useTranslation } from "react-i18next";
+import { useLanguageContext } from "../../../common/LanguageContext.js";
+
+const VesselDetails = ({ formMethods, viewMode = false }) => {
+  const { t } = useTranslation();
+  const { changeLanguage } = useLanguageContext();
+  
+  const {
+    register,
+    handleSubmit,
+    watch,
+    setValue,
+    clearErrors,
+    trigger,
+    formState: { errors },
+  } = formMethods;
+
+  const constructedBy = watch("constructedBy");
+  const supervisionAuthority = watch("supervisionAuthority");
+  const category = watch("category");
+  const zone = watch("zone");
+
+  // Effect to handle category change
+  useEffect(() => {
+    if (category === "A") {
+      setValue("zone", "1", { shouldValidate: true });
+      setValue("supervisionAuthority", "classificationSociety", { shouldValidate: true });
+      clearErrors("zone");
+      clearErrors("supervisionAuthority");
+    }
+  }, [category, setValue, clearErrors]);
+
+  const onSubmit = (data) => {
+    console.log("Form Submitted:vessel details", data);
+  };
+
+  return (
+    <form onSubmit={handleSubmit(onSubmit)} autoComplete="off">
+      {/* Basic Information Collapsible */}
+      <Collapsible title={t("Basic Information")} openStat={true}>
+        <Row className="gy-3" style={{ padding: "1rem" }}>
+          <Col md={4}>
+            <InputText
+              label={t("Name of Owner")}
+              name="ownerName"
+              placeholder={t("Please enter Name of Owner")}
+              required
+              register={register("ownerName", { required: t("Name is required") })}
+              errors={errors}
+              onChange={() => !viewMode && clearErrors("ownerName")}
+              disabled={viewMode}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("Address of Owner")}
+              name="ownerAddress"
+              placeholder={t("Please enter Address of Owner")}
+              required
+              register={register("ownerAddress", { required: t("Address is required") })}
+              errors={errors}
+              onChange={() => !viewMode && clearErrors("ownerAddress")}
+              disabled={viewMode}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("Mobile")}
+              name="mobile"
+              placeholder={t("Please enter Mobile")}
+              required
+              register={register("mobile", { required: t("Mobile is required") })}
+              errors={errors}
+              onChange={() => !viewMode && clearErrors("mobile")}
+              disabled={viewMode}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("Email Id")}
+              name="email"
+              placeholder={t("Please enter Email Id")}
+              required
+              register={register("email", { required: t("Email is required") })}
+              errors={errors}
+              onChange={() => !viewMode && clearErrors("email")}
+              disabled={viewMode}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("PAN")}
+              name="pan"
+              placeholder={t("Please enter PAN")}
+              required
+              register={register("pan", { required: t("PAN is required") })}
+              errors={errors}
+              onChange={() => !viewMode && clearErrors("pan")}
+              disabled={viewMode}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("Aadhar")}
+              name="aadhar"
+              placeholder={t("Please enter Aadhar")}
+              required
+              register={register("aadhar", { required: t("Aadhar is required") })}
+              errors={errors}
+              onChange={() => !viewMode && clearErrors("aadhar")}
+              disabled={viewMode}
+            />
+          </Col>
+        </Row>
+        <Row className="gy-3" style={{ padding: "1rem" }}>
+          <Col md={4}>
+            <InputText
+              label={t("Trade Licence")}
+              name="tradeLicence"
+              placeholder={t("Please enter Trade Licence")}
+              required
+              register={register("tradeLicence", { required: t("Trade Licence is required") })}
+              errors={errors}
+              onChange={() => !viewMode && clearErrors("tradeLicence")}
+              disabled={viewMode}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("GST")}
+              name="gst"
+              placeholder={t("Please enter GST")}
+              required
+              register={register("gst", { required: t("GST is required") })}
+              errors={errors}
+              onChange={() => !viewMode && clearErrors("gst")}
+              disabled={viewMode}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("Gross Tonnage (GRT)")}
+              name="grt"
+              placeholder={t("Please enter GRT")}
+              required
+              register={register("grt", { required: t("GRT is required") })}
+              errors={errors}
+              onChange={() => !viewMode && clearErrors("grt")}
+              disabled={viewMode}
+            />
+          </Col>
+        </Row>
+        <Row className="gy-3" style={{ padding: "1rem" }}>
+          <Col md={4}>
+            <InputText
+              label={t("Work Order Value")}
+              name="workOrderValue"
+              placeholder={t("Enter Work Order Value")}
+              required
+              register={register("workOrderValue", {
+                required: t("Work Order Value is required"),
+                pattern: {
+                  value: /^[0-9]+$/,
+                  message: t("Please enter a valid number"),
+                },
+              })}
+              errors={errors}
+              onChange={() => !viewMode && clearErrors("workOrderValue")}
+              disabled={viewMode}
+            />
+          </Col>
+          <Col md={4}>
+            <InputSelect
+              label={t("Type of Vessel")}
+              name="vesselType"
+              required={true}
+              options={[
+                { value: "new", label: t("New Vessel") },
+                { value: "old", label: t("Old Vessel") },
+              ]}
+              register={register("vesselType", { required: t("vesselType is required") })}
+              errors={errors}
+              value={watch("vesselType") || ""}
+              onChange={(value) => {
+                if (viewMode) return;
+                setValue("vesselType", value, { shouldValidate: true });
+                clearErrors("vesselType");
+              }}
+              disabled={viewMode}
+            />
+          </Col>
+          <Col md={4}>
+            <InputSelect
+              label={t("Category")}
+              name="category"
+              required={true}
+              options={[
+                { value: "A", label: t("Category A") },
+                { value: "B", label: t("Category B") },
+                { value: "C", label: t("Category C") },
+              ]}
+              register={register("category", { required: t("category is required") })}
+              errors={errors}
+              value={watch("category") || ""}
+              onChange={(value) => {
+                if (viewMode) return;
+                setValue("category", value, { shouldValidate: true });
+                clearErrors("category");
+              }}
+              disabled={viewMode}
+            />
+          </Col>
+          <Col md={4}>
+            <InputSelect
+              label={t("Zone")}
+              name="zone"
+              required={true}
+              options={[
+                { value: "1", label: t("Zone 1") },
+                { value: "2", label: t("Zone 2") },
+                { value: "3", label: t("Zone 3") },
+              ]}
+              register={register("zone", {
+                required: category !== "A" && t("zone is required")
+              })}
+              errors={category !== "A" ? errors : {}}
+              value={watch("zone") || ""}
+              onChange={(value) => {
+                if (viewMode || category === "A") return;
+                setValue("zone", value, { shouldValidate: true });
+                clearErrors("zone");
+              }}
+              disabled={viewMode || category === "A"}
+            />
+          </Col>
+          <Col md={4}>
+            <InputSelect
+              label={t("Supervision Authority")}
+              name="supervisionAuthority"
+              options={[
+                { value: "iwt", label: t("IWT") },
+                { value: "classificationSociety", label: t("Classification Society") },
+              ]}
+              required={true}
+              register={register("supervisionAuthority", {
+                required: category !== "A" && t("Supervision Authority is required")
+              })}
+              errors={category !== "A" ? errors : {}}
+              value={watch("supervisionAuthority") || ""}
+              onChange={(value) => {
+                if (viewMode || category === "A") return;
+                setValue("supervisionAuthority", value, { shouldValidate: true });
+                clearErrors("supervisionAuthority");
+              }}
+              disabled={viewMode || category === "A"}
+            />
+          </Col>
+          <Col md={4}>
+            <InputSelect
+              label={t("Purchase Type")}
+              name="purchaseType"
+              options={[
+                { value: "new", label: t("New") },
+                { value: "used", label: t("Used") },
+              ]}
+              required={true}
+              register={register("purchaseType", { required: t("Purchase Type is required") })}
+              errors={errors}
+              value={watch("purchaseType") || ""}
+              onChange={(value) => {
+                if (viewMode) return;
+                setValue("purchaseType", value, { shouldValidate: true });
+                clearErrors("purchaseType");
+              }}
+              disabled={viewMode}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("Name of the Classification Society")}
+              name="classificationSociety"
+              placeholder={t("Please enter Name of the Classification Society")}
+              register={register("classificationSociety")}
+              errors={errors}
+              onChange={() => !viewMode && clearErrors("classificationSociety")}
+              disabled={viewMode}
+            />
+          </Col>
+        </Row>
+        <Row className="gy-3" style={{ padding: "1rem" }}>
+          <Col md={6}>
+            <InputRadio
+              name="constructedBy"
+              label={t("Constructed By ?")}
+              options={[
+                { label: t("Self"), value: "1" },
+                { label: t("Builder"), value: "2" },
+              ]}
+              register={register}
+              rules={{ required: t("Please select a Contructor Type") }}
+              errors={errors}
+              onChange={() => !viewMode && clearErrors("constructedBy")}
+              disabled={viewMode}
+            />
+          </Col>
+          {constructedBy === "2" && (
+            <Col md={6}>
+              <InputSelect
+                label={t("Builder")}
+                name="builder"
+                required
+                options={[
+                  { value: "builder1", label: t("Builder 1") },
+                  { value: "builder2", label: t("Builder 2") },
+                ]}
+                register={register}
+                errors={errors}
+                value={watch("builder") || ""}
+                onChange={(value) => {
+                  if (viewMode) return;
+                  setValue("builder", value, { shouldValidate: true });
+                  clearErrors("builder");
+                }}
+                disabled={viewMode}
+              />
+            </Col>
+          )}
+        </Row>
+      </Collapsible>
+
+      {/* Builder Details Collapsible */}
+      {constructedBy === "2" && (
+        <Collapsible title="Builder Details" openStat={true}>
+          <Row className="gy-3" style={{ padding: "1rem" }}>
+            <Col md={4}>
+              <InputText
+                label={t("Builder Name")}
+                name="builderName"
+                required
+                placeholder={t("Please enter Builder Name")}
+                register={register("builderName", {
+                  required: constructedBy === "2" && t("Builder Name is required"),
+                })}
+                errors={errors}
+                onChange={() => !viewMode && clearErrors("builderName")}
+                disabled={viewMode}
+              />
+            </Col>
+            <Col md={4}>
+              <InputText
+                label={t("Builder Address")}
+                name="builderAddress"
+                required
+                placeholder={t("Please enter Builder Address")}
+                register={register("builderAddress", {
+                  required: constructedBy === "2" && t("Builder Address is required"),
+                })}
+                errors={errors}
+                onChange={() => !viewMode && clearErrors("builderAddress")}
+                disabled={viewMode}
+              />
+            </Col>
+            <Col md={4}>
+              <InputText
+                label={t("Builder Email Id")}
+                name="builderEmail"
+                required
+                placeholder={t("Please enter Builder Email Id")}
+                register={register("builderEmail", {
+                  required: constructedBy === "2" && t("Builder Email is required"),
+                  pattern: constructedBy === "2" && {
+                    value: /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i,
+                    message: t("Invalid email address"),
+                  },
+                })}
+                errors={errors}
+                onChange={() => !viewMode && clearErrors("builderEmail")}
+                disabled={viewMode}
+              />
+            </Col>
+            <Col md={4}>
+              <InputText
+                label={t("Mobile")}
+                name="builderMobile"
+                required
+                placeholder={t("Please enter Mobile")}
+                register={register("builderMobile", {
+                  required: constructedBy === "2" && t("Builder Mobile is required"),
+                  pattern: constructedBy === "2" && {
+                    value: /^[0-9]{10}$/,
+                    message: t("Invalid mobile number"),
+                  },
+                })}
+                errors={errors}
+                onChange={() => !viewMode && clearErrors("builderMobile")}
+                disabled={viewMode}
+              />
+            </Col>
+            <Col md={4}>
+              <InputText
+                label={t("Trade Licence")}
+                name="builderTradeLicence"
+                required
+                placeholder={t("Please enter Trade Licence")}
+                register={register("builderTradeLicence", {
+                  required: constructedBy === "2" && t("Builder Trade Licence is required"),
+                })}
+                errors={errors}
+                onChange={() => !viewMode && clearErrors("builderTradeLicence")}
+                disabled={viewMode}
+              />
+            </Col>
+            <Col md={4}>
+              <InputText
+                label={t("GST")}
+                name="builderGST"
+                required
+                placeholder={t("Please enter GST")}
+                register={register("builderGST", {
+                  required: constructedBy === "2" && t("Builder GST is required"),
+                })}
+                errors={errors}
+                onChange={() => !viewMode && clearErrors("builderGST")}
+                disabled={viewMode}
+              />
+            </Col>
+            <Col md={4}>
+              <InputSelect
+                label={t("Builder Authorization")}
+                name="builderAuth"
+                required
+                options={[
+                  { value: "auth", label: t("Authorized") },
+                  { value: "rejected", label: t("Rejected") },
+                ]}
+                register={register}
+                errors={errors}
+                value={watch("builderAuth") || ""}
+                onChange={(value) => {
+                  if (viewMode) return;
+                  setValue("builderAuth", value, { shouldValidate: true });
+                  clearErrors("builderAuth");
+                }}
+                disabled={viewMode}
+              />
+            </Col>
+          </Row>
+        </Collapsible>
+      )}
+    </form>
+  );
+};
+
+export default VesselDetails;
+import React from "react";
+import { Card, Row, Col, Table } from "react-bootstrap";
 import { useTranslation } from "react-i18next";
 import { useLanguageContext } from "../common/LanguageContext";
 
-interface InputFileProps {
-  label: string;
-  required?: boolean;
-  name: string;
-  errors?: any;
-  onChange?: (e: React.ChangeEvent<HTMLInputElement>) => void;
-  accept?: string;
-  disabled?: boolean;
-  className?: string;
-  style?: React.CSSProperties;
-  watch?: any;
-  defaultValue?: string | File;
-  autoFocus?: boolean;
-  clearErrors?: (fieldName: string) => void;
-  setValue?: (name: string, value: any, options?: Object) => void;
-}
 
-const InputFile: React.FC<InputFileProps> = ({
-  label,
-  required,
-  name,
-  errors,
-  onChange,
-  accept = ".pdf,.jpg,.jpeg,.png",
-  disabled,
-  className = "",
-  watch,
-  clearErrors,
-  setValue,
-}) => {
+const Invoicing = ({ supervisionAuthority, onPayNow }) => {
+    const { t } = useTranslation();
+    const { changeLanguage } = useLanguageContext();
+  return (
+    <div className="container py-4">
+      <h2 className="mb-4" style={{ color: "#2466BF", fontWeight: 600 }}>
+        {t("Invoicing")}
+      </h2>
+      <Row className="mb-4 justify-content-center">
+        {supervisionAuthority === "iwt" && (
+          <Col md={8}>
+            <Card className="shadow-sm">
+              <Card.Header style={{ background: "#EAF1FB", color: "#2466BF", fontWeight: 600 }}>
+               {t("Supervision Authority: IWT")}
+              </Card.Header>
+              <Card.Body>
+                <Table bordered responsive className="mb-0">
+                  <thead>
+                    <tr>
+                      <th>{t("Payment")}</th>
+                      <th>{t("Fee Structure")}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td>{t("Drawing Approval Fee")}</td>
+                      <td>
+                        {t("Rs. 0.1% of the work order value")}<br />
+                        <span style={{ color: "#888" }}>{t("Minimum Rs. 500/- + GST")}</span>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td>{t("Supervision Fee")}</td>
+                      <td>
+                        <div>
+                         {t(" 1% of the Contract Price up to 10 lac")}<br />
+                          <span style={{ color: "#888" }}>{t("(Minimum Rs. 1000)")}</span>
+                        </div>
+                        <div className="mt-2">
+                          {t("Above Rs. 10 lac to 40 lac:")} <br />
+                          <span style={{ color: "#2466BF" }}>{t("Rs. 10,000/- + ½% of the cost above 10 lac")}</span>
+                        </div>
+                        <div className="mt-2">
+                          {t("Above Rs. 40 lac:")} <br />
+                          <span style={{ color: "#2466BF" }}>{t("Rs. 25,000/- + ¼% of the cost above 40 lac")}</span>
+                        </div>
+                      </td>
+                    </tr>
+                  </tbody>
+                </Table>
+              </Card.Body>
+            </Card>
+          </Col>
+        )}
+        {supervisionAuthority === "classificationSociety" && (
+          <Col md={8}>
+            <Card className="shadow-sm">
+              <Card.Header style={{ background: "#EAF1FB", color: "#2466BF", fontWeight: 600 }}>
+                {t("Supervision Authority: Classification Society")}
+              </Card.Header>
+              <Card.Body>
+                <Table bordered responsive className="mb-0">
+                  <thead>
+                    <tr>
+                      <th>{t("Payment")}</th>
+                      <th>{t("Fee Structure")}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td>{t("Drawing Scrutiny Fee")}</td>
+                      <td>
+                        {t("0.05% of the work order value")}<br />
+                        <span style={{ color: "#888" }}>{t("Minimum Rs. 500/-")}</span>
+                      </td>
+                    </tr>
+                  </tbody>
+                </Table>
+              </Card.Body>
+            </Card>
+          </Col>
+        )}
+        {!supervisionAuthority && (
+          <Col md={8}>
+            <Card className="shadow-sm">
+              <Card.Body>
+                <div style={{ color: "#888", textAlign: "center" }}>
+                  {t("Please select a Supervision Authority in Step 1 to view invoicing details.")}
+                </div>
+              </Card.Body>
+            </Card>
+          </Col>
+        )}
+      </Row>
+    </div>
+  );
+};
+
+export default Invoicing;
+import React from "react";
+import { Row, Col, Form } from "react-bootstrap";
+import Collapsible from "../../../common/Collapsible.js";
+import { useTranslation } from "react-i18next";
+import InputFile from "../../../common/InputFile";
+import InputText from "../../../common/InputText.tsx";
+
+const Documents = ({ formMethods, viewMode = false }) => {
   const { t } = useTranslation();
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const currentFile = watch ? watch(name) : null;
-  const hasError = errors && errors[name];
-  const [isTouched, setIsTouched] = useState(false);
+  const {
+    register,
+    watch,
+    setValue,
+    clearErrors,
+    formState: { errors },
+  } = formMethods;
 
-  // Clear error when file is selected
-  useEffect(() => {
-    if (currentFile && isTouched && clearErrors) {
-      clearErrors(name);
-    }
-  }, [currentFile, isTouched, name, clearErrors]);
+  const constructedBy = watch("constructedBy");
+  const tonnageBooklets = watch("tonnageBooklets");
+  const stabilityBooklets = watch("stabilityBooklets");
+  const authLetter = watch("authLetter");
+  const workOrderFiles = watch("workOrderFiles") || [];
+  const drawingsFiles = watch("drawingsFiles") || [];
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setIsTouched(true);
-    if (e.target.files && e.target.files[0]) {
-      const file = e.target.files[0];
-      if (setValue) {
-        setValue(name, file, { shouldValidate: true });
+  const handleFileAdd = (fieldName) => {
+    const currentFiles = watch(fieldName) || [];
+    setValue(fieldName, [...currentFiles, null]);
+  };
+
+  const handleFileRemove = (fieldName, index) => {
+    const currentFiles = watch(fieldName) || [];
+    const newFiles = currentFiles.filter((_, i) => i !== index);
+    setValue(fieldName, newFiles.length ? newFiles : null);
+  };
+
+  const handleFileChange = (fieldName, index, e) => {
+    const currentFiles = watch(fieldName) || [];
+    const newFiles = [...currentFiles];
+    newFiles[index] = e.target.files?.[0] || null;
+    setValue(fieldName, newFiles);
+    clearErrors(fieldName);
+  };
+
+  return (
+    <div>
+      {/* Documents Collapsible */}
+      <Collapsible title={t("Documents")} openStat={true}>
+        <Row className="gy-4">
+          {/* Work Order Section */}
+          <Col md={6}>
+            <Form.Group>
+              <Form.Label className="fw-bold">{t("Work Order")}</Form.Label>
+              {(workOrderFiles.length === 0 ? [null] : workOrderFiles).map((file, index) => (
+                <div key={index} className="mb-3">
+                  <div className="d-flex align-items-center gap-2">
+                    <InputFile
+                      label=""
+                      name={`workOrder_file_${index}`}
+                      register={register(`workOrder_file_${index}`)}
+                      errors={errors}
+                      value={file}
+                      onChange={(e) => handleFileChange("workOrderFiles", index, e)}
+                      disabled={viewMode}
+                      className="flex-grow-1"
+                    />
+                    {index === workOrderFiles.length - 1 && !viewMode && (
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-outline-primary"
+                        onClick={() => handleFileAdd("workOrderFiles")}
+                      >
+                        +
+                      </button>
+                    )}
+                    {workOrderFiles.length > 1 && !viewMode && (
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-outline-danger"
+                        onClick={() => handleFileRemove("workOrderFiles", index)}
+                      >
+                        -
+                      </button>
+                    )}
+                  </div>
+                  <InputText
+                    label=""
+                    name={`workOrder_desc_${index}`}
+                    placeholder={t("Description of File")}
+                    register={register(`workOrder_desc_${index}`)}
+                    errors={errors}
+                    disabled={viewMode}
+                    className="mt-2"
+                  />
+                </div>
+              ))}
+            </Form.Group>
+          </Col>
+
+          {/* Drawings Section */}
+          <Col md={6}>
+            <Form.Group>
+              <Form.Label className="fw-bold">{t("Drawings")}</Form.Label>
+              {(drawingsFiles.length === 0 ? [null] : drawingsFiles).map((file, index) => (
+                <div key={index} className="mb-3">
+                  <div className="d-flex align-items-center gap-2">
+                    <InputFile
+                      label=""
+                      name={`drawings_file_${index}`}
+                      register={register(`drawings_file_${index}`)}
+                      errors={errors}
+                      value={file}
+                      onChange={(e) => handleFileChange("drawingsFiles", index, e)}
+                      disabled={viewMode}
+                      className="flex-grow-1"
+                    />
+                    {index === drawingsFiles.length - 1 && !viewMode && (
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-outline-primary"
+                        onClick={() => handleFileAdd("drawingsFiles")}
+                      >
+                        +
+                      </button>
+                    )}
+                    {drawingsFiles.length > 1 && !viewMode && (
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-outline-danger"
+                        onClick={() => handleFileRemove("drawingsFiles", index)}
+                      >
+                        -
+                      </button>
+                    )}
+                  </div>
+                  <InputText
+                    label=""
+                    name={`drawings_desc_${index}`}
+                    placeholder={t("Description of File")}
+                    register={register(`drawings_desc_${index}`)}
+                    errors={errors}
+                    disabled={viewMode}
+                    className="mt-2"
+                  />
+                </div>
+              ))}
+            </Form.Group>
+          </Col>
+        </Row>
+
+        <Row className="gy-4 mt-2">
+          {/* Tonnage Booklets */}
+          <Col md={6}>
+            <InputFile
+              label={t("Tonnage Booklets")}
+              name="tonnageBooklets"
+              required
+              register={register("tonnageBooklets", { 
+                required: t("Tonnage Booklets are required") 
+              })}
+              errors={errors}
+              value={tonnageBooklets?.[0]}
+              onChange={e => {
+                if (viewMode) return;
+                setValue("tonnageBooklets", e.target.files);
+                clearErrors("tonnageBooklets");
+              }}
+              disabled={viewMode}
+            />
+          </Col>
+
+          {/* Stability Booklets */}
+          <Col md={6}>
+            <InputFile
+              label={t("Stability Booklets")}
+              name="stabilityBooklets"
+              required
+              register={register("stabilityBooklets", { 
+                required: t("Stability Booklets are required") 
+              })}
+              errors={errors}
+              value={stabilityBooklets?.[0]}
+              onChange={e => {
+                if (viewMode) return;
+                setValue("stabilityBooklets", e.target.files);
+                clearErrors("stabilityBooklets");
+              }}
+              disabled={viewMode}
+            />
+          </Col>
+        </Row>
+      </Collapsible>
+
+      {/* Builder Documents - Only shown if constructed by builder */}
+      {constructedBy === "2" && (
+        <Collapsible title={t("Builder Documents")} openStat={true}>
+          <Row className="gy-4">
+            <Col md={6}>
+              <InputFile
+                label={t("Authorisation Letter")}
+                name="authLetter"
+                required
+                register={register("authLetter", {
+                  required: constructedBy === "2" && t("Authorization Letter is required"),
+                })}
+                errors={errors}
+                value={authLetter?.[0]}
+                onChange={e => {
+                  if (viewMode) return;
+                  setValue("authLetter", e.target.files);
+                  clearErrors("authLetter");
+                }}
+                disabled={viewMode}
+              />
+            </Col>
+          </Row>
+        </Collapsible>
+      )}
+
+      {/* Declaration Collapsible */}
+      <Collapsible title={t("Declaration")} openStat={true}>
+        <div className="mb-3">
+          <div className="d-flex align-items-start">
+            <input
+              type="checkbox"
+              id="termsAccepted"
+              className="me-2 mt-1"
+              {...register("termsAccepted", {
+                required: t("You must accept the terms and conditions"),
+              })}
+              disabled={viewMode}
+            />
+            <div>
+              <label
+                htmlFor="termsAccepted"
+                className="mb-0"
+                style={{ fontWeight: 500, color: "#333", cursor: "pointer" }}
+              >
+                {t("I have thoroughly read and understood all the terms and conditions as mentioned in the Schedule.")}
+              </label>
+              {errors.termsAccepted && (
+                <div className="text-danger small mt-1" style={{ display: "block" }}>
+                  {errors.termsAccepted.message}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </Collapsible>
+    </div>
+  );
+};
+
+export default Documents;
+import React, { useState } from "react";
+import { Button, Modal, Form } from "react-bootstrap";
+import InputFile from "./InputFile";
+import { useTranslation } from "react-i18next";
+import { useLanguageContext } from "../common/LanguageContext";
+
+
+const PaymentModal = ({
+  show,
+  onHide,
+  paymentMode,
+  setPaymentMode,
+  challanFile,
+  onChallanUpload,
+  onOnlinePay,
+  isLoading,
+  formMethods, 
+  supervisionAuthority, 
+}) => {
+  const [submitting, setSubmitting] = useState(false);
+
+    const { t } = useTranslation();
+    const { changeLanguage } = useLanguageContext();
+  const handleOfflineSubmit = (e) => {
+    e.preventDefault();
+    setSubmitting(true);
+
+    
+    const formData = formMethods.getValues();
+
+   
+    console.log("===== VESSEL REGISTRATION FORM DATA =====");
+    console.log("1. Vessel Details:", {
+      basicInfo: {
+        ownerName: formData.ownerName,
+        ownerAddress: formData.ownerAddress,
+        mobile: formData.mobile,
+        email: formData.email,
+        pan: formData.pan,
+        aadhar: formData.aadhar,
+        tradeLicence: formData.tradeLicence,
+        gst: formData.gst,
+        grt: formData.grt,
+        workOrderValue: formData.workOrderValue,
+      },
+      vesselSpecs: {
+        vesselType: formData.vesselType,
+        category: formData.category,
+        zone: formData.zone,
+        supervisionAuthority: formData.supervisionAuthority,
+        purchaseType: formData.purchaseType,
+        classificationSociety: formData.classificationSociety,
+      },
+      builderDetails: formData.constructedBy === "2" ? {
+        builderName: formData.builderName,
+        builderAddress: formData.builderAddress,
+        builderEmail: formData.builderEmail,
+        builderMobile: formData.builderMobile,
+        builderTradeLicence: formData.builderTradeLicence,
+        builderGST: formData.builderGST,
+        builderAuth: formData.builderAuth,
+        authLetter: formData.authLetter,
+     
+      } : null,
+      documents: {
+        workOrderFiles: formData.workOrderFiles, 
+        drawingFiles: formData.drawingFiles, 
+        tonnageBooklets: formData.tonnageBooklets,
+        stabilityBooklets: formData.stabilityBooklets,
+      },
+      declaration: {
+        termsAccepted: formData.termsAccepted,
+      },
+    });
+
+    console.log("2. Invoicing Details:", {
+      supervisionAuthority: supervisionAuthority,
+      paymentMode: paymentMode,
+      challanFile: challanFile?.name || null,
+    });
+
+  
+    setTimeout(() => {
+      setSubmitting(false);
+      onHide();
+      onOnlinePay();
+    }, 800);
+  };
+
+  return (
+    <Modal show={show} onHide={onHide} centered>
+      <Modal.Header closeButton>
+        <Modal.Title>{t("Payment Option")}</Modal.Title>
+      </Modal.Header>
+      <Modal.Body>
+        <Form onSubmit={handleOfflineSubmit}>
+          <Form.Group>
+            <Form.Label className="fw-semibold mb-2">
+              {t("Select Payment Mode")}
+            </Form.Label>
+            <div className="d-flex gap-3 mb-3">
+              <Form.Check
+                type="radio"
+                id="offline"
+                label={t("Offline")}
+                checked={paymentMode === "offline"}
+                onChange={() => setPaymentMode("offline")}
+                name="paymentMode"
+              />
+              <Form.Check
+                type="radio"
+                id="online"
+                label={t("Online")}
+                checked={paymentMode === "online"}
+                onChange={() => setPaymentMode("online")}
+                name="paymentMode"
+              />
+            </div>
+          </Form.Group>
+          {paymentMode === "offline" && (
+            <div className="mb-3">
+              <InputFile
+                label={t("Upload Challan")}
+                name="challan"
+                required
+                value={challanFile}
+                onChange={onChallanUpload}
+                errors={{}}
+              />
+            </div>
+          )}
+          <div className="d-flex justify-content-end gap-2 mt-4">
+            <Button
+              variant="secondary"
+              onClick={onHide}
+              style={{
+                minWidth: 100,
+                fontWeight: 500,
+                borderRadius: 6,
+                fontSize: "1rem",
+              }}
+              disabled={isLoading}
+            >
+             {t(" Close")}
+            </Button>
+            {paymentMode === "offline" ? (
+              <Button
+                type="submit"
+                variant="primary"
+                disabled={submitting || isLoading}
+                style={{
+                  minWidth: 120,
+                  fontWeight: 600,
+                  borderRadius: 6,
+                  fontSize: "1rem",
+                }}
+              >
+                {submitting ? t("Submitting...") : t("Submit")}
+              </Button>
+            ) : (
+              <Button
+                variant="success"
+                onClick={onOnlinePay}
+                disabled={isLoading}
+                style={{
+                  minWidth: 160,
+                  fontWeight: 600,
+                  borderRadius: 6,
+                  fontSize: "1rem",
+                }}
+              >
+                {t("Proceed to Payment Gateway")}
+              </Button>
+            )}
+          </div>
+        </Form>
+      </Modal.Body>
+    </Modal>
+  );
+};
+
+export default PaymentModal;
+import React, { useState } from "react";
+import { Box, Button, Typography, Paper, Divider, Stack } from "@mui/material";
+import { ChevronRight, CheckCircleFill } from "react-bootstrap-icons";
+import { toast } from "react-toastify";
+import { useTranslation } from "react-i18next";
+import { useLanguageContext } from "../common/LanguageContext";
+
+
+const themeColor = "#2E57A7";
+const successColor = "#28a745";
+
+const Stepper = ({ steps, onSave }) => {
+   const { t } = useTranslation();
+    const { changeLanguage } = useLanguageContext();
+  const [activeStep, setActiveStep] = useState(0);
+  const [completed, setCompleted] = useState({});
+  const [errors, setErrors] = useState({});
+
+  const totalSteps = steps.length;
+
+  const handleNext = async () => {
+    const currentStep = steps[activeStep];
+    if (currentStep.validate) {
+      const isValid = await currentStep.validate();
+      setErrors((prev) => ({ ...prev, [activeStep]: !isValid }));
+      if (isValid) {
+        setCompleted({ ...completed, [activeStep]: true });
+        setActiveStep((prev) => Math.min(prev + 1, totalSteps - 1));
+      } else {
+        toast.error("Please fix the errors before proceeding.");
       }
-      if (onChange) {
-        onChange(e);
-      }
-      if (clearErrors) {
-        clearErrors(name);
-      }
-    } else if (setValue) {
-      setValue(name, null, { shouldValidate: true });
+    } else {
+      setCompleted({ ...completed, [activeStep]: true });
+      setActiveStep((prev) => Math.min(prev + 1, totalSteps - 1));
     }
   };
 
-  const handleLabelClick = () => {
-    if (fileInputRef.current && !disabled) {
-      fileInputRef.current.click();
+  const handleBack = () => {
+    setActiveStep((prev) => Math.max(prev - 1, 0));
+  };
+
+  const handleSave = async () => {
+    const currentStep = steps[activeStep];
+    if (currentStep.validate) {
+      const isValid = await currentStep.validate();
+      setErrors((prev) => ({ ...prev, [activeStep]: !isValid }));
+      if (isValid) {
+        setCompleted({ ...completed, [activeStep]: true });
+        onSave();
+      } else {
+        toast.error("Please fix the errors before proceeding.");
+      }
+    } else {
+      setCompleted({ ...completed, [activeStep]: true });
+      onSave();
+    }
+  };
+
+  // Custom handler for Pay Now on Invoicing step
+  const handlePayNow = () => {
+    if (
+      steps[activeStep] &&
+      steps[activeStep].component &&
+      typeof steps[activeStep].component.props.onPayNow === "function"
+    ) {
+      steps[activeStep].component.props.onPayNow();
     }
   };
 
   return (
-    <Form.Group className={`mb-4 ${className}`} controlId={name}>
-      <Form.Label className="fw-bold text-dark">
-        {label}
-        {required && <span className="text-danger ms-1">*</span>}
-      </Form.Label>
-      <div
-        className={`file-upload border rounded p-3 ${
-          hasError ? 'border-danger' : 
-          currentFile ? 'border-success' : 'border-secondary'
-        }`}
-        style={{
-          backgroundColor: hasError ? '#fff8f8' : 'white',
-          borderRadius: '8px',
-          transition: 'all 0.3s ease'
+    <Box sx={{ width: "100%", padding: "1rem" }}>
+      {/* Step Header */}
+      <Paper
+        elevation={3}
+        sx={{
+          padding: "0.75rem 1.5rem",
+          borderRadius: "0.75rem",
+          overflowX: "auto",
+          whiteSpace: "nowrap",
+          backgroundColor: "#fafafa",
         }}
       >
-        <div className="d-flex align-items-center">
-          <div
-            onClick={handleLabelClick}
-            className={`file-label btn ${
-              hasError ? 'btn-outline-danger' : 'btn-primary'
-            } mb-0 d-inline-flex align-items-center`}
-            style={{
-              borderRadius: '6px',
-              padding: '8px 16px',
-              cursor: disabled ? 'not-allowed' : 'pointer',
-              opacity: disabled ? 0.6 : 1,
-              minWidth: '120px',
-              color: 'white'
+        <Stack direction="row" alignItems="center" spacing={1}>
+          {steps.map((step, index) => (
+            <React.Fragment key={index}>
+              <Stack
+                direction="row"
+                alignItems="center"
+                spacing={0.5}
+                sx={{ cursor: "pointer" }}
+                onClick={() => setActiveStep(index)}
+              >
+                {completed[index] ? (
+                  <CheckCircleFill size={18} color={successColor} />
+                ) : (
+                  <Typography
+                    sx={{
+                      fontSize: "0.875rem",
+                      width: "1.5rem",
+                      height: "1.5rem",
+                      textAlign: "center",
+                      borderRadius: "50%",
+                      backgroundColor: "#e0e0e0",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      fontWeight: "bold",
+                      color: "#666",
+                    }}
+                  >
+                    {index + 1}
+                  </Typography>
+                )}
+                <Typography
+                  sx={{
+                    fontWeight: index === activeStep ? "bold" : "normal",
+                    color: index === activeStep ? themeColor : "#999",
+                    fontSize: "0.875rem",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {step.label}
+                </Typography>
+              </Stack>
+              {index < steps.length - 1 && <ChevronRight size={14} color="#ccc" />}
+            </React.Fragment>
+          ))}
+        </Stack>
+      </Paper>
+
+      {/* Step Content */}
+      <Paper
+        elevation={2}
+        sx={{
+          marginTop: "1rem",
+          borderRadius: "0.75rem",
+          backgroundColor: "#fff",
+          width: "100%",
+        }}
+      >
+        {steps[activeStep].component}
+        {errors[activeStep]}
+      </Paper>
+
+      <Divider sx={{ margin: "2rem 0" }} />
+
+      {/* Navigation Buttons */}
+        <Box
+        sx={{
+          display: "flex",
+          justifyContent: "space-between",
+          gap: "1rem",
+          flexWrap: "wrap",
+        }}
+      >
+        <Button
+          variant="outlined"
+          onClick={handleBack}
+          disabled={activeStep === 0}
+          sx={{
+            color: themeColor,
+            borderColor: themeColor,
+            fontWeight: "bold",
+            borderRadius: "0.5rem",
+            minWidth: "8rem",
+            fontSize: "0.9rem",
+          }}
+        >
+          {t("Previous")}
+        </Button>
+        
+        {activeStep === totalSteps - 1 ? (
+          <Button
+            variant="contained"
+            onClick={handlePayNow}
+            sx={{
+              backgroundColor: themeColor,
+              fontWeight: "bold",
+              borderRadius: "0.5rem",
+              minWidth: "8rem",
+              fontSize: "0.9rem",
+              color: "#fff",
+              "&:hover": {
+                backgroundColor: "#1f4ea0",
+              },
             }}
           >
-            <FaUpload className="file-icon me-2" />
-            <span className="file-text">{t("Choose File")}</span>
-          </div>
-          <div
-            className={`file-name-container ms-3 flex-grow-1 border rounded px-3 py-2 ${
-              currentFile ? 'bg-light-success' : 'bg-light'
-            } d-flex align-items-center ${
-              hasError ? 'border-danger' : 
-              currentFile ? 'border-success' : 'border-secondary'
-            }`}
-            style={{ overflow: 'hidden' }}
+            {t("Pay Now")}
+          </Button>
+        ) : (
+          <Button
+            variant="contained"
+            onClick={activeStep === 1 ? handleSave : handleNext}
+            sx={{
+              backgroundColor: themeColor,
+              fontWeight: "bold",
+              borderRadius: "0.5rem",
+              minWidth: "8rem",
+              fontSize: "0.9rem",
+              color: "#fff",
+              "&:hover": {
+                backgroundColor: "#1f4ea0",
+              },
+            }}
           >
-            {currentFile ? (
-              <>
-                <FaCheckCircle className="text-success me-2 flex-shrink-0" />
-                <div className="overflow-hidden">
-                  <span className="text-success fw-bold" style={{ fontSize: '0.8rem' }}>
-                    {t("Selected File")}:
-                  </span>
-                  <div className="d-flex align-items-center">
-                    <span className="file-icon-preview me-2 flex-shrink-0">
-                      {currentFile.name?.endsWith('.pdf') ? (
-                        <FaFilePdf color="#dc3545" />
-                      ) : (
-                        <FaFileImage color="#28a745" />
-                      )}
-                    </span>
-                    <span 
-                      className="text-dark fw-semibold" 
-                      style={{ 
-                        overflow: 'hidden', 
-                        textOverflow: 'ellipsis', 
-                        whiteSpace: 'nowrap' 
-                      }}
-                    >
-                      {currentFile.name}
-                    </span>
-                  </div>
-                </div>
-              </>
-            ) : (
-              <span className="text-muted">{t("No file chosen")}</span>
-            )}
-          </div>
-        </div>
-        <input
-          ref={fileInputRef}
-          type="file"
-          id={name}
-          onChange={handleFileChange}
-          accept={accept}
-          disabled={disabled}
-          className="d-none"
-        />
-      </div>
-      {hasError ? (
-        <Form.Text className="text-danger small mt-1 d-block">
-          {errors[name]?.message}
-        </Form.Text>
-      ) : (
-        <Form.Text className="text-muted small mt-1">
-          {t("Upload PDF, JPG or PNG file (Max size: 2MB)")}
-        </Form.Text>
-      )}
-    </Form.Group>
+            {activeStep === 1 ? t("Save & Next") : t("Next")}
+          </Button>
+        )}
+      </Box>
+    </Box>
   );
 };
 
-export default InputFile;
+export default Stepper;
