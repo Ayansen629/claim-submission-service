@@ -1,156 +1,198 @@
-import React, { useRef, useEffect } from "react";
-import { Form } from "react-bootstrap";
-import { FaUpload, FaFile, FaFilePdf, FaFileImage, FaCheckCircle } from "react-icons/fa";
+import React, { useState } from "react";
+import { Box, Typography, Stack } from "@mui/material";
+import Stepper from "../../../common/Stepper.jsx";
+import VesselDetails from "./VesselDetails.js";
+import { useForm } from "react-hook-form";
+import Invoicing from "../../../common/Invoicing.js";
+import PaymentModal from "../../../common/PaymentModal.js"; 
+import PreviewPage from "../../../common/PreviewPage";
+import { vesselData, previewSections } from "./vesselData";
 import { useTranslation } from "react-i18next";
-import { useLanguageContext } from "../common/LanguageContext";
+import { useLanguageContext } from "../../../common/LanguageContext.js";
+import Documents from "./Documents.js";
 
-const InputFile = ({
-  label,
-  required,
-  name,
-  register,
-  errors,
-  onChange,
-  accept = ".pdf,.jpg,.jpeg,.png",
-  disabled,
-  className = "",
-  watch,
-  defaultValue,
-  value,
-  clearErrors
-}) => {
-  const hasError = errors && errors[name];
-  const fileInputRef = useRef(null);
+const NewVesselRegistration = () => {
   const { t } = useTranslation();
   const { changeLanguage } = useLanguageContext();
+  const methods = useForm({ mode: "onTouched" });
+  const { trigger, watch } = methods;
 
-  useEffect(() => {
-    if (value && errors?.[name]) {
-      clearErrors?.(name);
-    }
-  }, [value, name, clearErrors, errors]);
+  const [showModal, setShowModal] = useState(false);
+  const [paymentMode, setPaymentMode] = useState("offline");
+  const [challanFile, setChallanFile] = useState(null);
+  const [showPreview, setShowPreview] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
 
-  const handleFileChange = (e) => {
-    if (e.target.files && e.target.files[0]) {
-      const file = e.target.files[0];
-      
-      // Validate file type
-      const validTypes = ['application/pdf', 'image/jpeg', 'image/png', 'image/jpg'];
-      if (!validTypes.includes(file.type)) {
-        if (onChange) onChange({ target: { files: [] } });
-        return;
-      }
-
-      // Validate file size
-      if (file.size > 2 * 1024 * 1024) {
-        if (onChange) onChange({ target: { files: [] } });
-        return;
-      }
-
-      if (onChange) onChange(e);
-    }
+  const validateVesselDetails = async () => {
+    const valid = await trigger([
+      "ownerName", "ownerAddress", "mobile", "email", "pan", 
+      "aadhar", "tradeLicence", "gst", "grt", "workOrderValue",
+      "vesselType", "category", "purchaseType", "constructedBy"
+    ]);
+    return valid;
   };
 
+  const validateDocuments = async () => {
+    const values = methods.getValues();
+    let isValid = true;
+
+    // Clear all errors first
+    methods.clearErrors([
+      "tonnageBooklets", 
+      "stabilityBooklets",
+      "authLetter",
+      "termsAccepted"
+    ]);
+
+    // Check required files
+    if (!values.tonnageBooklets) {
+      methods.setError("tonnageBooklets", {
+        type: "required",
+        message: t("Tonnage Booklets are required")
+      });
+      isValid = false;
+    }
+
+    if (!values.stabilityBooklets) {
+      methods.setError("stabilityBooklets", {
+        type: "required",
+        message: t("Stability Booklets are required")
+      });
+      isValid = false;
+    }
+
+    // Check auth letter if constructed by builder
+    if (values.constructedBy === "2" && !values.authLetter) {
+      methods.setError("authLetter", {
+        type: "required",
+        message: t("Authorization Letter is required")
+      });
+      isValid = false;
+    }
+
+    // Check terms accepted
+    if (!values.termsAccepted) {
+      methods.setError("termsAccepted", {
+        type: "required",
+        message: t("You must accept the terms and conditions")
+      });
+      isValid = false;
+    }
+
+    return isValid;
+  };
+
+  const supervisionAuthority = watch("supervisionAuthority");
+
+  const handleChallanUpload = (e) => {
+    setChallanFile(e.target.files?.[0] || null);
+  };
+  
+  const handleShowPreview = () => {
+    setShowPreview(true);
+  };
+
+  const handleOnlinePay = () => {
+    setIsLoading(true);
+    setShowModal(false);
+   
+    setTimeout(() => {
+      setIsLoading(false);
+      setShowPreview(true);
+    }, 1500);
+  };
+
+  const handleSave = () => {
+    setIsLoading(true);
+    setTimeout(() => {
+      setIsLoading(false);
+      setShowPreview(true);
+    }, 1500);
+  };
+
+  const steps = [
+    {
+      label: t("Vessel Details"),
+      component: <VesselDetails formMethods={methods} viewMode={showPreview} />,
+      validate: validateVesselDetails,
+    },
+    {
+      label: t("Documents"),
+      component: <Documents formMethods={methods} viewMode={showPreview} />,
+      validate: validateDocuments,
+    },
+    {
+      label: t("Invoicing"),
+      component: (
+        <Invoicing
+          supervisionAuthority={supervisionAuthority}
+          onPayNow={() => setShowModal(true)}
+        />
+      ),
+      validate: () => true,
+    },
+  ];
+
+  if (showPreview) {
+    return (
+      <PreviewPage
+        data={vesselData}
+        sections={previewSections}
+        title="Vessel Registration Preview"
+        subtitle="Registration details submitted successfully"
+        onBack={() => setShowPreview(false)}
+        submitButtonText="Take Action"
+        onSubmit={() => alert("Taking action...")}
+        icons={{ title: "vessel" }}
+        viewMode={true}
+      />
+    );
+  }
+
   return (
-    <Form.Group className={`mb-4 ${className}`} controlId={name}>
-      <Form.Label className="fw-bold text-dark">
-        {label}
-        {required && <span className="text-danger ms-1">*</span>}
-      </Form.Label>
-      <div
-        className={`file-upload border rounded p-3 ${
-          hasError ? 'border-danger' : 
-          value ? 'border-success' : ''
-        }`}
-        style={{
-          backgroundColor: hasError ? '#fff8f8' : 'white',
-          borderRadius: '8px',
-          transition: 'all 0.3s ease'
-        }}
-      >
-        <div className="d-flex align-items-center">
-          <label
-            htmlFor={name}
-            className={`file-label btn ${
-              hasError ? 'btn-outline-danger' : 'btn-primary'
-            } mb-0 d-inline-flex align-items-center`}
-            style={{
-              borderRadius: '6px',
-              padding: '8px 16px',
-              cursor: disabled ? 'not-allowed' : 'pointer',
-              opacity: disabled ? 0.6 : 1,
-              minWidth: '120px',
-              color: 'white'
-            }}
-          >
-            <FaUpload className="file-icon me-2" />
-            <span className="file-text">{t("Choose File")}</span>
-          </label>
-          <div
-            className={`file-name-container ms-3 flex-grow-1 border rounded px-3 py-2 ${
-              value ? 'bg-light-success' : 'bg-light'
-            } d-flex align-items-center ${
-              hasError ? 'border-danger' : 
-              value ? 'border-success' : ''
-            }`}
-            style={{
-              overflow: 'hidden'
-            }}
-          >
-            {value ? (
-              <>
-                <FaCheckCircle className="text-success me-2 flex-shrink-0" />
-                <div className="overflow-hidden">
-                  <span className="text-success fw-bold" style={{ fontSize: '0.8rem' }}>
-                    {t("Selected File:")}
-                  </span>
-                  <div className="d-flex align-items-center">
-                    <span className="file-icon-preview me-2 flex-shrink-0">
-                      {value.name?.endsWith('.pdf') ? (
-                        <FaFilePdf color="#dc3545" />
-                      ) : (
-                        <FaFileImage color="#28a745" />
-                      )}
-                    </span>
-                    <span 
-                      className="text-dark fw-semibold" 
-                      style={{ 
-                        overflow: 'hidden', 
-                        textOverflow: 'ellipsis', 
-                        whiteSpace: 'nowrap' 
-                      }}
-                    >
-                      {value.name}
-                    </span>
-                  </div>
-                </div>
-              </>
-            ) : (
-              <span className="text-muted">{t("No file chosen")}</span>
-            )}
+    <Box sx={{ padding: "1rem 0 0 0.75rem", backgroundColor: "#f5f6fa", minHeight: "100vh" }}>
+      {isLoading ? (
+        <div className="d-flex justify-content-center align-items-center" style={{ height: "80vh" }}>
+          <div className="text-center">
+            <div className="spinner-border text-primary" role="status" style={{ width: "3rem", height: "3rem" }}>
+              <span className="visually-hidden">Loading...</span>
+            </div>
+            <p className="mt-3">Processing your request...</p>
           </div>
         </div>
-        <input
-          ref={fileInputRef}
-          type="file"
-          id={name}
-          onChange={handleFileChange}
-          accept={accept}
-          disabled={disabled}
-          className="d-none"
-        />
-      </div>
-      {hasError ? (
-        <Form.Text className="text-danger small mt-1 d-block">
-          {errors[name]?.message}
-        </Form.Text>
       ) : (
-        <Form.Text className="text-muted small mt-1">
-          {t("Upload PDF, JPG or PNG file (Max size: 2MB)")}
-        </Form.Text>
+        <>
+          <Stack spacing={0.5}>
+            <Typography
+              sx={{
+                fontWeight: 550,
+                color: "#2E57A7",
+                fontSize: "1.2rem",
+              }}
+            >
+             {t("New Vessel Registration")}
+              &nbsp;
+              <span style={{ color: "#666", fontSize: "0.65rem" }}>
+                {t("(Fill in the vessel details to complete registration)")}
+              </span>
+            </Typography>
+          </Stack>
+          <Stepper steps={steps} onSave={handleSave} formMethods={methods} />
+          <PaymentModal
+            show={showModal}
+            onHide={() => setShowModal(false)}
+            paymentMode={paymentMode}
+            setPaymentMode={setPaymentMode}
+            challanFile={challanFile}
+            onChallanUpload={handleChallanUpload}
+            onOnlinePay={handleOnlinePay}
+            isLoading={isLoading}
+            formMethods={methods}
+          />
+        </>
       )}
-    </Form.Group>
+    </Box>
   );
 };
 
-export default InputFile;
+export default NewVesselRegistration;
