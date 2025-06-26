@@ -1,198 +1,238 @@
 import React, { useState } from "react";
-import { Box, Typography, Stack } from "@mui/material";
-import Stepper from "../../../common/Stepper.jsx";
-import VesselDetails from "./VesselDetails.js";
-import { useForm } from "react-hook-form";
-import Invoicing from "../../../common/Invoicing.js";
-import PaymentModal from "../../../common/PaymentModal.js"; 
-import PreviewPage from "../../../common/PreviewPage";
-import { vesselData, previewSections } from "./vesselData";
+import { Box, Button, Typography, Paper, Divider, Stack } from "@mui/material";
+import { ChevronRight, CheckCircleFill } from "react-bootstrap-icons";
+import { toast } from "react-toastify";
 import { useTranslation } from "react-i18next";
-import { useLanguageContext } from "../../../common/LanguageContext.js";
-import Documents from "./Documents.js";
+import { useLanguageContext } from "../common/LanguageContext";
 
-const NewVesselRegistration = () => {
+const themeColor = "#2E57A7";
+const successColor = "#28a745";
+
+const Stepper = ({ steps, onSave, formMethods }) => {
   const { t } = useTranslation();
   const { changeLanguage } = useLanguageContext();
-  const methods = useForm({ mode: "onTouched" });
-  const { trigger, watch } = methods;
+  const [activeStep, setActiveStep] = useState(0);
+  const [completed, setCompleted] = useState({});
+  const [errors, setErrors] = useState({});
 
-  const [showModal, setShowModal] = useState(false);
-  const [paymentMode, setPaymentMode] = useState("offline");
-  const [challanFile, setChallanFile] = useState(null);
-  const [showPreview, setShowPreview] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
+  const totalSteps = steps.length;
 
-  const validateVesselDetails = async () => {
-    const valid = await trigger([
-      "ownerName", "ownerAddress", "mobile", "email", "pan", 
-      "aadhar", "tradeLicence", "gst", "grt", "workOrderValue",
-      "vesselType", "category", "purchaseType", "constructedBy"
-    ]);
-    return valid;
-  };
+  const validateCurrentStep = async () => {
+    const currentStep = steps[activeStep];
+    if (!currentStep.validate) return true;
 
-  const validateDocuments = async () => {
-    const values = methods.getValues();
-    let isValid = true;
+    // First try standard validation
+    let isValid = await currentStep.validate();
+    
+    // Special handling for documents step
+    if (activeStep === 1 && !isValid) {
+      const values = formMethods.getValues();
+      
+      // Manually verify if files exist
+      const hasTonnageBooklets = !!values.tonnageBooklets;
+      const hasStabilityBooklets = !!values.stabilityBooklets;
+      const hasAuthLetter = values.constructedBy !== "2" || !!values.authLetter;
+      const hasTermsAccepted = !!values.termsAccepted;
 
-    // Clear all errors first
-    methods.clearErrors([
-      "tonnageBooklets", 
-      "stabilityBooklets",
-      "authLetter",
-      "termsAccepted"
-    ]);
-
-    // Check required files
-    if (!values.tonnageBooklets) {
-      methods.setError("tonnageBooklets", {
-        type: "required",
-        message: t("Tonnage Booklets are required")
-      });
-      isValid = false;
-    }
-
-    if (!values.stabilityBooklets) {
-      methods.setError("stabilityBooklets", {
-        type: "required",
-        message: t("Stability Booklets are required")
-      });
-      isValid = false;
-    }
-
-    // Check auth letter if constructed by builder
-    if (values.constructedBy === "2" && !values.authLetter) {
-      methods.setError("authLetter", {
-        type: "required",
-        message: t("Authorization Letter is required")
-      });
-      isValid = false;
-    }
-
-    // Check terms accepted
-    if (!values.termsAccepted) {
-      methods.setError("termsAccepted", {
-        type: "required",
-        message: t("You must accept the terms and conditions")
-      });
-      isValid = false;
+      if (hasTonnageBooklets && hasStabilityBooklets && hasAuthLetter && hasTermsAccepted) {
+        // Clear any lingering errors
+        formMethods.clearErrors([
+          "tonnageBooklets",
+          "stabilityBooklets",
+          "authLetter",
+          "termsAccepted"
+        ]);
+        return true;
+      }
     }
 
     return isValid;
   };
 
-  const supervisionAuthority = watch("supervisionAuthority");
-
-  const handleChallanUpload = (e) => {
-    setChallanFile(e.target.files?.[0] || null);
-  };
-  
-  const handleShowPreview = () => {
-    setShowPreview(true);
-  };
-
-  const handleOnlinePay = () => {
-    setIsLoading(true);
-    setShowModal(false);
-   
-    setTimeout(() => {
-      setIsLoading(false);
-      setShowPreview(true);
-    }, 1500);
+  const handleNext = async () => {
+    const isValid = await validateCurrentStep();
+    setErrors((prev) => ({ ...prev, [activeStep]: !isValid }));
+    
+    if (isValid) {
+      setCompleted({ ...completed, [activeStep]: true });
+      setActiveStep((prev) => Math.min(prev + 1, totalSteps - 1));
+    } else {
+      const errorFields = Object.keys(formMethods.formState.errors);
+      if (errorFields.length > 0) {
+        toast.error(t("Please fix the errors before proceeding."));
+      }
+    }
   };
 
-  const handleSave = () => {
-    setIsLoading(true);
-    setTimeout(() => {
-      setIsLoading(false);
-      setShowPreview(true);
-    }, 1500);
+  const handleBack = () => {
+    setActiveStep((prev) => Math.max(prev - 1, 0));
   };
 
-  const steps = [
-    {
-      label: t("Vessel Details"),
-      component: <VesselDetails formMethods={methods} viewMode={showPreview} />,
-      validate: validateVesselDetails,
-    },
-    {
-      label: t("Documents"),
-      component: <Documents formMethods={methods} viewMode={showPreview} />,
-      validate: validateDocuments,
-    },
-    {
-      label: t("Invoicing"),
-      component: (
-        <Invoicing
-          supervisionAuthority={supervisionAuthority}
-          onPayNow={() => setShowModal(true)}
-        />
-      ),
-      validate: () => true,
-    },
-  ];
+  const handleSave = async () => {
+    const isValid = await validateCurrentStep();
+    
+    if (isValid) {
+      setCompleted({ ...completed, [activeStep]: true });
+      if (activeStep < totalSteps - 1) {
+        setActiveStep((prev) => prev + 1);
+      } else {
+        onSave();
+      }
+    } else {
+      // Get current errors to show specific messages
+      const errors = formMethods.formState.errors;
+      let errorMessage = t("Please fix the following errors:");
+      
+      if (errors.tonnageBooklets) errorMessage += `\n- ${errors.tonnageBooklets.message}`;
+      if (errors.stabilityBooklets) errorMessage += `\n- ${errors.stabilityBooklets.message}`;
+      if (errors.authLetter) errorMessage += `\n- ${errors.authLetter.message}`;
+      if (errors.termsAccepted) errorMessage += `\n- ${errors.termsAccepted.message}`;
 
-  if (showPreview) {
-    return (
-      <PreviewPage
-        data={vesselData}
-        sections={previewSections}
-        title="Vessel Registration Preview"
-        subtitle="Registration details submitted successfully"
-        onBack={() => setShowPreview(false)}
-        submitButtonText="Take Action"
-        onSubmit={() => alert("Taking action...")}
-        icons={{ title: "vessel" }}
-        viewMode={true}
-      />
-    );
-  }
+      toast.error(errorMessage);
+    }
+  };
 
   return (
-    <Box sx={{ padding: "1rem 0 0 0.75rem", backgroundColor: "#f5f6fa", minHeight: "100vh" }}>
-      {isLoading ? (
-        <div className="d-flex justify-content-center align-items-center" style={{ height: "80vh" }}>
-          <div className="text-center">
-            <div className="spinner-border text-primary" role="status" style={{ width: "3rem", height: "3rem" }}>
-              <span className="visually-hidden">Loading...</span>
-            </div>
-            <p className="mt-3">Processing your request...</p>
-          </div>
-        </div>
-      ) : (
-        <>
-          <Stack spacing={0.5}>
-            <Typography
-              sx={{
-                fontWeight: 550,
-                color: "#2E57A7",
-                fontSize: "1.2rem",
-              }}
-            >
-             {t("New Vessel Registration")}
-              &nbsp;
-              <span style={{ color: "#666", fontSize: "0.65rem" }}>
-                {t("(Fill in the vessel details to complete registration)")}
-              </span>
-            </Typography>
-          </Stack>
-          <Stepper steps={steps} onSave={handleSave} formMethods={methods} />
-          <PaymentModal
-            show={showModal}
-            onHide={() => setShowModal(false)}
-            paymentMode={paymentMode}
-            setPaymentMode={setPaymentMode}
-            challanFile={challanFile}
-            onChallanUpload={handleChallanUpload}
-            onOnlinePay={handleOnlinePay}
-            isLoading={isLoading}
-            formMethods={methods}
-          />
-        </>
-      )}
+    <Box sx={{ width: "100%", padding: "1rem" }}>
+      {/* Step Header */}
+      <Paper
+        elevation={3}
+        sx={{
+          padding: "0.75rem 1.5rem",
+          borderRadius: "0.75rem",
+          overflowX: "auto",
+          whiteSpace: "nowrap",
+          backgroundColor: "#fafafa",
+        }}
+      >
+        <Stack direction="row" alignItems="center" spacing={1}>
+          {steps.map((step, index) => (
+            <React.Fragment key={index}>
+              <Stack
+                direction="row"
+                alignItems="center"
+                spacing={0.5}
+                sx={{ cursor: "pointer" }}
+                onClick={() => setActiveStep(index)}
+              >
+                {completed[index] ? (
+                  <CheckCircleFill size={18} color={successColor} />
+                ) : (
+                  <Typography
+                    sx={{
+                      fontSize: "0.875rem",
+                      width: "1.5rem",
+                      height: "1.5rem",
+                      textAlign: "center",
+                      borderRadius: "50%",
+                      backgroundColor: "#e0e0e0",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      fontWeight: "bold",
+                      color: "#666",
+                    }}
+                  >
+                    {index + 1}
+                  </Typography>
+                )}
+                <Typography
+                  sx={{
+                    fontWeight: index === activeStep ? "bold" : "normal",
+                    color: index === activeStep ? themeColor : "#999",
+                    fontSize: "0.875rem",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {step.label}
+                </Typography>
+              </Stack>
+              {index < steps.length - 1 && <ChevronRight size={14} color="#ccc" />}
+            </React.Fragment>
+          ))}
+        </Stack>
+      </Paper>
+
+      {/* Step Content */}
+      <Paper
+        elevation={2}
+        sx={{
+          marginTop: "1rem",
+          borderRadius: "0.75rem",
+          backgroundColor: "#fff",
+          width: "100%",
+        }}
+      >
+        {steps[activeStep].component}
+      </Paper>
+
+      <Divider sx={{ margin: "2rem 0" }} />
+
+      {/* Navigation Buttons */}
+      <Box
+        sx={{
+          display: "flex",
+          justifyContent: "space-between",
+          gap: "1rem",
+          flexWrap: "wrap",
+        }}
+      >
+        <Button
+          variant="outlined"
+          onClick={handleBack}
+          disabled={activeStep === 0}
+          sx={{
+            color: themeColor,
+            borderColor: themeColor,
+            fontWeight: "bold",
+            borderRadius: "0.5rem",
+            minWidth: "8rem",
+            fontSize: "0.9rem",
+          }}
+        >
+          {t("Previous")}
+        </Button>
+        
+        {activeStep === totalSteps - 1 ? (
+          <Button
+            variant="contained"
+            onClick={handleSave}
+            sx={{
+              backgroundColor: themeColor,
+              fontWeight: "bold",
+              borderRadius: "0.5rem",
+              minWidth: "8rem",
+              fontSize: "0.9rem",
+              color: "#fff",
+              "&:hover": {
+                backgroundColor: "#1f4ea0",
+              },
+            }}
+          >
+            {t("Pay Now")}
+          </Button>
+        ) : (
+          <Button
+            variant="contained"
+            onClick={activeStep === 1 ? handleSave : handleNext}
+            sx={{
+              backgroundColor: themeColor,
+              fontWeight: "bold",
+              borderRadius: "0.5rem",
+              minWidth: "8rem",
+              fontSize: "0.9rem",
+              color: "#fff",
+              "&:hover": {
+                backgroundColor: "#1f4ea0",
+              },
+            }}
+          >
+            {activeStep === 1 ? t("Save & Next") : t("Next")}
+          </Button>
+        )}
+      </Box>
     </Box>
   );
 };
 
-export default NewVesselRegistration;
+export default Stepper;
