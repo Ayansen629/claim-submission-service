@@ -1,32 +1,30 @@
-import React, { useState, useEffect, useMemo, useRef } from "react";
-import { Row, Col, Button, InputGroup, ListGroup } from "react-bootstrap";
-import { useTranslation } from "react-i18next";
-import { BsDownload, BsSearch, BsFileEarmarkPdf } from "react-icons/bs";
+import React, { useState, useEffect } from "react";
+import { Row, Col, Button, ListGroup, Card } from "react-bootstrap";
 import Collapsible from "../../../common/Collapsible.js";
+import { useTranslation } from "react-i18next";
 import InputFile from "../../../common/InputFile.tsx";
 import InputText from "../../../common/InputText.tsx";
 import { renameFile } from "../../../../utils/constants.ts";
+import { BsDownload, BsFileEarmarkPdf, BsPlus, BsTrash } from "react-icons/bs";
 
-const Documents = ({ formMethods, viewMode = false }) => {
+const Documents = ({ formMethods, viewMode = false, editMode = false }) => {
   const { t } = useTranslation();
   const [formData, setFormData] = useState({});
   const [workOrderFiles, setWorkOrderFiles] = useState([{ id: 1 }]);
   const [drawingsFiles, setDrawingsFiles] = useState([{ id: 1 }]);
-  
-  // Search states
-  const [workOrderSearch, setWorkOrderSearch] = useState("");
-  const [drawingsSearch, setDrawingsSearch] = useState("");
   
   const {
     register,
     watch,
     setValue,
     clearErrors,
+    getValues,
     setError,
     formState: { errors },
   } = formMethods;
 
-  // Initialize form data
+  const constructedBy = watch("constructedBy");
+
   useEffect(() => {
     setTimeout(() => {
       Object.keys(formData).forEach(key => {
@@ -37,17 +35,19 @@ const Documents = ({ formMethods, viewMode = false }) => {
     }, 0);
   }, [setValue, formData]);
 
-  // Load existing files in view mode
   useEffect(() => {
-    if (viewMode) {
+    if (viewMode || editMode) {
       const workOrderIds = [];
       const drawingIds = [];
       
       for (let i = 1; i <= 50; i++) {
-        if (watch(`workOrder_file_${i}`)) {
+        const workOrderFile = getValues(`workOrder_file_${i}`);
+        const drawingFile = getValues(`drawings_file_${i}`);
+        
+        if (workOrderFile && workOrderFile.name) {
           workOrderIds.push({ id: i });
         }
-        if (watch(`drawings_file_${i}`)) {
+        if (drawingFile && drawingFile.name) {
           drawingIds.push({ id: i });
         }
       }
@@ -55,93 +55,128 @@ const Documents = ({ formMethods, viewMode = false }) => {
       if (workOrderIds.length > 0) setWorkOrderFiles(workOrderIds);
       if (drawingIds.length > 0) setDrawingsFiles(drawingIds);
     }
-  }, [viewMode, watch]);
+  }, [viewMode, editMode, getValues]);
 
-  const DocumentListItem = ({ fileName, description, onDownload, fileSize }) => (
-    <ListGroup.Item className="d-flex justify-content-between align-items-center py-2 px-3">
-      <div className="d-flex align-items-center flex-grow-1">
-        <BsFileEarmarkPdf className="text-danger me-2" size={20} />
-        <div className="flex-grow-1">
-          <div className="fw-semibold text-primary mb-1" style={{ fontSize: "0.9rem" }}>
-            {fileName}
+  const DocumentCard = ({ fileName, description, onDownload, fileSize, onRemove, showRemove = false }) => (
+    <Card className="mb-2 border-0 shadow-sm">
+      <Card.Body className="p-3">
+        <div className="d-flex justify-content-between align-items-center">
+          <div className="d-flex align-items-center flex-grow-1">
+            <div className="bg-danger bg-opacity-10 rounded-circle p-2 me-3">
+              <BsFileEarmarkPdf className="text-danger" size={20} />
+            </div>
+            <div className="flex-grow-1">
+              <h6 className="mb-1 text-primary fw-semibold" style={{ fontSize: "0.9rem" }}>
+                {fileName}
+              </h6>
+              <p className="mb-0 text-muted small">
+                {description}
+                {fileSize && (
+                  <span className="ms-2 badge bg-light text-dark">
+                    {(fileSize / 1024 / 1024).toFixed(1)} MB
+                  </span>
+                )}
+              </p>
+            </div>
           </div>
-          <div className="text-muted small">
-            {description}
-            {fileSize && <span className="ms-2 badge bg-light text-dark">{(fileSize / 1024 / 1024).toFixed(1)} MB</span>}
+          <div className="d-flex gap-2">
+            <Button
+              variant="outline-primary"
+              size="sm"
+              onClick={() => onDownload(fileName)}
+              className="rounded-pill"
+            >
+              <BsDownload size={14} />
+            </Button>
+            {showRemove && (
+              <Button
+                variant="outline-danger"
+                size="sm"
+                onClick={onRemove}
+                className="rounded-pill"
+              >
+                <BsTrash size={14} />
+              </Button>
+            )}
           </div>
         </div>
-      </div>
-      <Button
-        variant="outline-primary"
-        size="sm"
-        onClick={() => onDownload(fileName)}
-        className="ms-2 p-1"
-        style={{ minWidth: "32px", height: "32px" }}
-      >
-        <BsDownload size={12} />
-      </Button>
-    </ListGroup.Item>
+      </Card.Body>
+    </Card>
   );
 
-  const FileSection = ({ title, files, searchTerm, setSearchTerm, type }) => {
-    const searchInputRef = useRef(null);
-    
-    const allFiles = useMemo(() => {
-      return files.filter(file => {
-        const fileData = watch(`${type}_file_${file.id}`);
-        return fileData && fileData.name;
-      });
-    }, [files, watch, type]);
-    
-    const filteredFiles = useMemo(() => {
-      if (!searchTerm) return allFiles;
-      const searchLower = searchTerm.toLowerCase();
-      return allFiles.filter(file => {
-        const fileName = watch(`${type}_file_${file.id}`)?.name?.toLowerCase() || "";
-        const description = watch(`${type}_desc_${file.id}`)?.toLowerCase() || "";
-        return fileName.includes(searchLower) || description.includes(searchLower);
-      });
-    }, [allFiles, searchTerm, watch, type]);
+  const FileUploadCard = ({ label, name, register, errors, onChange, watch, defaultValue, clearErrors, onRemove, showRemove = false }) => (
+    <Card className="mb-3 border-2 border-dashed border-primary border-opacity-25">
+      <Card.Body className="p-3">
+        <div className="mb-3">
+          <InputFile
+            label={label}
+            name={name}
+            register={register}
+            errors={errors}
+            onChange={onChange}
+            watch={watch}
+            defaultValue={defaultValue}
+            clearErrors={clearErrors}
+            accept=".pdf,.jpg,.jpeg,.png"
+          />
+        </div>
+        <div className="mb-3">
+          <InputText
+            label={t("Description")}
+            name={name.replace('_file_', '_desc_')}
+            placeholder={t("Enter file description")}
+            register={register(name.replace('_file_', '_desc_'))}
+            errors={errors}
+            onChange={() => clearErrors(name.replace('_file_', '_desc_'))}
+          />
+        </div>
+        {showRemove && (
+          <div className="text-end">
+            <Button
+              variant="outline-danger"
+              size="sm"
+              onClick={onRemove}
+              className="rounded-pill"
+            >
+              <BsTrash className="me-1" size={14} />
+              Remove
+            </Button>
+          </div>
+        )}
+      </Card.Body>
+    </Card>
+  );
+
+  const FileSection = ({ title, files, type, icon }) => {
+    const filesWithData = files.filter(file => {
+      const fileData = watch(`${type}_file_${file.id}`);
+      return fileData && fileData.name;
+    });
 
     return (
-      <div className="border rounded-3 overflow-hidden" style={{ backgroundColor: "#ffffff", boxShadow: "0 2px 8px rgba(0,0,0,0.1)" }}>
-        <div className="bg-light p-3 border-bottom">
-          <div className="d-flex justify-content-between align-items-center mb-2">
-            <h6 className="mb-0 fw-bold text-primary d-flex align-items-center">
-              <BsFileEarmarkPdf className="me-2" />
-              {title}
-            </h6>
-            <span className="badge bg-primary">{allFiles.length} files</span>
+      <Card className="h-100 shadow-sm border-0">
+        <Card.Header className="bg-light border-0 py-3">
+          <div className="d-flex justify-content-between align-items-center">
+            <h5 className="mb-0 text-primary fw-bold d-flex align-items-center">
+              {icon}
+              <span className="ms-2">{title}</span>
+            </h5>
+            <span className="badge bg-primary rounded-pill">
+              {viewMode ? filesWithData.length : files.length} files
+            </span>
           </div>
-          
-          {viewMode && allFiles.length > 0 && (
-            <InputGroup size="sm">
-              <InputGroup.Text className="bg-white border-end-0">
-                <BsSearch className="text-muted" />
-              </InputGroup.Text>
-              <input
-                ref={searchInputRef}
-                type="text"
-                className="form-control form-control-sm border-start-0"
-                placeholder={`Search ${title.toLowerCase()}...`}
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                style={{ boxShadow: "none" }}
-              />
-            </InputGroup>
-          )}
-        </div>
+        </Card.Header>
 
-        <div style={{ maxHeight: "500px", overflowY: "auto" }}>
-          {viewMode ? (
-            filteredFiles.length > 0 ? (
-              <ListGroup variant="flush">
-                {filteredFiles.map((fileInput) => {
+        <Card.Body className="p-0">
+          <div style={{ maxHeight: "500px", overflowY: "auto" }} className="p-3">
+            {viewMode ? (
+              filesWithData.length > 0 ? (
+                filesWithData.map((fileInput) => {
                   const fileData = watch(`${type}_file_${fileInput.id}`);
                   const descData = watch(`${type}_desc_${fileInput.id}`);
                   
                   return (
-                    <DocumentListItem
+                    <DocumentCard
                       key={fileInput.id}
                       fileName={fileData.name}
                       description={descData || `${title} document ${fileInput.id}`}
@@ -149,138 +184,105 @@ const Documents = ({ formMethods, viewMode = false }) => {
                       onDownload={() => handleDownload(fileData.name)}
                     />
                   );
-                })}
-              </ListGroup>
-            ) : (
-              <div className="text-center py-4 text-muted">
-                <BsFileEarmarkPdf size={48} className="mb-2 opacity-50" />
-                <div>{searchTerm ? 'No matching files found' : 'No files found'}</div>
-              </div>
-            )
-          ) : (
-            <div className="p-3">
-              {files.map((fileInput, idx) => (
-                <div key={fileInput.id} className="mb-3 p-3 border rounded-2 bg-light">
-                  <div className="mb-3">
-                    <InputFile
-                      label={`${t("Choose File")} ${idx + 1}`}
-                      name={`${type}_file_${fileInput.id}`}
-                      register={register(`${type}_file_${fileInput.id}`)}
-                      errors={errors}
-                      onChange={(e) => handleFileChange(e, type, fileInput.id)}
-                      watch={watch}
-                      defaultValue={watch(`${type}_file_${fileInput.id}`)}
-                      clearErrors={clearErrors}
-                    />
+                })
+              ) : (
+                <div className="text-center py-5 text-muted">
+                  <div className="bg-light rounded-circle p-4 d-inline-flex mb-3">
+                    <BsFileEarmarkPdf size={48} className="opacity-50" />
                   </div>
-                  <div className="mb-3">
-                    <InputText
-                      label={t("Description")}
-                      name={`${type}_desc_${fileInput.id}`}
-                      placeholder={t("Enter file description")}
-                      register={register(`${type}_desc_${fileInput.id}`)}
-                      errors={errors}
-                      onChange={() => clearErrors(`${type}_desc_${fileInput.id}`)}
-                    />
-                  </div>
-                  {files.length > 1 && (
-                    <div className="text-end">
-                      <Button
-                        variant="outline-danger"
-                        size="sm"
-                        onClick={() => removeFileInput(type, fileInput.id)}
-                      >
-                        Remove
-                      </Button>
-                    </div>
-                  )}
+                  <p className="mb-0">No files uploaded</p>
                 </div>
-              ))}
-            </div>
-          )}
-        </div>
+              )
+            ) : (
+              <>
+                {files.map((fileInput, idx) => (
+                  <FileUploadCard
+                    key={fileInput.id}
+                    label={`${t("Choose File")} ${idx + 1}`}
+                    name={`${type}_file_${fileInput.id}`}
+                    register={register(`${type}_file_${fileInput.id}`)}
+                    errors={errors}
+                    onChange={(e) => {
+                      if (e.target.files && e?.target?.files[0]) {
+                        const file = e.target.files[0];
+                        
+                        if (file.size > 10 * 1024 * 1024) {
+                          setError(`${type}_file_${fileInput.id}`, {
+                            type: 'manual',
+                            message: t('File size should not exceed 10MB')
+                          });
+                          return;
+                        }
+                        
+                        const extension = file?.name?.substring(file?.name?.lastIndexOf("."));
+                        const fileName = `${title}${extension}`;
+                        file.originalName = fileName;
+                        const renamedFile = renameFile(file, fileName);
+
+                        clearErrors(`${type}_file_${fileInput.id}`);
+                        setValue(`${type}_file_${fileInput.id}`, renamedFile, { shouldValidate: true });
+                        setFormData((prev) => ({
+                          ...prev,
+                          [`${type}_file_${fileInput.id}`]: renamedFile
+                        }));
+                      }
+                    }}
+                    watch={watch}
+                    defaultValue={watch(`${type}_file_${fileInput.id}`)}
+                    clearErrors={clearErrors}
+                    onRemove={() => removeFileInput(type, fileInput.id)}
+                    showRemove={files.length > 1}
+                  />
+                ))}
+              </>
+            )}
+          </div>
+        </Card.Body>
 
         {!viewMode && (
-          <div className="p-3 bg-light border-top text-center">
+          <Card.Footer className="bg-light border-0 text-center py-3">
             <Button
               variant="primary"
               size="sm"
               onClick={() => addFileInput(type)}
-              style={{ backgroundColor: "#2466BF", borderColor: "#2466BF" }}
+              className="rounded-pill px-4"
             >
-              + Add {title}
+              <BsPlus className="me-1" size={18} />
+              Add {title}
             </Button>
-          </div>
+          </Card.Footer>
         )}
-      </div>
+      </Card>
     );
   };
 
-  const SingleFileSection = ({ title, fileName, onDownload, fileSize }) => (
-    <div className="border rounded-3 p-3 bg-white" style={{ boxShadow: "0 2px 8px rgba(0,0,0,0.1)" }}>
-      <h6 className="fw-bold text-primary mb-3 d-flex align-items-center">
-        <BsFileEarmarkPdf className="me-2" />
-        {title}
-      </h6>
-      {fileName ? (
-        <div className="d-flex justify-content-between align-items-center p-2 bg-light rounded">
-          <div className="d-flex align-items-center">
-            <BsFileEarmarkPdf className="text-danger me-2" size={20} />
-            <div>
-              <div className="fw-semibold text-primary" style={{ fontSize: "0.9rem" }}>
-                {fileName}
-              </div>
-              {fileSize && (
-                <div className="text-muted small">
-                  <span className="badge bg-light text-dark">{(fileSize / 1024 / 1024).toFixed(1)} MB</span>
-                </div>
-              )}
+  const SingleFileSection = ({ title, fileName, onDownload, fileSize, icon }) => (
+    <Card className="h-100 shadow-sm border-0">
+      <Card.Header className="bg-light border-0 py-3">
+        <h5 className="mb-0 text-primary fw-bold d-flex align-items-center">
+          {icon}
+          <span className="ms-2">{title}</span>
+        </h5>
+      </Card.Header>
+      <Card.Body className="p-3">
+        {fileName ? (
+          <DocumentCard
+            fileName={fileName}
+            description={`${title} document`}
+            fileSize={fileSize}
+            onDownload={() => onDownload(fileName)}
+          />
+        ) : (
+          <div className="text-center py-4 text-muted">
+            <div className="bg-light rounded-circle p-4 d-inline-flex mb-3">
+              <BsFileEarmarkPdf size={32} className="opacity-50" />
             </div>
+            <p className="mb-0">No file uploaded</p>
           </div>
-          <Button
-            variant="outline-primary"
-            size="sm"
-            onClick={() => onDownload(fileName)}
-            className="p-1"
-            style={{ minWidth: "32px", height: "32px" }}
-          >
-            <BsDownload size={12} />
-          </Button>
-        </div>
-      ) : (
-        <div className="text-center py-3 text-muted">
-          <BsFileEarmarkPdf size={32} className="mb-2 opacity-50" />
-          <div>No file uploaded</div>
-        </div>
-      )}
-    </div>
+        )}
+      </Card.Body>
+    </Card>
   );
-
-  const handleFileChange = (e, type, id) => {
-    if (e.target.files && e?.target?.files[0]) {
-      const file = e.target.files[0];
-      
-      if (file.size > 10 * 1024 * 1024) {
-        setError(`${type}_file_${id}`, {
-          type: 'manual',
-          message: t('File size should not exceed 10MB')
-        });
-        return;
-      }
-      
-      const extension = file?.name?.substring(file?.name?.lastIndexOf("."));
-      const fileName = `${type === 'workOrder' ? 'Work Order' : 'Drawings'}${extension}`;
-      file.originalName = fileName;
-      const renamedFile = renameFile(file, fileName);
-
-      clearErrors(`${type}_file_${id}`);
-      setValue(`${type}_file_${id}`, renamedFile, { shouldValidate: true });
-      setFormData(prev => ({
-        ...prev,
-        [`${type}_file_${id}`]: renamedFile
-      }));
-    }
-  };
 
   const addFileInput = (type) => {
     if (viewMode) return;
@@ -306,22 +308,23 @@ const Documents = ({ formMethods, viewMode = false }) => {
   };
 
   const handleDownload = (fileName) => {
-    console.log(`Downloading ${fileName}`);
-    // Implement actual download logic here
+    const link = document.createElement('a');
+    link.href = '#';
+    link.download = fileName;
+    link.click();
   };
 
   return (
     <div>
       <Collapsible title={t("Documents")} openStat={true}>
-        <div style={{ padding: "1.5rem", backgroundColor: "#f8f9fa" }}>
+        <div style={{ padding: "2rem", backgroundColor: "#f8f9fa" }}>
           <Row className="g-4">
             <Col lg={6} md={12}>
               <FileSection
                 title={t("Work Order")}
                 files={workOrderFiles}
-                searchTerm={workOrderSearch}
-                setSearchTerm={setWorkOrderSearch}
                 type="workOrder"
+                icon={<BsFileEarmarkPdf className="text-primary" />}
               />
             </Col>
 
@@ -329,9 +332,8 @@ const Documents = ({ formMethods, viewMode = false }) => {
               <FileSection
                 title={t("Drawings")}
                 files={drawingsFiles}
-                searchTerm={drawingsSearch}
-                setSearchTerm={setDrawingsSearch}
                 type="drawings"
+                icon={<BsFileEarmarkPdf className="text-success" />}
               />
             </Col>
 
@@ -342,39 +344,48 @@ const Documents = ({ formMethods, viewMode = false }) => {
                   fileName={watch("tonnageBooklets")?.name}
                   fileSize={watch("tonnageBooklets")?.size}
                   onDownload={handleDownload}
+                  icon={<BsFileEarmarkPdf className="text-warning" />}
                 />
               ) : (
-                <div className="border rounded-3 p-3 bg-white" style={{ boxShadow: "0 2px 8px rgba(0,0,0,0.1)" }}>
-                  <InputFile
-                    label={t('Tonnage Booklets')}
-                    required={true}
-                    name="tonnageBooklets"
-                    register={register("tonnageBooklets")}
-                    errors={errors}
-                    onChange={(e) => {
-                      if (e.target.files && e?.target?.files[0]) {
-                        const file = e.target.files[0];
-                        if (file.size > 10 * 1024 * 1024) {
-                          setError("tonnageBooklets", {
-                            type: 'manual',
-                            message: t('File size should not exceed 10MB')
-                          });
-                          return;
+                <Card className="h-100 shadow-sm border-0">
+                  <Card.Header className="bg-light border-0 py-3">
+                    <h5 className="mb-0 text-primary fw-bold d-flex align-items-center">
+                      <BsFileEarmarkPdf className="text-warning me-2" />
+                      {t('Tonnage Booklets')}
+                    </h5>
+                  </Card.Header>
+                  <Card.Body className="p-3">
+                    <InputFile
+                      label={t('Tonnage Booklets')}
+                      required={true}
+                      name="tonnageBooklets"
+                      register={register("tonnageBooklets")}
+                      errors={errors}
+                      onChange={(e) => {
+                        if (e.target.files && e?.target?.files[0]) {
+                          const file = e.target.files[0];
+                          if (file.size > 10 * 1024 * 1024) {
+                            setError("tonnageBooklets", {
+                              type: 'manual',
+                              message: t('File size should not exceed 10MB')
+                            });
+                            return;
+                          }
+                          const extension = file?.name?.substring(file?.name?.lastIndexOf("."));
+                          const fileName = `Tonnage Booklets${extension}`;
+                          file.originalName = fileName;
+                          const renamedFile = renameFile(file, fileName);
+                          clearErrors("tonnageBooklets");
+                          setValue("tonnageBooklets", renamedFile, { shouldValidate: true });
                         }
-                        const extension = file?.name?.substring(file?.name?.lastIndexOf("."));
-                        const fileName = `Tonnage Booklets${extension}`;
-                        file.originalName = fileName;
-                        const renamedFile = renameFile(file, fileName);
-                        clearErrors("tonnageBooklets");
-                        setValue("tonnageBooklets", renamedFile, { shouldValidate: true });
-                      }
-                    }}
-                    watch={watch}
-                    accept=".pdf,.jpg,.jpeg,.png"
-                    defaultValue={watch("tonnageBooklets")}
-                    clearErrors={clearErrors}
-                  />
-                </div>
+                      }}
+                      watch={watch}
+                      accept=".pdf,.jpg,.jpeg,.png"
+                      defaultValue={watch("tonnageBooklets")}
+                      clearErrors={clearErrors}
+                    />
+                  </Card.Body>
+                </Card>
               )}
             </Col>
 
@@ -385,69 +396,80 @@ const Documents = ({ formMethods, viewMode = false }) => {
                   fileName={watch("stabilityBooklets")?.name}
                   fileSize={watch("stabilityBooklets")?.size}
                   onDownload={handleDownload}
+                  icon={<BsFileEarmarkPdf className="text-info" />}
                 />
               ) : (
-                <div className="border rounded-3 p-3 bg-white" style={{ boxShadow: "0 2px 8px rgba(0,0,0,0.1)" }}>
-                  <InputFile
-                    label={t('Stability Booklets')}
-                    required={true}
-                    name="stabilityBooklets"
-                    register={register("stabilityBooklets")}
-                    errors={errors}
-                    onChange={(e) => {
-                      if (e.target.files && e?.target?.files[0]) {
-                        const file = e.target.files[0];
-                        if (file.size > 10 * 1024 * 1024) {
-                          setError("stabilityBooklets", {
-                            type: 'manual',
-                            message: t('File size should not exceed 10MB')
-                          });
-                          return;
+                <Card className="h-100 shadow-sm border-0">
+                  <Card.Header className="bg-light border-0 py-3">
+                    <h5 className="mb-0 text-primary fw-bold d-flex align-items-center">
+                      <BsFileEarmarkPdf className="text-info me-2" />
+                      {t('Stability Booklets')}
+                    </h5>
+                  </Card.Header>
+                  <Card.Body className="p-3">
+                    <InputFile
+                      label={t('Stability Booklets')}
+                      required={true}
+                      name="stabilityBooklets"
+                      register={register("stabilityBooklets")}
+                      errors={errors}
+                      onChange={(e) => {
+                        if (e.target.files && e?.target?.files[0]) {
+                          const file = e.target.files[0];
+                          if (file.size > 10 * 1024 * 1024) {
+                            setError("stabilityBooklets", {
+                              type: 'manual',
+                              message: t('File size should not exceed 10MB')
+                            });
+                            return;
+                          }
+                          const extension = file?.name?.substring(file?.name?.lastIndexOf("."));
+                          const fileName = `Stability Booklets${extension}`;
+                          file.originalName = fileName;
+                          const renamedFile = renameFile(file, fileName);
+                          clearErrors("stabilityBooklets");
+                          setValue("stabilityBooklets", renamedFile, { shouldValidate: true });
                         }
-                        const extension = file?.name?.substring(file?.name?.lastIndexOf("."));
-                        const fileName = `Stability Booklets${extension}`;
-                        file.originalName = fileName;
-                        const renamedFile = renameFile(file, fileName);
-                        clearErrors("stabilityBooklets");
-                        setValue("stabilityBooklets", renamedFile, { shouldValidate: true });
-                      }
-                    }}
-                    watch={watch}
-                    accept=".pdf,.jpg,.jpeg,.png"
-                    defaultValue={watch("stabilityBooklets")}
-                    clearErrors={clearErrors}
-                  />
-                </div>
+                      }}
+                      watch={watch}
+                      accept=".pdf,.jpg,.jpeg,.png"
+                      defaultValue={watch("stabilityBooklets")}
+                      clearErrors={clearErrors}
+                    />
+                  </Card.Body>
+                </Card>
               )}
             </Col>
 
             <Col md={12}>
-              <div className="border rounded-3 p-3 bg-white" style={{ boxShadow: "0 2px 8px rgba(0,0,0,0.1)" }}>
-                <div className="d-flex align-items-start">
-                  <input
-                    type="checkbox"
-                    id="termsAccepted"
-                    className="me-3 mt-1"
-                    {...register("termsAccepted", { required: t('You must accept the terms and conditions') })}
-                    disabled={viewMode}
-                    checked={viewMode ? watch("termsAccepted") : undefined}
-                  />
-                  <div>
-                    <label
-                      htmlFor="termsAccepted"
-                      className="mb-0 fw-medium"
-                      style={{ color: "#333", cursor: viewMode ? "default" : "pointer", lineHeight: "1.4" }}
-                    >
-                      {t('I have thoroughly read and understood all the terms and conditions as mentioned in the Schedule.')}
-                    </label>
-                    {errors.termsAccepted && !viewMode && (
-                      <div className="text-danger small mt-2">
-                        {errors.termsAccepted.message}
-                      </div>
-                    )}
+              <Card className="shadow-sm border-0">
+                <Card.Body className="p-4">
+                  <div className="d-flex align-items-start">
+                    <input
+                      type="checkbox"
+                      id="termsAccepted"
+                      className="me-3 mt-1"
+                      {...register("termsAccepted", { required: t('You must accept the terms and conditions') })}
+                      disabled={viewMode}
+                      checked={viewMode ? watch("termsAccepted") : undefined}
+                    />
+                    <div>
+                      <label
+                        htmlFor="termsAccepted"
+                        className="mb-0 fw-medium"
+                        style={{ color: "#333", cursor: viewMode ? "default" : "pointer", lineHeight: "1.5" }}
+                      >
+                        {t('I have thoroughly read and understood all the terms and conditions as mentioned in the Schedule.')}
+                      </label>
+                      {errors.termsAccepted && !viewMode && (
+                        <div className="text-danger small mt-2">
+                          {errors.termsAccepted.message}
+                        </div>
+                      )}
+                    </div>
                   </div>
-                </div>
-              </div>
+                </Card.Body>
+              </Card>
             </Col>
           </Row>
         </div>
