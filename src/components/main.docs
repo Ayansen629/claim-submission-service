@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Row, Col, Form, Button, InputGroup, ListGroup } from "react-bootstrap";
 import Collapsible from "../../../common/Collapsible.js";
 import { useTranslation } from "react-i18next";
@@ -7,17 +7,87 @@ import InputText from "../../../common/InputText.tsx";
 import { renameFile } from "../../../../utils/constants.ts";
 import { BsDownload, BsSearch, BsFileEarmarkPdf } from "react-icons/bs";
 
+// Separate SearchInput component to prevent re-renders
+const SearchInput = ({ searchTerm, setSearchTerm, placeholder }) => {
+  return (
+    <div className="d-flex align-items-center">
+      <BsSearch className="text-muted me-2" />
+      <input
+        type="text"
+        className="form-control form-control-sm"
+        placeholder={placeholder}
+        value={searchTerm}
+        onChange={(e) => setSearchTerm(e.target.value)}
+        style={{ 
+          boxShadow: "none", 
+          border: "1px solid #ced4da",
+          borderRadius: "0.375rem"
+        }}
+      />
+    </div>
+  );
+};
+
+// Separate FileList component
+const FileList = ({ files, type, watch, handleDownload, searchTerm }) => {
+  const filteredFiles = files.filter(file => {
+    const fileData = watch(`${type}_file_${file.id}`);
+    if (!fileData || !fileData.name) return false;
+    
+    if (!searchTerm) return true;
+    
+    const fileName = fileData.name.toLowerCase();
+    const description = (watch(`${type}_desc_${file.id}`) || "").toLowerCase();
+    const search = searchTerm.toLowerCase();
+    
+    return fileName.includes(search) || description.includes(search);
+  });
+
+  return (
+    <ListGroup variant="flush">
+      {filteredFiles.map((fileInput) => {
+        const fileData = watch(`${type}_file_${fileInput.id}`);
+        const descData = watch(`${type}_desc_${fileInput.id}`);
+        
+        return (
+          <ListGroup.Item key={fileInput.id} className="d-flex justify-content-between align-items-center py-2 px-3">
+            <div className="d-flex align-items-center flex-grow-1">
+              <BsFileEarmarkPdf className="text-danger me-2" size={20} />
+              <div className="flex-grow-1">
+                <div className="fw-semibold text-primary mb-1" style={{ fontSize: "0.9rem" }}>
+                  {fileData.name}
+                </div>
+                <div className="text-muted small">
+                  {descData || `Document ${fileInput.id}`}
+                  {fileData.size && <span className="ms-2 badge bg-light text-dark">{(fileData.size / 1024 / 1024).toFixed(1)} MB</span>}
+                </div>
+              </div>
+            </div>
+            <Button
+              variant="outline-primary"
+              size="sm"
+              onClick={() => handleDownload(fileData.name)}
+              className="ms-2 p-1"
+              style={{ minWidth: "32px", height: "32px" }}
+            >
+              <BsDownload size={12} />
+            </Button>
+          </ListGroup.Item>
+        );
+      })}
+    </ListGroup>
+  );
+};
+
 const Documents = ({ formMethods, viewMode = false }) => {
   const { t } = useTranslation();
   const [formData, setFormData] = useState({});
   const [workOrderFiles, setWorkOrderFiles] = useState([{ id: 1 }]);
   const [drawingsFiles, setDrawingsFiles] = useState([{ id: 1 }]);
   
-  // Search states and refs
+  // Search states
   const [workOrderSearch, setWorkOrderSearch] = useState("");
   const [drawingsSearch, setDrawingsSearch] = useState("");
-  const workOrderSearchRef = useRef(null);
-  const drawingsSearchRef = useRef(null);
   
   const {
     register,
@@ -47,10 +117,13 @@ const Documents = ({ formMethods, viewMode = false }) => {
       const drawingIds = [];
       
       for (let i = 1; i <= 50; i++) {
-        if (watch(`workOrder_file_${i}`)) {
+        const workOrderFile = getValues(`workOrder_file_${i}`);
+        const drawingFile = getValues(`drawings_file_${i}`);
+        
+        if (workOrderFile && workOrderFile.name) {
           workOrderIds.push({ id: i });
         }
-        if (watch(`drawings_file_${i}`)) {
+        if (drawingFile && drawingFile.name) {
           drawingIds.push({ id: i });
         }
       }
@@ -58,63 +131,13 @@ const Documents = ({ formMethods, viewMode = false }) => {
       if (workOrderIds.length > 0) setWorkOrderFiles(workOrderIds);
       if (drawingIds.length > 0) setDrawingsFiles(drawingIds);
     }
-  }, [viewMode, watch]);
-
-  const DocumentListItem = ({ fileName, description, onDownload, fileSize }) => (
-    <ListGroup.Item className="d-flex justify-content-between align-items-center py-2 px-3">
-      <div className="d-flex align-items-center flex-grow-1">
-        <BsFileEarmarkPdf className="text-danger me-2" size={20} />
-        <div className="flex-grow-1">
-          <div className="fw-semibold text-primary mb-1" style={{ fontSize: "0.9rem" }}>
-            {fileName}
-          </div>
-          <div className="text-muted small">
-            {description}
-            {fileSize && <span className="ms-2 badge bg-light text-dark">{(fileSize / 1024 / 1024).toFixed(1)} MB</span>}
-          </div>
-        </div>
-      </div>
-      <Button
-        variant="outline-primary"
-        size="sm"
-        onClick={() => onDownload(fileName)}
-        className="ms-2 p-1"
-        style={{ minWidth: "32px", height: "32px" }}
-      >
-        <BsDownload size={12} />
-      </Button>
-    </ListGroup.Item>
-  );
+  }, [viewMode, getValues]);
 
   const FileSection = ({ title, files, searchTerm, setSearchTerm, type }) => {
-    const searchRef = type === 'workOrder' ? workOrderSearchRef : drawingsSearchRef;
-    
-    const allFiles = useMemo(() => {
-      return files.filter(file => {
-        const fileData = watch(`${type}_file_${file.id}`);
-        return fileData && fileData.name;
-      });
-    }, [files, watch, type]);
-    
-    const filteredFiles = useMemo(() => {
-      if (!searchTerm) return allFiles;
-      return allFiles.filter(file => {
-        const fileName = watch(`${type}_file_${file.id}`)?.name || "";
-        const description = watch(`${type}_desc_${file.id}`) || "";
-        return fileName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-               description.toLowerCase().includes(searchTerm.toLowerCase());
-      });
-    }, [allFiles, searchTerm, watch, type]);
-
-    const handleSearchChange = (e) => {
-      setSearchTerm(e.target.value);
-      // Maintain focus after state update
-      setTimeout(() => {
-        if (searchRef.current) {
-          searchRef.current.focus();
-        }
-      }, 0);
-    };
+    const allFiles = files.filter(file => {
+      const fileData = watch(`${type}_file_${file.id}`);
+      return fileData && fileData.name;
+    });
 
     return (
       <div className="border rounded-3 overflow-hidden" style={{ backgroundColor: "#ffffff", boxShadow: "0 2px 8px rgba(0,0,0,0.1)" }}>
@@ -128,47 +151,28 @@ const Documents = ({ formMethods, viewMode = false }) => {
           </div>
           
           {viewMode && allFiles.length > 0 && (
-            <InputGroup size="sm">
-              <InputGroup.Text className="bg-white border-end-0">
-                <BsSearch className="text-muted" />
-              </InputGroup.Text>
-              <input
-                ref={searchRef}
-                type="text"
-                className="form-control form-control-sm border-start-0"
-                placeholder={`Search ${title.toLowerCase()}...`}
-                value={searchTerm}
-                onChange={handleSearchChange}
-                style={{ boxShadow: "none" }}
-                onFocus={(e) => e.target.select()}
-              />
-            </InputGroup>
+            <SearchInput
+              searchTerm={searchTerm}
+              setSearchTerm={setSearchTerm}
+              placeholder={`Search ${title.toLowerCase()}...`}
+            />
           )}
         </div>
 
         <div style={{ maxHeight: "500px", overflowY: "auto" }}>
           {viewMode ? (
-            filteredFiles.length > 0 ? (
-              <ListGroup variant="flush">
-                {filteredFiles.map((fileInput) => {
-                  const fileData = watch(`${type}_file_${fileInput.id}`);
-                  const descData = watch(`${type}_desc_${fileInput.id}`);
-                  
-                  return (
-                    <DocumentListItem
-                      key={fileInput.id}
-                      fileName={fileData.name}
-                      description={descData || `${title} document ${fileInput.id}`}
-                      fileSize={fileData.size}
-                      onDownload={() => handleDownload(fileData.name)}
-                    />
-                  );
-                })}
-              </ListGroup>
+            allFiles.length > 0 ? (
+              <FileList
+                files={files}
+                type={type}
+                watch={watch}
+                handleDownload={handleDownload}
+                searchTerm={searchTerm}
+              />
             ) : (
               <div className="text-center py-4 text-muted">
                 <BsFileEarmarkPdf size={48} className="mb-2 opacity-50" />
-                <div>{searchTerm ? 'No matching files found' : 'No files found'}</div>
+                <div>No files found</div>
               </div>
             )
           ) : (
