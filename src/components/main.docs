@@ -1,69 +1,341 @@
-const Collapsible = ({ children, title, openStat }) => {
-  const [isOpen, setIsOpen] = useState(openStat || true);
-  const location = useLocation(); 
+import React, { useState, useEffect } from "react";
+import { Box, Typography, Stack } from "@mui/material";
+import { useParams, useLocation,useNavigate } from "react-router-dom";
+import Stepper from "../../../common/Stepper.jsx";
+import VesselDetails from "./VesselDetails.js";
+import Documents from "./Documents.js";
+import { useForm } from "react-hook-form";
+import Invoicing from "../../../common/Invoicing.js";
+import PaymentModal from "../../../common/PaymentModal.js"; 
+// import ActionDropdown from "../../../common/ActionDropdown";
+// import ApprovalModal from "../../../common/ApprovalModal";
+import NewVesselRegistrationSuccess from "./newVesselRegistrationSuccess.js";
+import { useTranslation } from "react-i18next";
+import { useLanguageContext } from "../../../common/LanguageContext.js";
+import VesselRegistrationPreview from "./VesselRegistrationPreview.js";
 
-  const toggleOpen = (e) => {
-    e.preventDefault();
-    setIsOpen((prevState) => !prevState);
+const NewVesselRegistration = () => {
+  const { t } = useTranslation();
+  const { changeLanguage } = useLanguageContext();
+  const { id } = useParams();
+  const location = useLocation();
+  const navigate = useNavigate();
+  
+  const isEditMode = !!id && location.pathname.includes('/edit/');
+  const isViewMode = !!id && location.pathname.includes('/view/');
+  const isNormalMode = !isEditMode && !isViewMode;
+  
+  const methods = useForm({ mode: "onTouched" });
+  const { trigger, getValues, setError, setValue, reset } = methods;
+
+  const [showModal, setShowModal] = useState(false);
+  const [paymentMode, setPaymentMode] = useState("offline");
+  const [challanFile, setChallanFile] = useState(null);
+  const [isLoading, setIsLoading] = useState(false);
+  // const [showApprovalModal, setShowApprovalModal] = useState(false);
+  // const [selectedAction, setSelectedAction] = useState("");
+
+  // const actionsFromAPI = ["Approve", "Reject", "Request Changes"];
+
+  const staticData = {
+    ownerName: "John Doe",
+    ownerAddress: "123 Main Street, Harbor City, State 12345",
+    mobile: "9876543210",
+    email: "john.doe@example.com",
+    pan: "ABCDE1234F",
+    aadhar: "123456789012",
+    tradeLicence: "TL123456789",
+    gst: "GST123456789012",
+    grt: "500",
+    workOrderValue: "1000000",
+    vesselType: "new",
+    category: "A",
+    zone: "1",
+    supervisionAuthority: "classificationSociety",
+    purchaseType: "new",
+    classificationSociety: "Lloyd's Register Classification Society",
+    constructedBy: "2",
+    builder: "builder1",
+    builderName: "ABC Marine Shipyard Pvt Ltd",
+    builderAddress: "456 Port Road, Shipyard Complex, Harbor City 54321",
+    builderEmail: "contact@abcshipyard.com",
+    builderMobile: "9876543211",
+    builderTradeLicence: "BTL789012345",
+    builderGST: "BGST987654321098",
+    builderAuth: "auth",
+    termsAccepted: true,
+    
+    // Work Order Files (50 files)
+    ...Array.from({ length: 50 }, (_, i) => ({
+      [`workOrder_file_${i + 1}`]: { 
+        name: `Work_Order_Document_${String(i + 1).padStart(2, '0')}.pdf`, 
+        size: Math.floor(Math.random() * 2000000) + 500000 
+      },
+      [`workOrder_desc_${i + 1}`]: `Work order document ${i + 1} - ${[
+        'Main contract document',
+        'Amendment and modifications',
+        'Technical specifications',
+        'Timeline and milestones',
+        'Budget breakdown',
+        'Quality requirements',
+        'Safety protocols',
+        'Environmental compliance',
+        'Material specifications',
+        'Equipment details'
+      ][i % 10]}`
+    })).reduce((acc, curr) => ({ ...acc, ...curr }), {}),
+    
+    // Drawing Files (50 files)
+    ...Array.from({ length: 50 }, (_, i) => ({
+      [`drawings_file_${i + 1}`]: { 
+        name: `Technical_Drawing_${String(i + 1).padStart(2, '0')}.pdf`, 
+        size: Math.floor(Math.random() * 3000000) + 800000 
+      },
+      [`drawings_desc_${i + 1}`]: `Technical drawing ${i + 1} - ${[
+        'General arrangement plan',
+        'Hull structure details',
+        'Machinery layout',
+        'Electrical schematic',
+        'Piping diagram',
+        'Safety equipment layout',
+        'Navigation equipment',
+        'Interior arrangement',
+        'Deck plan',
+        'Cross-section view'
+      ][i % 10]}`
+    })).reduce((acc, curr) => ({ ...acc, ...curr }), {}),
+    
+    tonnageBooklets: { name: "Tonnage_Booklets.pdf", size: 512000 },
+    stabilityBooklets: { name: "Stability_Booklets.pdf", size: 768000 },
+    authLetter: { name: "Authorization_Letter.pdf", size: 256000 }
   };
 
-  // Check if it's registration paths (needs width)
-  const isRegistrationPath = [
-    '/employee-registration',
-    '/registration',
-  ].includes(location.pathname);
+  useEffect(() => {
+    if (isNormalMode) {
+      reset();
+    } else if (isEditMode || isViewMode) {
+      setTimeout(() => {
+        Object.keys(staticData).forEach(key => {
+          setValue(key, staticData[key]);
+        });
+      }, 100);
+    }
+  }, [isEditMode, isViewMode, isNormalMode, setValue, reset, location.pathname]);
 
-  // Check if it's the preview page in a stepper (no width needed)
-  const isPreviewStepper = location.pathname === '/vessel-registration/preview' && 
-                          location.search.includes('stepper=true'); // Assuming stepper status is passed in URL
+  const validateVesselDetails = async () => {
+    if (isViewMode) return true;
+    const basicFields = [
+      "ownerName", "ownerAddress", "mobile", "email", "pan", 
+      "aadhar", "tradeLicence", "gst", "grt", "workOrderValue",
+      "vesselType", "category", "purchaseType", "constructedBy"
+    ];
+    
+    const constructedBy = getValues("constructedBy");
+    if (constructedBy === "2") {
+      basicFields.push(
+        "builderName", "builderAddress", "builderEmail", 
+        "builderMobile", "builderTradeLicence", "builderGST", 
+        "builderAuth", "authLetter"
+      );
+    }
+    
+    const valid = await trigger(basicFields);
+    return valid;
+  };
+
+  const validateDocuments = async () => {
+    if (isViewMode) return true;
+    const requiredFields = ['tonnageBooklets', 'stabilityBooklets', 'termsAccepted'];
+    const constructedBy = getValues("constructedBy");
+    
+    if (constructedBy === "2") {
+      requiredFields.push('authLetter');
+    }
+    
+    let hasErrors = false;
+    
+    requiredFields.forEach(fieldName => {
+      const fieldValue = getValues(fieldName);
+      
+      if (!fieldValue || (fieldValue instanceof FileList && fieldValue.length === 0)) {
+        setError(fieldName, {
+          type: 'required',
+          message: `${fieldName} is required`
+        });
+        hasErrors = true;
+      }
+    });
+    
+    return !hasErrors;
+  };
+
+  const supervisionAuthority = methods.watch("supervisionAuthority");
+
+  const handleChallanUpload = (e) => {
+    setChallanFile(e.target.files?.[0] || null);
+  };
+
+  const handleOnlinePay = () => {
+    setIsLoading(true);
+    setShowModal(false);
+   
+    setTimeout(() => {
+      setIsLoading(false);
+      navigate("/new-vessel/registration-success", { 
+        state: { registrationId: "VR2024001" }
+      });
+    }, 1500);
+  };
+
+  const handleOfflineSubmit = () => {
+    setShowModal(false);
+    setIsLoading(true);
+    
+    setTimeout(() => {
+      setIsLoading(false);
+      navigate("/new-vessel/registration-success", { 
+        state: { registrationId: "VR2024001" }
+      });
+    }, 1500);
+  };
+
+  // const handleActionClick = (action) => {
+  //   setSelectedAction(action);
+  //   setShowApprovalModal(true);
+  // };
+
+  // const handleActionSubmit = (formData) => {
+  //   const payload = {
+  //     action: selectedAction,
+  //     ...formData,
+  //   };
+  //   console.log("Action submitted:", payload);
+  //   setShowApprovalModal(false);
+  //   setSelectedAction("");
+  // };
+
+  // const handleCloseModal = () => {
+  //   setShowApprovalModal(false);
+  //   setSelectedAction("");
+  // };
+
+  const steps = isViewMode ? [
+    {
+      label: t("Vessel Details"),
+      component: <VesselDetails formMethods={methods} viewMode={isViewMode} />,
+      validate: validateVesselDetails,
+    },
+    {
+      label: t("Documents"),
+      component: <Documents formMethods={methods} viewMode={isViewMode} editMode={isEditMode} />,
+      validate: validateDocuments,
+    }
+  ] : [
+    {
+      label: t("Vessel Details"),
+      component: <VesselDetails formMethods={methods} viewMode={isViewMode} />,
+      validate: validateVesselDetails,
+    },
+    {
+      label: t("Documents"),
+      component: <Documents formMethods={methods} viewMode={isViewMode} editMode={isEditMode} />,
+      validate: validateDocuments,
+    },
+    {
+      label : t("Preview"),
+      component: <VesselRegistrationPreview formData={methods.getValues()} isPreview={true} />
+    },
+    {
+      label: t("Invoicing"),
+      component: (
+        <Invoicing
+          supervisionAuthority={supervisionAuthority}
+          onPayNow={() => setShowModal(true)}
+        />
+      ),
+      validate: () => true,
+    },
+  ];
+
+  const handleSave = () => {
+    setIsLoading(true);
+    setTimeout(() => {
+      setIsLoading(false);
+      navigate("/new-vessel/registration-success", { 
+        state: { registrationId: "VR2024001" }
+      });
+    }, 1500);
+  };
 
   return (
-    <>
-      <div className={`bg-light collapseContainer ${isOpen ? "open" : "closed"}`}>
-        <div className="collapseDiv" onClick={toggleOpen}>
-          <div style={{ display: "flex", alignItems: "center", marginRight: "10px", padding: "5px", paddingLeft: "10px" }}>
-            <div
-              className="open-collapse"
-              style={{
-                backgroundColor: isOpen ? "#2466BF" : "#d3d3d3",
-                ...(isRegistrationPath && !isPreviewStepper && { 
-                  width: '24px',
-                  minWidth: '24px',
-                  display: 'flex',
-                  justifyContent: 'center',
-                  alignItems: 'center'
-                }) 
+    <Box sx={{ padding: "1rem 0 0 0.75rem", backgroundColor: "#f5f6fa", minHeight: "100vh" }}>
+      {isLoading ? (
+        <div className="d-flex justify-content-center align-items-center" style={{ height: "80vh" }}>
+          <div className="text-center">
+            <div className="spinner-border text-primary" role="status" style={{ width: "3rem", height: "3rem" }}>
+              <span className="visually-hidden">Loading...</span>
+            </div>
+            <p className="mt-3">Processing your request...</p>
+          </div>
+        </div>
+      ) : (
+        <>
+          <Stack spacing={0.5}>
+            <Typography
+              sx={{
+                fontWeight: 550,
+                color: "#2E57A7",
+                fontSize: "1.2rem",
               }}
             >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="12"
-                height="12"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="white"
-                strokeWidth="3"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M20 6L9 17l-5-5" />
-              </svg>
-            </div>
-            <span className="title cptitle">{title}</span>
-          </div>
-          <button
-            style={{
-              border: "none",
-              fontSize: "1.5em",
-              backgroundColor: "transparent",
-            }}
-            aria-expanded={isOpen}
-          >
-            {isOpen ? <IoArrowUpCircle /> : <IoArrowDownCircle />}
-          </button>
-        </div>
-        {isOpen && <div>{children}</div>}
-      </div>
-    </>
+             {isViewMode ? t("View Vessel Registration") + ` - ${id}` : 
+              isEditMode ? t("Edit Vessel Registration") + ` - ${id}` : t("New Vessel Registration")}
+              &nbsp;
+              <span style={{ color: "#666", fontSize: "0.65rem" }}>
+                {isViewMode ? t("(View vessel registration details)") :
+                 isEditMode ? t("(Update vessel registration details)") : t("(Fill in the vessel details to complete registration)")}
+              </span>
+            </Typography>
+          </Stack>
+          <Stepper 
+            steps={steps} 
+            onSave={handleSave} 
+            viewMode={isViewMode}
+            // actionDropdown={isViewMode ? (
+            //   <ActionDropdown
+            //     actions={actionsFromAPI}
+            //     onActionClick={handleActionClick}
+            //     variant="primary"
+            //     className="py-2 px-3"
+            //   />
+            // ) : null}
+          />
+          {!isViewMode && (
+            <PaymentModal
+              show={showModal}
+              onHide={() => setShowModal(false)}
+              paymentMode={paymentMode}
+              setPaymentMode={setPaymentMode}
+              challanFile={challanFile}
+              onChallanUpload={handleChallanUpload}
+              onOnlinePay={handleOnlinePay}
+              onOfflineSubmit={handleOfflineSubmit}
+              isLoading={isLoading}
+              formMethods={methods}
+            />
+          )}
+          {/* {isViewMode && (
+            <ApprovalModal
+              show={showApprovalModal}
+              handleClose={handleCloseModal}
+              handleSubmitData={handleActionSubmit}
+              selectedAction={selectedAction}
+            />
+          )} */}
+        </>
+      )}
+    </Box>
   );
 };
+
+export default NewVesselRegistration;
