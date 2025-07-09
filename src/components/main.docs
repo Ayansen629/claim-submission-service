@@ -1,207 +1,1485 @@
-import React, { useState, useEffect, useRef } from "react";
-import { Form } from "react-bootstrap";
-import { FaUpload, FaFilePdf, FaFileImage, FaCheckCircle, FaTimes } from "react-icons/fa";
+import React, { useState, useEffect } from "react";
+import { Row, Col, Button, ListGroup, Card } from "react-bootstrap";
+import Collapsible from "../../../common/Collapsible.js";
 import { useTranslation } from "react-i18next";
-import { useLanguageContext } from "../common/LanguageContext";
+import InputFile from "../../../common/InputFile.tsx";
+import InputText from "../../../common/InputText.tsx";
+import { renameFile } from "../../../../utils/constants.ts";
+import { BsDownload, BsFileEarmarkPdf, BsPlus, BsTrash } from "react-icons/bs";
 
-interface InputFileProps {
-  label: string;
-  required?: boolean;
-  name: string;
-  errors?: any;
-  onChange?: (e: React.ChangeEvent<HTMLInputElement>) => void;
-  accept?: string;
-  disabled?: boolean;
-  className?: string;
-  style?: React.CSSProperties;
-  watch?: any;
-  defaultValue?: string | File;
-  autoFocus?: boolean;
-  clearErrors?: (fieldName: string) => void;
-  register?: any;
-}
-
-const InputFile: React.FC<InputFileProps> = ({
-  label,
-  required,
-  name,
-  errors,
-  onChange,
-  accept = ".pdf,.jpg,.jpeg,.png",
-  disabled,
-  className = "",
-  watch,
-  defaultValue,
-  clearErrors,
-  register
-}) => {
-  const hasError = errors && errors[name];
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const [fileSelected, setFileSelected] = useState(false);
+const Documents = ({ formMethods, viewMode = false, editMode = false }) => {
   const { t } = useTranslation();
-  const { changeLanguage } = useLanguageContext();
+  const [formData, setFormData] = useState({});
+  const [workOrderFiles, setWorkOrderFiles] = useState([{ id: 1 }]);
+  const [drawingsFiles, setDrawingsFiles] = useState([{ id: 1 }]);
+  
+  const {
+    register,
+    watch,
+    setValue,
+    clearErrors,
+    getValues,
+    setError,
+    formState: { errors },
+  } = formMethods;
 
-  const currentFile = watch ? watch(name) : null;
+  const constructedBy = watch("constructedBy");
 
   useEffect(() => {
-    if (currentFile && fileSelected) {
-      clearErrors && clearErrors(name);
-    }
-  }, [currentFile, fileSelected, name, clearErrors]);
+    setTimeout(() => {
+      Object.keys(formData).forEach(key => {
+        if (formData[key] !== undefined) {
+          setValue(key, formData[key], { shouldValidate: false });
+        }
+      });
+    }, 0);
+  }, [setValue, formData]);
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      setFileSelected(true);
-      if (onChange) {
-        onChange(e);
+  useEffect(() => {
+    if (viewMode || editMode) {
+      const workOrderIds = [];
+      const drawingIds = [];
+      
+      for (let i = 1; i <= 50; i++) {
+        const workOrderFile = getValues(`workOrder_file_${i}`);
+        const drawingFile = getValues(`drawings_file_${i}`);
+        
+        if (workOrderFile && workOrderFile.name) {
+          workOrderIds.push({ id: i });
+        }
+        if (drawingFile && drawingFile.name) {
+          drawingIds.push({ id: i });
+        }
       }
+      
+      if (workOrderIds.length > 0) setWorkOrderFiles(workOrderIds);
+      if (drawingIds.length > 0) setDrawingsFiles(drawingIds);
+    }
+  }, [viewMode, editMode, getValues]);
+
+  const DocumentCard = ({ fileName, description, onDownload, fileSize, onRemove, showRemove = false }) => (
+    <Card className="mb-2 border-0 shadow-sm">
+      <Card.Body className="p-3">
+        <div className="d-flex justify-content-between align-items-center">
+          <div className="d-flex align-items-center flex-grow-1">
+            <div className="bg-danger bg-opacity-10 rounded-circle p-2 me-3">
+              <BsFileEarmarkPdf className="text-danger" size={20} />
+            </div>
+            <div className="flex-grow-1">
+              <h6 className="mb-1 text-primary fw-semibold" style={{ fontSize: "0.9rem" }}>
+                {fileName}
+              </h6>
+              <p className="mb-0 text-muted small">
+                {description}
+                {fileSize && (
+                  <span className="ms-2 badge bg-light text-dark">
+                    {(fileSize / 1024 / 1024).toFixed(1)} MB
+                  </span>
+                )}
+              </p>
+            </div>
+          </div>
+          <div className="d-flex gap-2">
+            <Button
+              variant="outline-primary"
+              size="sm"
+              onClick={() => onDownload(fileName)}
+              className="rounded-pill"
+            >
+              <BsDownload size={14} />
+            </Button>
+            {showRemove && (
+              <Button
+                variant="outline-danger"
+                size="sm"
+                onClick={onRemove}
+                className="rounded-pill"
+              >
+                <BsTrash size={14} />
+              </Button>
+            )}
+          </div>
+        </div>
+      </Card.Body>
+    </Card>
+  );
+
+  const FileUploadCard = ({ label, name, onRemove, showRemove = false }) => (
+    <Card className="mb-3 border-2 border-dashed border-primary border-opacity-25">
+      <Card.Body className="p-3">
+        <div className="mb-3">
+          <InputFile
+            label={label}
+            name={name}
+            register={register(name)}
+            errors={errors}
+            onChange={(e) => {
+              if (e.target.files && e?.target?.files[0]) {
+                const file = e.target.files[0];
+                
+                if (file.size > 10 * 1024 * 1024) {
+                  setError(name, {
+                    type: 'manual',
+                    message: t('File size should not exceed 10MB')
+                  });
+                  return;
+                }
+                
+                const extension = file?.name?.substring(file?.name?.lastIndexOf("."));
+                const fileName = `Document${extension}`;
+                file.originalName = fileName;
+                const renamedFile = renameFile(file, fileName);
+
+                clearErrors(name);
+                setValue(name, renamedFile, { shouldValidate: true });
+                setFormData((prev) => ({
+                  ...prev,
+                  [name]: renamedFile
+                }));
+              }
+            }}
+            watch={watch}
+            defaultValue={watch(name)}
+            clearErrors={clearErrors}
+            accept=".pdf,.jpg,.jpeg,.png"
+          />
+        </div>
+        <div className="mb-3">
+          <InputText
+            label={t("Description")}
+            name={name.replace('_file_', '_desc_')}
+            placeholder={t("Enter file description")}
+            register={register(name.replace('_file_', '_desc_'))}
+            errors={errors}
+            // onChange={(e) =>
+            //   { clearErrors(name.replace('_file_', '_desc_'));
+            //   setValue(name.replace('_file_', '_desc_'),e.target.value);
+            // }}
+          />
+        </div>
+        {showRemove && (
+          <div className="text-end">
+            <Button
+              variant="outline-danger"
+              size="sm"
+              onClick={onRemove}
+              className="rounded-pill"
+            >
+              <BsTrash className="me-1" size={14} />
+              Remove
+            </Button>
+          </div>
+        )}
+      </Card.Body>
+    </Card>
+  );
+
+  const FileSection = ({ title, files, type, icon }) => {
+    const filesWithData = files.filter(file => {
+      const fileData = watch(`${type}_file_${file.id}`);
+      return fileData && fileData.name;
+    });
+
+    return (
+      <Card className="h-100 shadow-sm border-0">
+        <Card.Header className="bg-light border-0 py-3">
+          <div className="d-flex justify-content-between align-items-center">
+            <h5 className="mb-0 text-primary fw-bold d-flex align-items-center">
+              {icon}
+              <span className="ms-2">{title}</span>
+            </h5>
+            <span className="badge bg-primary rounded-pill">
+              {viewMode ? filesWithData.length : files.length} files
+            </span>
+          </div>
+        </Card.Header>
+
+        <Card.Body className="p-0">
+          <div style={{ maxHeight: "500px", overflowY: "auto" }} className="p-3">
+            {viewMode ? (
+              filesWithData.length > 0 ? (
+                filesWithData.map((fileInput) => {
+                  const fileData = watch(`${type}_file_${fileInput.id}`);
+                  const descData = watch(`${type}_desc_${fileInput.id}`);
+                  
+                  return (
+                    <DocumentCard
+                      key={fileInput.id}
+                      fileName={fileData.name}
+                      description={descData || `${title} document ${fileInput.id}`}
+                      fileSize={fileData.size}
+                      onDownload={() => handleDownload(fileData.name)}
+                    />
+                  );
+                })
+              ) : (
+                <div className="text-center py-5 text-muted">
+                  <div className="bg-light rounded-circle p-4 d-inline-flex mb-3">
+                    <BsFileEarmarkPdf size={48} className="opacity-50" />
+                  </div>
+                  <p className="mb-0">No files uploaded</p>
+                </div>
+              )
+            ) : (
+              <>
+                {files.map((fileInput, idx) => (
+                  <FileUploadCard
+                    key={fileInput.id}
+                    label={`${t("Choose File")} ${idx + 1}`}
+                    name={`${type}_file_${fileInput.id}`}
+                    onRemove={() => removeFileInput(type, fileInput.id)}
+                    showRemove={files.length > 1}
+                  />
+                ))}
+              </>
+            )}
+          </div>
+        </Card.Body>
+
+        {!viewMode && (
+          <Card.Footer className="bg-light border-0 text-center py-3">
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => addFileInput(type)}
+              className="rounded-pill px-4"
+            >
+              <BsPlus className="me-1" size={18} />
+              Add {title}
+            </Button>
+          </Card.Footer>
+        )}
+      </Card>
+    );
+  };
+
+  const SingleFileSection = ({ title, fileName, onDownload, fileSize, icon }) => (
+    <Card className="h-100 shadow-sm border-0">
+      <Card.Header className="bg-light border-0 py-3">
+        <h5 className="mb-0 text-primary fw-bold d-flex align-items-center">
+          {icon}
+          <span className="ms-2">{title}</span>
+        </h5>
+      </Card.Header>
+      <Card.Body className="p-3">
+        {fileName ? (
+          <DocumentCard
+            fileName={fileName}
+            description={`${title} document`}
+            fileSize={fileSize}
+            onDownload={() => onDownload(fileName)}
+          />
+        ) : (
+          <div className="text-center py-4 text-muted">
+            <div className="bg-light rounded-circle p-4 d-inline-flex mb-3">
+              <BsFileEarmarkPdf size={32} className="opacity-50" />
+            </div>
+            <p className="mb-0">No file uploaded</p>
+          </div>
+        )}
+      </Card.Body>
+    </Card>
+  );
+
+  const addFileInput = (type) => {
+    if (viewMode) return;
+    if (type === 'workOrder') {
+      const newId = workOrderFiles.length > 0 ? Math.max(...workOrderFiles.map(f => f.id)) + 1 : 1;
+      setWorkOrderFiles([...workOrderFiles, { id: newId }]);
+    } else if (type === 'drawings') {
+      const newId = drawingsFiles.length > 0 ? Math.max(...drawingsFiles.map(f => f.id)) + 1 : 1;
+      setDrawingsFiles([...drawingsFiles, { id: newId }]);
     }
   };
 
-  const handleRemoveFile = (e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
+  const removeFileInput = (type, id) => {
+    if (viewMode) return;
+    if (type === 'workOrder') {
+      setWorkOrderFiles(workOrderFiles.filter(file => file.id !== id));
+    } else if (type === 'drawings') {
+      setDrawingsFiles(drawingsFiles.filter(file => file.id !== id));
     }
-    setFileSelected(false);
-    
-    // Create a proper event object to clear the file
-    const fakeEvent = {
-      target: {
-        files: [],
-        value: '',
-        name: name
-      }
-    } as any;
-    
-    if (onChange) {
-      onChange(fakeEvent);
-    }
-    
-    // Also clear errors if function exists
-    if (clearErrors) {
-      clearErrors(name);
-    }
+    setValue(`${type}_file_${id}`, null);
+    setValue(`${type}_desc_${id}`, "");
+    clearErrors([`${type}_file_${id}`, `${type}_desc_${id}`]);
   };
 
-  const getFileIcon = (fileName: string) => {
-    if (!fileName || typeof fileName !== 'string') {
-      return <FaFileImage className="text-primary" size={14} />;
-    }
-    
-    const lowerFileName = fileName.toLowerCase();
-    if (lowerFileName.includes('.pdf')) {
-      return <FaFilePdf className="text-danger" size={14} />;
-    }
-    return <FaFileImage className="text-success" size={14} />;
-  };
-
-  const getFileName = (file: any) => {
-    if (!file) return label; // Show label name when no file
-    if (file.name) return file.name;
-    if (file.fileName) return file.fileName;
-    return label; // Fallback to label name
+  const handleDownload = (fileName) => {
+    const link = document.createElement('a');
+    link.href = '#';
+    link.download = fileName;
+    link.click();
   };
 
   return (
-    <Form.Group className={`mb-3 ${className}`} controlId={name}>
-      <Form.Label className="fw-semibold text-dark mb-2" style={{ fontSize: '0.9rem' }}>
-        {label}
-        {required && <span className="text-danger ms-1">*</span>}
-      </Form.Label>
-      
-      <div className="d-flex align-items-stretch gap-2">
-        <label
-          htmlFor={name}
-          className={`btn ${hasError ? 'btn-outline-danger' : 'btn-outline-primary'} btn-sm d-flex align-items-center justify-content-center`}
-          style={{
-            cursor: disabled ? 'not-allowed' : 'pointer',
-            opacity: disabled ? 0.6 : 1,
-            minWidth: '90px',
-            padding: '6px 10px',
-            fontSize: '0.8rem',
-            borderRadius: '6px',
-            height: '34px'
-          }}
-        >
-          <FaUpload size={11} className="me-1" />
-          {t("Choose")}
-        </label>
+    <div>
+      <Collapsible title={t("Documents")} openStat={true}>
+        <div style={{ padding: "2rem", backgroundColor: "#f8f9fa" }}>
+          <Row className="g-4">
+            <Col lg={6} md={12}>
+              <FileSection
+                title={t("Work Order")}
+                files={workOrderFiles}
+                type="workOrder"
+                icon={<BsFileEarmarkPdf className="text-primary" />}
+              />
+            </Col>
 
-        <div className="flex-grow-1 position-relative">
-          {currentFile ? (
-            <div className={`d-flex align-items-center border rounded px-2 py-1 ${hasError ? 'border-danger bg-danger-subtle' : 'border-success bg-light'}`} style={{ height: '34px' }}>
-              <div className="d-flex align-items-center flex-grow-1 me-2">
-                <FaCheckCircle className="text-success me-2 flex-shrink-0" size={12} />
-                <div className="me-2 flex-shrink-0">
-                  {getFileIcon(getFileName(currentFile))}
-                </div>
-                <span 
-                  className="text-dark fw-medium"
-                  style={{ 
-                    fontSize: '0.8rem',
-                    overflow: 'hidden', 
-                    textOverflow: 'ellipsis', 
-                    whiteSpace: 'nowrap' 
-                  }}
-                  title={getFileName(currentFile)}
-                >
-                  {getFileName(currentFile)}
-                </span>
-              </div>
-              <button
-                type="button"
-                className="btn btn-outline-danger btn-sm rounded-circle p-0 d-flex align-items-center justify-content-center position-absolute"
-                onClick={handleRemoveFile}
-                disabled={disabled}
-                style={{ 
-                  width: '22px', 
-                  height: '22px', 
-                  fontSize: '0.7rem',
-                  right: '4px',
-                  top: '50%',
-                  transform: 'translateY(-50%)',
-                  zIndex: 10
-                }}
-              >
-                <FaTimes size={9} />
-              </button>
-            </div>
-          ) : (
-            <div className={`border rounded px-2 py-1 bg-light ${hasError ? 'border-danger' : 'border-secondary'} d-flex align-items-center`} style={{ height: '34px' }}>
-              <span className="text-muted" style={{ fontSize: '0.8rem' }}>
-                {t("No file selected")}
-              </span>
-            </div>
-          )}
+            <Col lg={6} md={12}>
+              <FileSection
+                title={t("Drawings")}
+                files={drawingsFiles}
+                type="drawings"
+                icon={<BsFileEarmarkPdf className="text-success" />}
+              />
+            </Col>
+
+            <Col md={6}>
+              {viewMode ? (
+                <SingleFileSection
+                  title={t('Tonnage Booklets')}
+                  fileName={watch("tonnageBooklets")?.name}
+                  fileSize={watch("tonnageBooklets")?.size}
+                  onDownload={handleDownload}
+                  icon={<BsFileEarmarkPdf className="text-warning" />}
+                />
+              ) : (
+                <Card className="h-100 shadow-sm border-0">
+                  <Card.Header className="bg-light border-0 py-3">
+                    <h5 className="mb-0 text-primary fw-bold d-flex align-items-center">
+                      <BsFileEarmarkPdf className="text-warning me-2" />
+                      {t('Tonnage Booklets')}
+                    </h5>
+                  </Card.Header>
+                  <Card.Body className="p-3">
+                    <InputFile
+                      label={t('Tonnage Booklets')}
+                      required={true}
+                      name="tonnageBooklets"
+                      register={register("tonnageBooklets")}
+                      errors={errors}
+                      onChange={(e) => {
+                        if (e.target.files && e?.target?.files[0]) {
+                          const file = e.target.files[0];
+                          if (file.size > 10 * 1024 * 1024) {
+                            setError("tonnageBooklets", {
+                              type: 'manual',
+                              message: t('File size should not exceed 10MB')
+                            });
+                            return;
+                          }
+                          const extension = file?.name?.substring(file?.name?.lastIndexOf("."));
+                          const fileName = `Tonnage Booklets${extension}`;
+                          file.originalName = fileName;
+                          const renamedFile = renameFile(file, fileName);
+                          clearErrors("tonnageBooklets");
+                          setValue("tonnageBooklets", renamedFile, { shouldValidate: true });
+                        }
+                      }}
+                      watch={watch}
+                      accept=".pdf,.jpg,.jpeg,.png"
+                      defaultValue={watch("tonnageBooklets")}
+                      clearErrors={clearErrors}
+                    />
+                  </Card.Body>
+                </Card>
+              )}
+            </Col>
+
+            <Col md={6}>
+              {viewMode ? (
+                <SingleFileSection
+                  title={t('Stability Booklets')}
+                  fileName={watch("stabilityBooklets")?.name}
+                  fileSize={watch("stabilityBooklets")?.size}
+                  onDownload={handleDownload}
+                  icon={<BsFileEarmarkPdf className="text-info" />}
+                />
+              ) : (
+                <Card className="h-100 shadow-sm border-0">
+                  <Card.Header className="bg-light border-0 py-3">
+                    <h5 className="mb-0 text-primary fw-bold d-flex align-items-center">
+                      <BsFileEarmarkPdf className="text-info me-2" />
+                      {t('Stability Booklets')}
+                    </h5>
+                  </Card.Header>
+                  <Card.Body className="p-3">
+                    <InputFile
+                      label={t('Stability Booklets')}
+                      required={true}
+                      name="stabilityBooklets"
+                      register={register("stabilityBooklets")}
+                      errors={errors}
+                      onChange={(e) => {
+                        if (e.target.files && e?.target?.files[0]) {
+                          const file = e.target.files[0];
+                          if (file.size > 10 * 1024 * 1024) {
+                            setError("stabilityBooklets", {
+                              type: 'manual',
+                              message: t('File size should not exceed 10MB')
+                            });
+                            return;
+                          }
+                          const extension = file?.name?.substring(file?.name?.lastIndexOf("."));
+                          const fileName = `Stability Booklets${extension}`;
+                          file.originalName = fileName;
+                          const renamedFile = renameFile(file, fileName);
+                          clearErrors("stabilityBooklets");
+                          setValue("stabilityBooklets", renamedFile, { shouldValidate: true });
+                        }
+                      }}
+                      watch={watch}
+                      accept=".pdf,.jpg,.jpeg,.png"
+                      defaultValue={watch("stabilityBooklets")}
+                      clearErrors={clearErrors}
+                    />
+                  </Card.Body>
+                </Card>
+              )}
+            </Col>
+
+            <Col md={12}>
+              <Card className="shadow-sm border-0">
+                <Card.Body className="p-4">
+                  <div className="d-flex align-items-start">
+                    <input
+                      type="checkbox"
+                      id="termsAccepted"
+                      className="me-3 mt-1"
+                      {...register("termsAccepted", { required: t('You must accept the terms and conditions') })}
+                      disabled={viewMode}
+                      // checked={viewMode ? watch("termsAccepted") : undefined}
+                       checked={viewMode ?  true: watch("termsAccepted")}
+                    />
+                    <div>
+                      <label
+                        htmlFor="termsAccepted"
+                        className="mb-0 fw-medium"
+                        style={{ color: "#333", cursor: viewMode ? "default" : "pointer", lineHeight: "1.5" }}
+                      >
+                        {t('I have thoroughly read and understood all the terms and conditions as mentioned in the Schedule.')}
+                      </label>
+                      {errors.termsAccepted && !viewMode && (
+                        <div className="text-danger small mt-2">
+                          {errors.termsAccepted.message}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </Card.Body>
+              </Card>
+            </Col>
+          </Row>
         </div>
-      </div>
-
-      <input
-        ref={fileInputRef}
-        type="file"
-        id={name}
-        onChange={handleFileChange}
-        accept={accept}
-        disabled={disabled}
-        className="d-none"
-        {...(register && register)}
-      />
-
-      {hasError ? (
-        <Form.Text className="text-danger small mt-1 d-block" style={{ fontSize: '0.75rem' }}>
-          <FaTimes size={8} className="me-1" />
-          {errors[name]?.message}
-        </Form.Text>
-      ) : (
-        <Form.Text className="text-muted small mt-1" style={{ fontSize: '0.75rem' }}>
-          {t("PDF, JPG, PNG (Max: 10MB)")}
-        </Form.Text>
-      )}
-    </Form.Group>
+      </Collapsible>
+    </div>
   );
 };
 
-export default InputFile;
+export default Documents;
+import React, { useState, useEffect } from "react";
+import { Box, Typography, Stack } from "@mui/material";
+import { useParams, useLocation, useNavigate } from "react-router-dom";
+import Stepper from "../../../common/Stepper.jsx";
+import VesselDetails from "./VesselDetails.js";
+import Documents from "./Documents.js";
+import { useForm } from "react-hook-form";
+import Invoicing from "../../../common/Invoicing.js";
+import PaymentModal from "../../../common/PaymentModal.js"; 
+import ActionDropdown from "../../../common/ActionDropdown";
+import ApprovalModal from "../../../common/ApprovalModal";
+import NewVesselRegistrationSuccess from "./newVesselRegistrationSuccess.js";
+import { useTranslation } from "react-i18next";
+import { useLanguageContext } from "../../../common/LanguageContext.js";
+import { toast } from "react-toastify";
+// import VesselRegistrationPreview from "./VesselRegistrationPreview.js";
+
+const NewVesselRegistration = () => {
+  const { t } = useTranslation();
+  const { changeLanguage } = useLanguageContext();
+  const { id } = useParams();
+  const location = useLocation();
+  const navigate = useNavigate();
+  
+  const isEditMode = !!id && location.pathname.includes('/edit/');
+  const isViewMode = !!id && location.pathname.includes('/view/');
+  const isNormalMode = !isEditMode && !isViewMode;
+  
+  const methods = useForm({ mode: "onTouched" });
+  const { trigger, getValues, setError, setValue, reset } = methods;
+
+  const [showModal, setShowModal] = useState(false);
+  const [paymentMode, setPaymentMode] = useState("offline");
+  const [challanFile, setChallanFile] = useState(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [showApprovalModal, setShowApprovalModal] = useState(false);
+  const [selectedAction, setSelectedAction] = useState("");
+
+  const actionsFromAPI = ["Approve", "Reject", "Request Changes"];
+
+
+  const staticData = {
+    ownerName: "John Doe",
+    ownerAddress: "123 Main Street, Harbor City, State 12345",
+    mobile: "9876543210",
+    email: "john.doe@example.com",
+    pan: "ABCDE1234F",
+    aadhar: "123456789012",
+    tradeLicence: "TL123456789",
+    gst: "GST123456789012",
+    grt: "500",
+    workOrderValue: "1000000",
+    vesselType: "new",
+    category: "A",
+    zone: "1",
+    supervisionAuthority: "classificationSociety",
+    purchaseType: "new",
+    classificationSociety: "Lloyd's Register Classification Society",
+    constructedBy: "2",
+    builder: "builder1",
+    builderName: "ABC Marine Shipyard Pvt Ltd",
+    builderAddress: "456 Port Road, Shipyard Complex, Harbor City 54321",
+    builderEmail: "contact@abcshipyard.com",
+    builderMobile: "9876543211",
+    builderTradeLicence: "BTL789012345",
+    builderGST: "BGST987654321098",
+    builderAuth: "auth",
+    termsAccepted: true,
+    
+    // Work Order Files (50 files)
+    ...Array.from({ length: 50 }, (_, i) => ({
+      [`workOrder_file_${i + 1}`]: { 
+        name: `Work_Order_Document_${String(i + 1).padStart(2, '0')}.pdf`, 
+        size: Math.floor(Math.random() * 2000000) + 500000 
+      },
+      [`workOrder_desc_${i + 1}`]: `Work order document ${i + 1} - ${[
+        'Main contract document',
+        'Amendment and modifications',
+        'Technical specifications',
+        'Timeline and milestones',
+        'Budget breakdown',
+        'Quality requirements',
+        'Safety protocols',
+        'Environmental compliance',
+        'Material specifications',
+        'Equipment details'
+      ][i % 10]}`
+    })).reduce((acc, curr) => ({ ...acc, ...curr }), {}),
+    
+    // Drawing Files (50 files)
+    ...Array.from({ length: 50 }, (_, i) => ({
+      [`drawings_file_${i + 1}`]: { 
+        name: `Technical_Drawing_${String(i + 1).padStart(2, '0')}.pdf`, 
+        size: Math.floor(Math.random() * 3000000) + 800000 
+      },
+      [`drawings_desc_${i + 1}`]: `Technical drawing ${i + 1} - ${[
+        'General arrangement plan',
+        'Hull structure details',
+        'Machinery layout',
+        'Electrical schematic',
+        'Piping diagram',
+        'Safety equipment layout',
+        'Navigation equipment',
+        'Interior arrangement',
+        'Deck plan',
+        'Cross-section view'
+      ][i % 10]}`
+    })).reduce((acc, curr) => ({ ...acc, ...curr }), {}),
+    
+    tonnageBooklets: { name: "Tonnage_Booklets.pdf", size: 512000 },
+    stabilityBooklets: { name: "Stability_Booklets.pdf", size: 768000 },
+    authLetter: { name: "Authorization_Letter.pdf", size: 256000 }
+  };
+
+  useEffect(() => {
+    if (isNormalMode) {
+      reset();
+    } else if (isEditMode || isViewMode) {
+      setTimeout(() => {
+        Object.keys(staticData).forEach(key => {
+          setValue(key, staticData[key]);
+        });
+      }, 100);
+    }
+  }, [isEditMode, isViewMode, isNormalMode, setValue, reset, location.pathname]);
+
+ 
+  const handleActionClick = (action) => {
+    setSelectedAction(action);
+    setShowApprovalModal(true);
+  };
+
+  const handleActionSubmit = (formData) => {
+    const payload = {
+      action: selectedAction,
+      comments: formData.comments,
+    };
+    
+    console.log("Action submitted:", payload);
+    toast.success(`${selectedAction} action submitted successfully`);
+    
+    setShowApprovalModal(false);
+    setSelectedAction("");
+  };
+
+  const handleCloseModal = () => {
+    setShowApprovalModal(false);
+    setSelectedAction("");
+  };
+
+ 
+  const handleChallanUpload = (e) => {
+    setChallanFile(e.target.files?.[0] || null);
+  };
+
+  const handleOnlinePay = () => {
+    setIsLoading(true);
+    setShowModal(false);
+   
+    setTimeout(() => {
+      setIsLoading(false);
+      navigate("/new-vessel/registration-success", { 
+        state: { registrationId: "VR2024001" }
+      });
+    }, 1500);
+  };
+
+  const handleOfflineSubmit = () => {
+    setShowModal(false);
+    setIsLoading(true);
+    
+    setTimeout(() => {
+      setIsLoading(false);
+      navigate("/new-vessel/registration-success", { 
+        state: { registrationId: "VR2024001" }
+      });
+    }, 1500);
+  };
+
+  const handlePayNow = () => {
+    setShowModal(true);
+  };
+
+  // Validation functions
+  const validateVesselDetails = async () => {
+    if (isViewMode) return true;
+    const basicFields = [
+      "ownerName", "ownerAddress", "mobile", "email", "pan", 
+      "aadhar", "tradeLicence", "gst", "grt", "workOrderValue",
+      "vesselType", "category", "purchaseType", "constructedBy"
+    ];
+    
+    const constructedBy = getValues("constructedBy");
+    if (constructedBy === "2") {
+      basicFields.push(
+        "builderName", "builderAddress", "builderEmail", 
+        "builderMobile", "builderTradeLicence", "builderGST", 
+        "builderAuth", "authLetter"
+      );
+    }
+    
+    const valid = await trigger(basicFields);
+    return valid;
+  };
+
+  const validateDocuments = async () => {
+    if (isViewMode) return true;
+    const requiredFields = ['tonnageBooklets', 'stabilityBooklets', 'termsAccepted'];
+    const constructedBy = getValues("constructedBy");
+    
+    if (constructedBy === "2") {
+      requiredFields.push('authLetter');
+    }
+    
+    let hasErrors = false;
+    
+    requiredFields.forEach(fieldName => {
+      const fieldValue = getValues(fieldName);
+      
+      if (!fieldValue || (fieldValue instanceof FileList && fieldValue.length === 0)) {
+        setError(fieldName, {
+          type: 'required',
+          message: `${fieldName} is required`
+        });
+        hasErrors = true;
+      }
+    });
+    
+    return !hasErrors;
+  };
+
+  const supervisionAuthority = methods.watch("supervisionAuthority");
+
+  const steps = isViewMode ? [
+    {
+      label: t("Vessel Details"),
+      component: <VesselDetails formMethods={methods} viewMode={isViewMode} />,
+      validate: validateVesselDetails,
+    },
+    {
+      label: t("Documents"),
+      component: <Documents formMethods={methods} viewMode={isViewMode} editMode={isEditMode} />,
+      validate: validateDocuments,
+    }
+  ] : [
+    {
+      label: t("Vessel Details"),
+      component: <VesselDetails formMethods={methods} viewMode={isViewMode} />,
+      validate: validateVesselDetails,
+    },
+    {
+      label: t("Documents"),
+      component: <Documents formMethods={methods} viewMode={isViewMode} editMode={isEditMode} />,
+      validate: validateDocuments,
+    },
+    //  {
+    //   label : t("Preview"),
+    //   component: <VesselRegistrationPreview formData={methods.getValues()} isPreview={true}
+    // />
+    // },
+    {
+      label: t("Invoicing"),
+      component: (
+        <Invoicing
+          supervisionAuthority={supervisionAuthority}
+          onPayNow={handlePayNow}
+        />
+      ),
+      validate: () => true,
+    },
+  ];
+
+  const handleSave = () => {
+    setIsLoading(true);
+    setTimeout(() => {
+      setIsLoading(false);
+      navigate("/new-vessel/registration-success", { 
+        state: { registrationId: "VR2024001" }
+      });
+    }, 1500);
+  };
+
+  const actionDropdown = isViewMode ? (
+    <ActionDropdown
+      actions={actionsFromAPI}
+      onActionClick={handleActionClick}
+      variant="contained"
+      sx={{
+        backgroundColor: "#2E57A7",
+        fontWeight: "bold",
+        borderRadius: "0.5rem",
+        minWidth: "8rem",
+        fontSize: "0.9rem",
+        color: "#fff",
+        "&:hover": {
+          backgroundColor: "#1f4ea0",
+        },
+      }}
+    />
+  ) : null;
+
+  return (
+    <Box sx={{ padding: "1rem 0 0 0.75rem", backgroundColor: "#f5f6fa", minHeight: "100vh" }}>
+      {isLoading ? (
+        <div className="d-flex justify-content-center align-items-center" style={{ height: "80vh" }}>
+          <div className="text-center">
+            <div className="spinner-border text-primary" role="status" style={{ width: "3rem", height: "3rem" }}>
+              <span className="visually-hidden">Loading...</span>
+            </div>
+            <p className="mt-3">Processing your request...</p>
+          </div>
+        </div>
+      ) : (
+        <>
+          <Stack spacing={0.5}>
+            <Typography
+              sx={{
+                fontWeight: 550,
+                color: "#2E57A7",
+                fontSize: "1.2rem",
+              }}
+            >
+             {isViewMode ? t("View Vessel Registration") + ` - ${id}` : 
+              isEditMode ? t("Edit Vessel Registration") + ` - ${id}` : t("New Vessel Registration")}
+              &nbsp;
+              <span style={{ color: "#666", fontSize: "0.65rem" }}>
+                {isViewMode ? t("(View vessel registration details)") :
+                 isEditMode ? t("(Update vessel registration details)") : t("(Fill in the vessel details to complete registration)")}
+              </span>
+            </Typography>
+          </Stack>
+          
+          <Stepper 
+            steps={steps} 
+            onSave={handleSave} 
+            viewMode={isViewMode}
+            actionComponent={actionDropdown}
+            onPayNow={handlePayNow}
+          />
+          
+          {!isViewMode && (
+            <PaymentModal
+              show={showModal}
+              onHide={() => setShowModal(false)}
+              paymentMode={paymentMode}
+              setPaymentMode={setPaymentMode}
+              challanFile={challanFile}
+              onChallanUpload={handleChallanUpload}
+              onOnlinePay={handleOnlinePay}
+              onOfflineSubmit={handleOfflineSubmit}
+              isLoading={isLoading}
+              formMethods={methods}
+            />
+          )}
+          
+          {isViewMode && (
+            <ApprovalModal
+              show={showApprovalModal}
+              handleClose={handleCloseModal}
+              handleSubmitData={handleActionSubmit}
+              selectedAction={selectedAction}
+            />
+          )}
+        </>
+      )}
+    </Box>
+  );
+};
+
+export default NewVesselRegistration;
+import React, { useState, useEffect, useRef, useCallback } from "react";
+import { useForm } from "react-hook-form";
+import { Row, Col } from "react-bootstrap";
+import InputText from "../../../common/InputText.tsx";
+import InputSelect from "../../../common/InputSelect.tsx";
+import InputRadio from "../../../common/InputRadio.tsx";
+import InputFile from "../../../common/InputFile.tsx";
+import Collapsible from "../../../common/Collapsible.js";
+import { useTranslation } from "react-i18next";
+import { useLanguageContext } from "../../../common/LanguageContext.js";
+import { renameFile } from "../../../../utils/constants.ts";
+import { BsDownload } from "react-icons/bs";
+
+const VesselDetails = ({ formMethods, viewMode = false }) => {
+  const { t } = useTranslation();
+  const { changeLanguage } = useLanguageContext();
+  const [formData, setFormData] = useState({});
+
+  const defaultValues = {
+    ownerName: "",
+    ownerAddress: "",
+    mobile: "",
+    email: "",
+    pan: "",
+    aadhar: "",
+    tradeLicence: "",
+    gst: "",
+    grt: "",
+    workOrderValue: "",
+    vesselType: "",
+    category: "",
+    zone: "",
+    supervisionAuthority: "",
+    purchaseType: "",
+    classificationSociety: "",
+    constructedBy: "",
+    builder: "",
+    builderName: "",
+    builderAddress: "",
+    builderEmail: "",
+    builderMobile: "",
+    builderTradeLicence: "",
+    builderGST: "",
+    builderAuth: "",
+    authLetter: "",
+    termsAccepted: false,
+    tonnageBooklets: null,
+    stabilityBooklets: null,
+  };
+
+  const internalFormMethods = useForm({
+    defaultValues,
+    mode: "onTouched",
+  });
+
+  const methods = formMethods || internalFormMethods;
+
+  const isCompMount = useRef(true);
+
+  const {
+    register,
+    watch,
+    setValue,
+    clearErrors,
+    trigger,
+    getValues,
+    setError,
+    formState: { errors },
+  } = methods;
+
+  const constructedBy = watch("constructedBy");
+  const category = watch("category");
+
+  useEffect(() => {
+    if (isCompMount.current) {
+      isCompMount.current = false;
+      return;
+    }
+    const fieldsWithErrors = Object.keys(errors);
+    trigger(fieldsWithErrors);
+  }, [changeLanguage]);
+
+  useEffect(() => {
+    setTimeout(() => {
+      Object.keys(formData).forEach((key) => {
+        if (formData[key] !== undefined) {
+          setValue(key, formData[key], { shouldValidate: false });
+        }
+      });
+    }, 0);
+  }, [setValue, formData]);
+
+  const handleInputChange = useCallback(
+    (name, value) => {
+      setValue(name, value, { shouldValidate: true });
+      clearErrors(name);
+      setFormData((prev) => ({
+        ...prev,
+        [name]: value,
+      }));
+    },
+    [setValue, clearErrors]
+  );
+
+  const handleFileChange = useCallback(
+    (name, file) => {
+      if (!file) return;
+
+      const validTypes = [
+        "application/pdf",
+        "image/jpeg",
+        "image/png",
+        "image/jpg",
+      ];
+      if (!validTypes.includes(file.type)) {
+        setError(name, {
+          type: "manual",
+          message: t("Only PDF, JPG or PNG files are allowed"),
+        });
+        setValue(name, null);
+        return;
+      }
+
+      if (file.size > 10 * 1024 * 1024) {
+        setError(name, {
+          type: "manual",
+          message: t("File size should not exceed 10MB"),
+        });
+        setValue(name, null);
+        return;
+      }
+
+      const extension = file?.name?.substring(file?.name?.lastIndexOf("."));
+      const fileName = `${name}${extension}`;
+      file.originalName = fileName;
+      const renamedFile = renameFile(file, fileName);
+
+      clearErrors(name);
+      setValue(name, renamedFile, { shouldValidate: true });
+      setFormData((prev) => ({
+        ...prev,
+        [name]: renamedFile,
+      }));
+    },
+    [setValue, clearErrors, setError, t]
+  );
+
+  useEffect(() => {
+    if (category === "A") {
+      setValue("zone", "1", { shouldValidate: true });
+      setValue("supervisionAuthority", "classificationSociety", {
+        shouldValidate: true,
+      });
+      clearErrors("zone");
+      clearErrors("supervisionAuthority");
+    }
+  }, [category, setValue, clearErrors]);
+
+  const handleDownload = (fileName) => {
+    const link = document.createElement("a");
+    link.href = "#";
+    link.download = fileName;
+    link.click();
+  };
+
+  return (
+    <form autoComplete="off">
+      <Collapsible title={t("Basic Information")} openStat={true}>
+        <Row className="gy-3" style={{ padding: "1rem" }}>
+          <Col md={4}>
+            <InputText
+              label={t("Name of Owner")}
+              required={true}
+              name="ownerName"
+              placeholder={t("Please enter Name of Owner")}
+              register={register("ownerName", {
+                required: t("Name is required"),
+              })}
+              errors={errors}
+              disabled={viewMode}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("Address of Owner")}
+              required={true}
+              name="ownerAddress"
+              placeholder={t("Please enter Address of Owner")}
+              register={register("ownerAddress", {
+                required: t("Address is required"),
+              })}
+              errors={errors}
+              disabled={viewMode}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("Mobile")}
+              required={true}
+              name="mobile"
+              placeholder={t("Please enter Mobile")}
+              register={register("mobile", {
+                required: t("Mobile is required"),
+              })}
+              errors={errors}
+              disabled={viewMode}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("Email Id")}
+              required={true}
+              name="email"
+              type="email"
+              placeholder={t("Please enter Email Id")}
+              register={register("email", { required: t("Email is required") })}
+              errors={errors}
+              disabled={viewMode}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("PAN")}
+              required={true}
+              name="pan"
+              placeholder={t("Please enter PAN")}
+              register={register("pan", { required: t("PAN is required") })}
+              errors={errors}
+              disabled={viewMode}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("Aadhar")}
+              required={true}
+              name="aadhar"
+              placeholder={t("Please enter Aadhar")}
+              register={register("aadhar", {
+                required: t("Aadhar is required"),
+              })}
+              errors={errors}
+              disabled={viewMode}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("Trade Licence")}
+              required={true}
+              name="tradeLicence"
+              placeholder={t("Please enter Trade Licence")}
+              register={register("tradeLicence", {
+                required: t("Trade Licence is required"),
+              })}
+              errors={errors}
+              disabled={viewMode}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("GST")}
+              required={true}
+              name="gst"
+              placeholder={t("Please enter GST")}
+              register={register("gst", { required: t("GST is required") })}
+              errors={errors}
+              disabled={viewMode}
+            />
+          </Col>
+        </Row>
+      </Collapsible>
+
+      <Collapsible title={t("Vessel Details")} openStat={true}>
+        <Row className="gy-3" style={{ padding: "1rem" }}>
+          <Col md={4}>
+            <InputSelect
+              label={t("Type of Vessel")}
+              required={true}
+              name="vesselType"
+              options={[
+                { value: "new", label: t("New Vessel") },
+                { value: "old", label: t("Old Vessel") },
+              ]}
+              register={register("vesselType", {
+                required: t("vesselType is required"),
+              })}
+              errors={errors}
+              value={formData.vesselType || watch("vesselType") || ""}
+              onChange={(value) =>
+                !viewMode && handleInputChange("vesselType", value)
+              }
+              disabled={viewMode}
+            />
+          </Col>
+          <Col md={4}>
+            <InputSelect
+              label={t("Category")}
+              required={true}
+              name="category"
+              options={[
+                { value: "A", label: t("Category A") },
+                { value: "B", label: t("Category B") },
+                { value: "C", label: t("Category C") },
+              ]}
+              register={register("category", {
+                required: t("category is required"),
+              })}
+              errors={errors}
+              value={formData.category || watch("category") || ""}
+              onChange={(value) =>
+                !viewMode && handleInputChange("category", value)
+              }
+              disabled={viewMode}
+            />
+          </Col>
+          <Col md={4}>
+            <InputSelect
+              label={t("Zone")}
+              required={true}
+              name="zone"
+              options={[
+                { value: "1", label: t("Zone 1") },
+                { value: "2", label: t("Zone 2") },
+                { value: "3", label: t("Zone 3") },
+              ]}
+              register={register("zone", {
+                required: category !== "A" && t("zone is required"),
+              })}
+              errors={errors}
+              value={formData.zone || watch("zone") || ""}
+              onChange={(value) =>
+                !viewMode && handleInputChange("zone", value)
+              }
+              disabled={viewMode || category === "A"}
+            />
+          </Col>
+
+          <Col md={4}>
+            <InputText
+              label={t("Gross Tonnage (GRT)")}
+              required={true}
+              name="grt"
+              placeholder={t("Please enter GRT")}
+              register={register("grt", { required: t("GRT is required") })}
+              errors={errors}
+              disabled={viewMode}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("Work Order Value")}
+              required={true}
+              name="workOrderValue"
+              placeholder={t("Enter Work Order Value")}
+              register={register("workOrderValue", {
+                required: t("Work Order Value is required"),
+                pattern: {
+                  value: /^[0-9]+$/,
+                  message: t("Please enter a valid number"),
+                },
+              })}
+              errors={errors}
+              disabled={viewMode}
+            />
+          </Col>
+
+          <Col md={4}>
+            <InputSelect
+              label={t("Supervision Authority")}
+              required={true}
+              name="supervisionAuthority"
+              options={[
+                { value: "iwt", label: t("IWT") },
+                {
+                  value: "classificationSociety",
+                  label: t("Classification Society"),
+                },
+              ]}
+              register={register("supervisionAuthority", {
+                required:
+                  category !== "A" && t("Supervision Authority is required"),
+              })}
+              errors={errors}
+              value={
+                formData.supervisionAuthority ||
+                watch("supervisionAuthority") ||
+                ""
+              }
+              onChange={(value) =>
+                !viewMode && handleInputChange("supervisionAuthority", value)
+              }
+              disabled={viewMode || category === "A"}
+            />
+          </Col>
+          <Col md={4}>
+            <InputSelect
+              label={t("Purchase Type")}
+              required={true}
+              name="purchaseType"
+              options={[
+                { value: "new", label: t("New") },
+                { value: "used", label: t("Used") },
+              ]}
+              register={register("purchaseType", {
+                required: t("Purchase Type is required"),
+              })}
+              errors={errors}
+              value={formData.purchaseType || watch("purchaseType") || ""}
+              onChange={(value) =>
+                !viewMode && handleInputChange("purchaseType", value)
+              }
+              disabled={viewMode}
+            />
+          </Col>
+          <Col md={5}>
+            <InputText
+              label={t("Name of the Classification Society")}
+              name="classificationSociety"
+              placeholder={t("Please enter Name of the Classification Society")}
+              register={register("classificationSociety")}
+              errors={errors}
+              disabled={viewMode}
+            />
+          </Col>
+          <Col md={6} style={{ paddingTop: "1rem" }}>
+            <InputRadio
+              name="constructedBy"
+              label={t("Constructed By ?")}
+              options={[
+                { label: t("Self"), value: "1" },
+                { label: t("Builder"), value: "2" },
+              ]}
+              register={register}
+              rules={{ required: t("Please select a Constructor Type") }}
+              errors={errors}
+              onChange={() => !viewMode && clearErrors("constructedBy")}
+              disabled={viewMode}
+            />
+          </Col>
+          {constructedBy === "2" && (
+            <Col md={6}>
+              <InputSelect
+                label={t("Builder")}
+                required={true}
+                name="builder"
+                options={[
+                  { value: "builder1", label: t("Builder 1") },
+                  { value: "builder2", label: t("Builder 2") },
+                ]}
+                register={register("builder", {
+                  required: t("Builder is required"),
+                })}
+                errors={errors}
+                value={formData.builder || watch("builder") || ""}
+                onChange={(value) =>
+                  !viewMode && handleInputChange("builder", value)
+                }
+                disabled={viewMode}
+              />
+            </Col>
+          )}
+        </Row>
+      </Collapsible>
+
+      {constructedBy === "2" && (
+        <Collapsible title={t("Builder Details")} openStat={true}>
+          <Row className="gy-3" style={{ padding: "1rem" }}>
+            <Col md={4}>
+              <InputText
+                label={t("Builder Name")}
+                required={true}
+                name="builderName"
+                placeholder={t("Please enter Builder Name")}
+                register={register("builderName", {
+                  required: t("Builder Name is required"),
+                })}
+                errors={errors}
+                disabled={viewMode}
+              />
+            </Col>
+            <Col md={4}>
+              <InputText
+                label={t("Builder Address")}
+                required={true}
+                name="builderAddress"
+                placeholder={t("Please enter Builder Address")}
+                register={register("builderAddress", {
+                  required: t("Builder Address is required"),
+                })}
+                errors={errors}
+                disabled={viewMode}
+              />
+            </Col>
+            <Col md={4}>
+              <InputText
+                label={t("Builder Email Id")}
+                required={true}
+                name="builderEmail"
+                type="email"
+                placeholder={t("Please enter Builder Email Id")}
+                register={register("builderEmail", {
+                  required: t("Builder Email is required"),
+                  pattern: {
+                    value: /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i,
+                    message: t("Invalid email address"),
+                  },
+                })}
+                errors={errors}
+                disabled={viewMode}
+              />
+            </Col>
+            <Col md={4}>
+              <InputText
+                label={t("Mobile")}
+                required={true}
+                name="builderMobile"
+                placeholder={t("Please enter Mobile")}
+                register={register("builderMobile", {
+                  required: t("Builder Mobile is required"),
+                  pattern: {
+                    value: /^[0-9]{10}$/,
+                    message: t("Invalid mobile number"),
+                  },
+                })}
+                errors={errors}
+                disabled={viewMode}
+              />
+            </Col>
+            <Col md={4}>
+              <InputText
+                label={t("Trade Licence")}
+                required={true}
+                name="builderTradeLicence"
+                placeholder={t("Please enter Trade Licence")}
+                register={register("builderTradeLicence", {
+                  required: t("Builder Trade Licence is required"),
+                })}
+                errors={errors}
+                disabled={viewMode}
+              />
+            </Col>
+            <Col md={4}>
+              <InputText
+                label={t("GST")}
+                required={true}
+                name="builderGST"
+                placeholder={t("Please enter GST")}
+                register={register("builderGST", {
+                  required: t("Builder GST is required"),
+                })}
+                errors={errors}
+                disabled={viewMode}
+              />
+            </Col>
+            <Col md={4}>
+              <InputSelect
+                label={t("Builder Authorization")}
+                required={true}
+                name="builderAuth"
+                options={[
+                  { value: "auth", label: t("Authorized") },
+                  { value: "rejected", label: t("Rejected") },
+                ]}
+                register={register("builderAuth", {
+                  required: t("Builder Authorization is required"),
+                })}
+                errors={errors}
+                value={formData.builderAuth || watch("builderAuth") || ""}
+                onChange={(value) =>
+                  !viewMode && handleInputChange("builderAuth", value)
+                }
+                disabled={viewMode}
+              />
+            </Col>
+            <Col md={6}>
+              {viewMode ? (
+                watch("authLetter") && watch("authLetter").name ? (
+                  <div className="mb-3">
+                    <label className="form-label fw-bold">
+                      {t("Authorization Letter")}
+                    </label>
+                    <div
+                      className="mb-2 p-2 border rounded"
+                      style={{ backgroundColor: "#f8f9fa" }}
+                    >
+                      <div className="d-flex justify-content-between align-items-center">
+                        <div className="flex-grow-1">
+                          <strong className="text-primary small">
+                            {watch("authLetter").name}
+                          </strong>
+                        </div>
+                        <button
+                          type="button"
+                          className="btn btn-outline-primary btn-sm"
+                          onClick={() =>
+                            handleDownload(watch("authLetter").name)
+                          }
+                        >
+                          <BsDownload size={14} />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ) : null
+              ) : (
+                <div className="mb-2">
+                  <InputFile
+                    label={t("Authorization Letter")}
+                    required={true}
+                    name="authLetter"
+                    register={register("authLetter", {
+                      required: t("Authorization Letter is required"),
+                    })}
+                    errors={errors}
+                    onChange={(e) => {
+                      if (viewMode) return;
+                      if (e.target.files && e?.target?.files[0]) {
+                        handleFileChange("authLetter", e.target.files[0]);
+                      }
+                    }}
+                    disabled={viewMode}
+                    watch={watch}
+                    defaultValue={watch("authLetter")}
+                    clearErrors={clearErrors}
+                    accept=".pdf,.jpg,.jpeg,.png"
+                  />
+                </div>
+              )}
+            </Col>
+          </Row>
+        </Collapsible>
+      )}
+    </form>
+  );
+};
+
+export default VesselDetails;
