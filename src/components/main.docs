@@ -1,68 +1,91 @@
-import React, { useRef, useState, useEffect } from "react";
-import { useNavigate, useParams, useLocation } from "react-router-dom";
-import { useForm, useFieldArray, Controller } from "react-hook-form";
-import { Container, Row, Col, Card, Button } from "react-bootstrap";
-import { toast } from "react-toastify";
-import { useLanguageContext } from "../../../common/LanguageContext.js";
+import React, { useState, useEffect, useRef } from "react";
+import { useForm, FormProvider } from "react-hook-form";
 import { useTranslation } from "react-i18next";
-import i18n from "i18next";
+import { NavDropdown } from "react-bootstrap";
+import { MdOutlineLanguage } from "react-icons/md";
+
+import {
+  Container,
+  Row,
+  Col,
+  Form,
+  Button,
+  Card,
+  Image,
+  Alert,
+} from "react-bootstrap";
 import {
   FaUser,
-  FaMapMarkerAlt,
-  FaBriefcase,
+  FaBuilding,
   FaFileUpload,
-  FaGraduationCap,
-  FaPlus,
-  FaTrash,
+  FaCheck,
+  FaArrowRight,
   FaArrowLeft,
-  FaDownload,
-  FaArrowAltCircleLeft,
+  FaIdCard,
+  FaEnvelope,
+  FaPhone,
+  FaMapMarkerAlt,
+  FaUpload,
+  FaShip,
 } from "react-icons/fa";
-import InputText from "../../../common/InputText.tsx";
-import { handleErrorMessage } from "../../../../utils/errorMessageHandler.js";
-import InputSelect from "../../../common/InputSelect.tsx";
-import Collapsible from "../../../common/Collapsible.js";
-import { CONSTANT_REGEX, renameFile } from "../../../../utils/constants.ts";
-import { useMasterData } from "../../../context/MasterDataContext.js";
-import NewLoader from "../../../common/NewLoader.js";
-import "./EmployeeRegistration.css";
+import "./UserRegistration.css";
+import IWT_FULL_IMG from "../../../assets/images/iwt-whole.jpg";
+import { toast } from "react-toastify";
 import {
   getData,
+  postData,
   postFORMdata,
-  getBlobData,
-} from "../../../../services/http.service.ts";
-import { URLS_ENDPOINT } from "../../../../utils/urlsConstants.ts";
-import AppToggleButton from "../../../common/AppToggleButton.js";
-import axios from "axios";
+} from "../../../services/http.service.ts";
+import { URLS_ENDPOINT } from "../../../utils/urlsConstants.ts";
+import { handleErrorMessage } from "../../../utils/errorMessageHandler.js";
 import {
-  getFromLocalStorage,
-  setToLocalStorage,
-} from "../../../../utils/localStorageUtils.js";
-
+  createOwnerOrBuilderPayload,
+  mapToVesselUserDetails,
+} from "../model/mapToVesselModel.ts";
+import NewLoader from "../../common/NewLoader.js";
+import InputText from "../../common/InputText.tsx";
+import InputFile from "../../common/InputFile.tsx";
+import i18n from "i18next";
+import InputSelect from "../../common/InputSelect.tsx";
 import {
-  downloadFile,
-  getFilenameFromHeaders,
-} from "../../../../utils/fileDownload.ts";
+  MasterDataProvider,
+  useMasterData,
+} from "../../context/MasterDataContext.js";
+import { useLanguageContext } from "../../common/LanguageContext.js";
 
-const getValue = (obj, key) => {
-  if (!obj) return "";
-  if (obj[key] !== undefined) return obj[key];
-  const lowerKey = key.toLowerCase();
-  const foundKey = Object.keys(obj).find((k) => k.toLowerCase() === lowerKey);
-  return foundKey ? obj[foundKey] : "";
-};
-
-const EmployeeRegistration = () => {
-  const isCompMount = useRef(true);
+const VesselOwnerRegistrationPage = () => {
   const { i18n,t } = useTranslation();
   const { changeLanguage } = useLanguageContext();
-  const navigate = useNavigate();
-  const { id } = useParams();
-  const location = useLocation();
-  const isEditMode = !!id;
-  const loaderRef = useRef();
+  const isCompMount = useRef(true);
+
   const { masterData } = useMasterData();
-  const [employeeData, setEmployeeData] = useState("");
+
+  const [currentStep, setCurrentStep] = useState(1);
+  const [formData, setFormData] = useState({});
+  const [isSubmitted, setIsSubmitted] = useState(false);
+  const [successMessage, setSuccessMessage] = useState("");
+  const [isCompany, setIsCompany] = useState(false);
+  const [validationMessage, setValidationMessage] = useState("");
+  const loaderRef = useRef();
+  const PUBLIC_URL = process.env.REACT_APP_PUBLIC_URL;
+  const methods = useForm({
+    mode: "onBlur",
+    defaultValues: { categoryOfOwner: "", country: "India" },
+  });
+
+  const {
+    register,
+    handleSubmit,
+    formState: { errors },
+    trigger,
+    setValue,
+    getValues,
+    watch,
+    clearErrors,
+    setError,
+  } = methods;
+
+  const totalSteps = 3;
 
   useEffect(() => {
     if (isCompMount.current) {
@@ -74,226 +97,537 @@ const EmployeeRegistration = () => {
   }, [i18n.language]);
 
   useEffect(() => {
-    setEmployeeData(location?.state?.employee || "");
-  }, []);
-
-  const {
-    register,
-    handleSubmit,
-    control,
-    formState: { errors },
-    setValue,
-    watch,
-    reset,
-    clearErrors,
-    trigger,
-  } = useForm({
-    mode: "onSubmit",
-    defaultValues: {
-      firstName: "",
-      lastName: "",
-      email: "",
-      phoneNumber: "",
-      gender: "",
-      dateOfBirth: "",
-      addressLine1: "",
-      addressLine2: "",
-      pin: "",
-      district: "",
-      stateUt: "",
-      country: "India",
-      appointmentDate: "",
-      employeeType: "",
-      employeeStatus: "",
-      designation: "",
-      department: "",
-      section: "",
-      roles: "",
-      addressProof: "",
-      identityProof: "",
-      appointmentLetter: "",
-      educationDetails: [
-        {
-          qualification: "",
-          stream: "",
-          yearOfPassing: "",
-          employeeUUID: "",
-          uuid: "",
-        },
-      ],
-      isActive: true,
-    },
-  });
-
-  const [addressProofFile, setAddressProofFile] = useState(null);
-  const [identityProofFile, setIdentityProofFile] = useState(null);
-  const [appointmentLetterFile, setAppointmentLetterFile] = useState(null);
-  const [toggleValue, setToggleValue] = useState(true);
-
-  const { fields, append, remove } = useFieldArray({
-    control,
-    name: "educationDetails",
-  });
-
-  useEffect(() => {
-    if (isEditMode && employeeData) {
-      const professionalDetail = employeeData.professionalDetails?.[0] || {};
-      
-      reset({
-        firstName: getValue(employeeData, "firstName"),
-        lastName: getValue(employeeData, "lastName"),
-        email: getValue(employeeData, "emailId"),
-        phoneNumber: getValue(employeeData, "phoneNumber"),
-        gender: getValue(employeeData, "gender"),
-        dateOfBirth: getValue(employeeData, "dateOfBirth"),
-        addressLine1: getValue(employeeData, "addressLine1"),
-        addressLine2: getValue(employeeData, "addressLine2"),
-        pin: getValue(employeeData, "pin"),
-        district: getValue(employeeData, "district"),
-        stateUt: getValue(employeeData, "stateUt"),
-        country: getValue(employeeData, "country") || "India",
-        appointmentDate: getValue(professionalDetail, "appointmentDate"),
-        employeeType: getValue(professionalDetail, "employeeType"),
-        employeeStatus: getValue(professionalDetail, "employeeStatus"),
-        designation: getValue(professionalDetail, "designation"),
-        department: getValue(professionalDetail, "department"),
-        section: getValue(professionalDetail, "section"),
-        roles: getValue(professionalDetail, "role"),
-        isActive: getValue(employeeData, "isActive") ?? true,
-        educationDetails: Array.isArray(employeeData.educationDetails)
-          ? employeeData.educationDetails.map((ed) => ({
-              qualification: getValue(ed, "qualification"),
-              stream: getValue(ed, "stream"),
-              yearOfPassing: getValue(ed, "yearOfPassing"),
-              additionalEducationDetails:
-                getValue(ed, "additionalEducationDetails") || "",
-              uuid: ed?.uuid || "",
-              employeeUUID: ed?.uuid || "",
-            }))
-          : [{ qualification: "", stream: "", yearOfPassing: "" }],
+    setTimeout(() => {
+      Object.keys(formData).forEach((key) => {
+        if (formData[key] !== undefined) {
+          console.log("Setting value for", key, formData[key]);
+          setValue(key, formData[key], { shouldValidate: false });
+        }
       });
-      setToggleValue(getValue(employeeData, "isActive") ?? true);
-    } else if (!isEditMode) {
-      setToggleValue(true);
-    }
-  }, [isEditMode, reset, employeeData]);
+    }, 0);
+  }, [currentStep, setValue, formData]);
 
-  const fetchAddressDetails = async (pin) => {
+  const formFields = {
+    step1: [
+      {
+        name: "categoryOfOwner",
+        label: t("vesselOwnerRegistration.Category of Owner"),
+        type: "select",
+        options: [
+          ...(masterData?.ownerTypes?.map((type) => ({
+            value: type.valueCode,
+            label: type.valueLabel,
+            isCompany: type.isCompany,
+          })) || []),
+        ],
+        required: true,
+        icon: FaBuilding,
+        colSize: 6,
+        validation: { required: t("vesselOwnerRegistration.OwnerCatRequired") },
+      },
+      {
+        name: "ownerCompanyName",
+        label: t("vesselOwnerRegistration.Owner/Company Name"),
+        type: "text",
+        required: true,
+        icon: FaUser,
+        colSize: 6,
+        maxlength: 150,
+
+        placeholder: t("vesselOwnerRegistration.Enter owner or company name"),
+        validation: {
+          required: t("vesselOwnerRegistration.Owner name is required"),
+        },
+      },
+      {
+        name: "emailId",
+        label: t("vesselOwnerRegistration.Email ID"),
+        type: "email",
+        required: true,
+        icon: FaEnvelope,
+        maxlength: 100,
+
+        colSize: 6,
+        placeholder: t("vesselOwnerRegistration.Enter email address"),
+        validation: {
+          required: t("vesselOwnerRegistration.Email is required"),
+          pattern: {
+            value: /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i,
+            message: t("vesselOwnerRegistration.Invalid email address"),
+          },
+        },
+      },
+      {
+        name: "phoneNumber",
+        label: t("vesselOwnerRegistration.Phone Number"),
+        type: "text",
+        required: true,
+        icon: FaPhone,
+        colSize: 6,
+        maxlength: 10,
+        placeholder: t("vesselOwnerRegistration.Enter 10-digit phone number"),
+        validation: {
+          required: t("vesselOwnerRegistration.Phone number is required"),
+          pattern: {
+            value: /^[0-9]{10}$/,
+            message: t(
+              "vesselOwnerRegistration.Phone number must be 10 digits"
+            ),
+          },
+        },
+      },
+      {
+        name: "cinNo",
+        label: t("vesselOwnerRegistration.CIN Number"),
+        type: "text",
+        required: false,
+        icon: FaIdCard,
+        colSize: 6,
+        placeholder: t("vesselOwnerRegistration.Enter CIN number"),
+        validation: {
+          pattern: {
+            value: /^[A-Z]{1}[0-9]{5}[A-Z]{2}[0-9]{4}[A-Z]{3}[0-9]{6}$/,
+            message: t("vesselOwnerRegistration.Invalid CIN format"),
+          },
+        },
+        showIf: () => isCompany,
+      },
+      {
+        name: "dinNo",
+        label: t("vesselOwnerRegistration.DIN Number"),
+        type: "text",
+        required: false,
+        icon: FaIdCard,
+        colSize: 6,
+        placeholder: t("vesselOwnerRegistration.Enter DIN number"),
+        validation: {
+          pattern: {
+            value: /^[0-9]{8}$/,
+            message: t("vesselOwnerRegistration.DIN must be 8 digits"),
+          },
+        },
+        showIf: () => isCompany,
+      },
+      {
+        name: "panNo",
+        label: t("vesselOwnerRegistration.PAN Number"),
+        type: "text",
+        required: true,
+        icon: FaIdCard,
+        colSize: 6,
+        maxlength: 10,
+
+        placeholder: t(
+          "vesselOwnerRegistration.Enter PAN number (e.g., ABCDE1234F)"
+        ),
+        validation: {
+          required: t("vesselOwnerRegistration.PAN number is required"),
+          pattern: {
+            value: /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/,
+            message: t("vesselOwnerRegistration.Invalid PAN format"),
+          },
+        },
+      },
+      {
+        name: "gstNo",
+        label: t("vesselOwnerRegistration.GST Number"),
+        type: "text",
+        required: false,
+        icon: FaIdCard,
+        colSize: 6,
+        placeholder: t(
+          "vesselOwnerRegistration.Enter GST number (if applicable)"
+        ),
+        validation: {
+          pattern: {
+            value: /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/,
+            message: t("vesselOwnerRegistration.Invalid GST format"),
+          },
+        },
+      },
+      {
+        name: "addressLine1",
+        label: t("vesselOwnerRegistration.Address Line-1"),
+        type: "text",
+        required: true,
+        icon: FaMapMarkerAlt,
+        colSize: 6,
+        maxlength: 150,
+
+        placeholder: t("vesselOwnerRegistration.Enter address line 1"),
+        validation: {
+          required: t("vesselOwnerRegistration.Address is required"),
+        },
+      },
+      {
+        name: "addressLine2",
+        label: t("vesselOwnerRegistration.Address Line-2"),
+        type: "text",
+        required: false,
+        icon: FaMapMarkerAlt,
+        colSize: 6,
+        maxlength: 150,
+
+        placeholder: t(
+          "vesselOwnerRegistration.Enter address line 2 (optional)"
+        ),
+      },
+      {
+        name: "pin",
+        label: t("vesselOwnerRegistration.PIN"),
+        type: "text",
+        required: true,
+        icon: FaMapMarkerAlt,
+        colSize: 6,
+        maxlength: 6,
+        placeholder: t("vesselOwnerRegistration.Enter 6-digit PIN code"),
+        validation: {
+          required: t("vesselOwnerRegistration.PIN code is required"),
+          pattern: {
+            value: /^[0-9]{6}$/,
+            message: t("vesselOwnerRegistration.PIN must be 6 digits"),
+          },
+        },
+        onChange: (e, setValue, watch) => {
+          const changedValue = e?.target?.value || "";
+          if (changedValue?.length === 6) {
+            setValue("district", "");
+            setValue("state", "");
+            setValue("country", "India");
+            getDetailsByPIN(changedValue);
+          }
+        },
+      },
+      {
+        name: "district",
+        label: t("vesselOwnerRegistration.District"),
+        type: "text",
+        required: false,
+        icon: FaMapMarkerAlt,
+        colSize: 6,
+        placeholder: t("vesselOwnerRegistration.Please enter district"),
+      },
+      {
+        name: "state",
+        label: t("vesselOwnerRegistration.State / UT"),
+        type: "text",
+        required: false,
+        icon: FaMapMarkerAlt,
+        colSize: 6,
+        placeholder: t("vesselOwnerRegistration.Please enter state"),
+      },
+      {
+        name: "country",
+        label: t("vesselOwnerRegistration.Country"),
+        type: "text",
+        required: false,
+        disabled: true,
+        icon: FaMapMarkerAlt,
+        colSize: 6,
+        placeholder: t("vesselOwnerRegistration.Please enter country"),
+      },
+    ],
+    step2: [
+      {
+        name: "authorisedFname",
+        label: t("vesselOwnerRegistration.First Name"),
+        type: "text",
+        required: true,
+        icon: FaUser,
+        colSize: 6,
+        maxlength: 50,
+        placeholder: t("Enter first name"),
+        validation: {
+          required: t("vesselOwnerRegistration.First name is required"),
+        },
+      },
+      {
+        name: "authorisedLname",
+        maxlength: 50,
+        label: t("vesselOwnerRegistration.Last Name"),
+        type: "text",
+        required: true,
+        icon: FaUser,
+        colSize: 6,
+        placeholder: t("vesselOwnerRegistration.Enter last name"),
+        validation: {
+          required: t("vesselOwnerRegistration.Last name is required"),
+        },
+      },
+      {
+        name: "authorisedMob",
+        label: t("vesselOwnerRegistration.Primary Mobile Number"),
+        type: "text",
+        required: true,
+        icon: FaPhone,
+        colSize: 6,
+        maxlength: 10,
+        placeholder: t("vesselOwnerRegistration.Enter 10-digit mobile number"),
+        validation: {
+          required: t("vesselOwnerRegistration.Mobile number is required"),
+          pattern: {
+            value: /^[0-9]{10}$/,
+            message: t(
+              "vesselOwnerRegistration.Mobile number must be 10 digits"
+            ),
+          },
+        },
+      },
+      {
+        name: "authorisedEmail",
+        label: t("vesselOwnerRegistration.Email ID"),
+        type: "email",
+        required: true,
+        icon: FaEnvelope,
+        colSize: 6,
+        maxlength: 100,
+        placeholder: t("vesselOwnerRegistration.Enter email address"),
+        validation: {
+          required: t("vesselOwnerRegistration.Email is required"),
+          pattern: {
+            value: /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i,
+            message: t("vesselOwnerRegistration.Invalid email address"),
+          },
+        },
+      },
+      {
+        name: "authorizationLetter",
+        label: t("vesselOwnerRegistration.Letter of Authorization"),
+        type: "file",
+        required: false,
+        colSize: 12,
+      },
+    ],
+    step3: [
+      {
+        name: "panCardUpload",
+        label: t("vesselOwnerRegistration.PAN Card"),
+        type: "file",
+        required: false,
+        colSize: 6,
+      },
+      {
+        name: "gstCertificate",
+        label: t("vesselOwnerRegistration.GST Certificate"),
+        type: "file",
+        required: false,
+        colSize: 6,
+      },
+      {
+        name: "addressProof",
+        label: t("vesselOwnerRegistration.Address Proof"),
+        type: "file",
+        required: false,
+        colSize: 6,
+      },
+      {
+        name: "companyRegistrationCertificate",
+        label: t("vesselOwnerRegistration.Company Registration Certificate"),
+        type: "file",
+        required: false,
+        colSize: 6,
+      },
+      {
+        name: "companyRegistrationCertificate",
+        label: t("Company Registration Certificate"),
+        type: "file",
+        required: false,
+        colSize: 6,
+        showIf: () => isCompany,
+      },
+
+      {
+        name: "moaCertificate",
+        label: t("vesselOwnerRegistration.MOA Certificate"),
+        type: "file",
+        required: false,
+        colSize: 6,
+        validation: {},
+        showIf: () => isCompany,
+      },
+      {
+        name: "aoaCertificate",
+        label: t("vesselOwnerRegistration.AOA Certificate"),
+        type: "file",
+        required: false,
+        colSize: 6,
+        validation: {},
+        showIf: () => isCompany,
+      },
+    ],
+  };
+
+  const getDetailsByPIN = async (pinCode) => {
     try {
       const URL =
-        process.env.REACT_APP_PUBLIC_URL +
+        PUBLIC_URL +
         URLS_ENDPOINT.APP_SERVICES.GET_DETAILS_BY_PINCODE +
-        pin;
+        pinCode;
+      loaderRef.current?.show();
       const response = await getData(URL);
       if (response?.status === 200 && response?.data?.length > 0) {
         setValue("district", response?.data[0]?.district);
-        setValue("stateUt", response?.data[0]?.stateName);
-        setValue("country", "India");
+        setValue("state", response?.data[0]?.stateName);
+        loaderRef?.current?.hide();
       } else {
-        setValue("district", "");
-        setValue("stateUt", "");
-        setValue("country", "");
-        toast.info("No data found for this PIN code");
+        loaderRef?.current?.hide();
+        toast.info("No Data Found! Pleasee enter manually..", {
+          position: "top-right",
+        });
       }
-      loaderRef.current?.hide();
-    } catch (error) {
-      setValue("district", "");
-      setValue("stateUt", "");
-      setValue("country", "");
-      loaderRef.current?.hide();
-      toast.error("Error fetching address details");
+    } catch (err) {
+      console.log(err);
+      loaderRef?.current?.hide();
+      handleErrorMessage(err?.response?.data);
+    }
+  };
+  // Get fields for current step
+  const getCurrentStepFields = () => {
+    switch (currentStep) {
+      case 1:
+        return formFields.step1;
+      case 2:
+        return formFields.step2;
+      case 3:
+        return formFields.step3;
+      default:
+        return [];
     }
   };
 
-  const onSubmit = async (data) => {
-    console.log("Form Data:", data);
-    try {
-      loaderRef.current?.show();
+  const validateStep = async () => {
+    const currentFields = getCurrentStepFields();
+    const requiredFields = currentFields.filter(
+      (field) => field.required && (!field.showIf || field.showIf())
+    );
 
-      const uInfo = {
-        userType: "EMPLOYEE",
-        userBasicDetails:{},
-        employeeDetails: {
-          id: isEditMode ? employeeData?.id : "",
-          firstName: data.firstName,
-          lastName: data.lastName,
-          emailId: data.email,
-          phoneNumber: data.phoneNumber,
-          addressDetails:
-            data.addressLine1 +
-            (data.addressLine2 ? ", " + data.addressLine2 : ""),
-          addressLine1: data.addressLine1,
-          addressLine2: data.addressLine2,
-          pin: data.pin,
-          district: data.district,
-          stateUt: data.stateUt,
-          country: data.country,
-          isActive: data?.isActive,
-          dateOfBirth: data.dateOfBirth,
-          gender: data.gender,
-          appointmentDate: data.appointmentDate,
-          employeeType: data.employeeType,
-          employeeStatus: data.employeeStatus,
-          designation: data.designation,
-          department: data.department,
-          section: data.section,
-          role: data.roles,
-          educationDetails: data?.educationDetails?.map((ed) => ({
-            uuid: isEditMode ? ed.uuid : "",
-            qualification: ed.qualification,
-            stream: ed.stream,
-            yearOfPassing: ed.yearOfPassing,
-            additionalEducationDetails: ed.additionalEducationDetails || "",
-          })),
-        },
-      };
-
-      const formData = new FormData();
-      formData.append(
-        "request",
-        new Blob([JSON.stringify(uInfo)], {
-          type: "application/json",
-        })
-      );
-
-      [addressProofFile, identityProofFile, appointmentLetterFile].forEach(
-        (file) => {
-          if (file) {
-            formData.append("files", file);
-          }
+    // Set errors for empty required fields
+    requiredFields.forEach((field) => {
+      const value = getValues(field.name);
+      if (!value || value === "") {
+        setError(field.name, {
+          type: "required",
+          message: `${field.label} is required`,
+        });
+      } else if (field.validation && field.validation.pattern) {
+        const pattern = field.validation.pattern.value;
+        if (!pattern.test(value)) {
+          setError(field.name, {
+            type: "pattern",
+            message: field.validation.pattern.message,
+          });
         }
-      );
+      }
+    });
 
-      await submitEmpDetails(formData);
-    } catch (error) {
-      loaderRef.current?.hide();
-      toast.error(
-        error?.response?.data?.message ||
-          "Error submitting form. Please try again."
-      );
+    // Validate all fields in the current step
+    const fieldsToValidate = currentFields
+      .filter((field) => !field.showIf || field.showIf())
+      .map((field) => field.name);
+
+    return await trigger(fieldsToValidate);
+  };
+
+  const handleNext = async () => {
+    const isStepValid = await validateStep();
+
+    if (isStepValid) {
+      setValidationMessage("");
+
+      const currentValues = getValues();
+      console.log("Current values before next step:", currentValues);
+
+      setFormData((prev) => {
+        const newFormData = { ...prev };
+
+        Object.keys(currentValues).forEach((key) => {
+          if (currentValues[key] !== undefined) {
+            newFormData[key] = currentValues[key];
+          }
+        });
+
+        console.log("Updated formData:", newFormData);
+        return newFormData;
+      });
+
+      if (currentStep < totalSteps) {
+        setCurrentStep(currentStep + 1);
+        window.scrollTo(0, 0);
+      } else {
+        handleSubmit(onSubmit)();
+      }
     }
   };
 
-  const submitEmpDetails = async (payload) => {
+  const handlePrevious = () => {
+    const currentValues = getValues();
+
+    const fileFields = getCurrentStepFields().filter(
+      (field) => field.type === "file"
+    );
+    fileFields.forEach((field) => {
+      if (currentValues[field.name]) {
+        setFormData((prev) => ({
+          ...prev,
+          [field.name]: currentValues[field.name],
+        }));
+      }
+    });
+
+    setFormData((prev) => ({ ...prev, ...currentValues }));
+
+    setCurrentStep(Math.max(1, currentStep - 1));
+    window.scrollTo(0, 0);
+    setValidationMessage("");
+  };
+
+  const onSubmit = (data) => {
+    const finalData = { ...formData, ...data };
+    // console.log(finalData, "finalDatapayload");
+
+    const payload = createOwnerOrBuilderPayload("VESSEL_OWNER", {
+      ...finalData,
+    });
+
+    const files = [
+      finalData?.addressProof,
+      finalData?.panCardUpload,
+      finalData?.gstCertificate,
+      finalData?.authorizationLetter,
+      finalData?.companyRegistrationCertificate,
+      finalData?.moaCertificate,
+      finalData?.aoaCertificate,
+    ];
+    const fd = new FormData();
+
+    fd.append(
+      "request",
+      new Blob([JSON.stringify(payload)], { type: "application/json" })
+    );
+    files?.forEach((file) => {
+      if (file) {
+        fd.append(`files`, file);
+      }
+    });
+    submitUserDetails(fd);
+  };
+
+  const submitUserDetails = async (payload) => {
     try {
       const URL =
-        process.env.REACT_APP_AUTH_URL + URLS_ENDPOINT.USER_SERVICE.CREATE_UPDATE_EMP;
-
+        process.env.REACT_APP_AUTH_URL +
+        URLS_ENDPOINT.USER_SERVICE.CREATE_UPDATE_USER;
       loaderRef.current?.show();
       const response = await postFORMdata(URL, payload);
-      const apiRes = response?.data ? { ...response?.data } : null;
-      console.log("API Response:employee", apiRes);
-
-      if (apiRes?.responseStatus?.status === "200") {
+      const apiRes = { ...response?.data };
+      if (
+        response?.status === 200 &&
+        apiRes?.responseStatus?.status === "200"
+      ) {
         loaderRef?.current?.hide();
-        toast.success(
-          apiRes?.responseStatus?.message ||
-            (isEditMode
-              ? "Employee updated successfully!"
-              : "Employee registered successfully!"),
-          { position: "top-right" }
-        );
-        handleCancel();
+        setIsSubmitted(true);
+        setSuccessMessage(apiRes?.responseStatus?.message);
+        window.scrollTo(0, 0);
       } else {
         loaderRef?.current?.hide();
         toast.info(
@@ -308,1095 +642,432 @@ const EmployeeRegistration = () => {
     }
   };
 
-  const handleCancel = () => {
-    navigate("/iwt/employee-management");
-  };
+  const DynamicField = ({ field }) => {
+    if (field.showIf && !field.showIf()) return null;
 
-  const handleFileDownload = async (url) => {
-    try {
-      if (!url) return;
-      loaderRef.current?.show();
+    const handleChange = (e) => {
+      if (field?.onChange) field.onChange(e, setValue, watch);
+    };
 
-      const accessToken = getFromLocalStorage("access_token");
-      const tokenDetails = getFromLocalStorage("tokenDetails");
-      const sessionState = tokenDetails
-        ? JSON.parse(tokenDetails)?.session_state
-        : "";
+    switch (field.type) {
+      case "select":
+        return (
+          <InputSelect
+            label={field.label}
+            required={field.required}
+            name={field.name}
+            options={field.options}
+            register={register(field?.name, {
+              ...field.validation,
+            })}
+            errors={errors}
+            icon={field.icon}
+            className="mb-4"
+            onChange={(value, selObj) => {
+              setIsCompany(selObj?.isCompany || false);
+              setValue(field.name, value);
+              if (errors[field.name]) {
+                clearErrors(field.name);
+              }
+              setFormData((prev) => ({
+                ...prev,
+                [field.name]: value,
+              }));
+            }}
+            value={formData[field.name] || watch(field.name)}
+            autoFocus={field.autoFocus}
+          />
+        );
 
-      const response = await axios({
-        method: "GET",
-        url: url,
-        responseType: "blob",
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          "X-Request-ID": sessionState,
-          Accept: "application/octet-stream",
-        },
-      });
+      case "file":
+        return (
+          <InputFile
+            label={field.label}
+            required={field.required}
+            name={field.name}
+            key={field.name}
+            register={register(field.name)}
+            errors={errors}
+            onChange={(e) => {
+              if (e.target.files && e.target.files[0]) {
+                const file = e.target.files[0];
+                console.log("Selected file:", file);
+                const extension = file?.name?.substring(
+                  file?.name?.lastIndexOf(".")
+                );
+                // const fileName = `${field.label}${extension}`;
 
-      if (response.data) {
-        let filename = "document";
-        const contentDisposition = response.headers["content-disposition"];
-        if (contentDisposition) {
-          const filenameMatch = contentDisposition.match(
-            /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/
-          );
-          if (filenameMatch && filenameMatch[1]) {
-            filename = filenameMatch[1].replace(/['"]/g, "");
-          }
-        }
+                const customFileName = `${field.label}${extension}`;
 
-        const blob = new Blob([response.data], {
-          type: response.headers["content-type"] || "application/octet-stream",
-        });
-        const blobUrl = window.URL.createObjectURL(blob);
+                file.originalName = customFileName;
+                setValue(field.name, file);
 
-        const link = document.createElement("a");
-        link.href = blobUrl;
-        link.setAttribute("download", filename);
-        document.body.appendChild(link);
-        link.click();
+                setFormData((prev) => {
+                  const updated = { ...prev, [field.name]: file };
+                  // console.log(`Updated formData with file ${field.name}:`, updated);
+                  return updated;
+                });
 
-        setTimeout(() => {
-          document.body.removeChild(link);
-          window.URL.revokeObjectURL(blobUrl);
-        }, 100);
-      }
-    } catch (error) {
-      console.error("Error downloading file:", error);
-      toast.error("Failed to download file. Please try again.");
-    } finally {
-      loaderRef.current?.hide();
+                if (errors[field.name]) {
+                  clearErrors(field.name);
+                }
+
+                const validTypes = [
+                  "application/pdf",
+                  "image/jpeg",
+                  "image/png",
+                  "image/jpg",
+                ];
+                if (!validTypes.includes(file.type)) {
+                  setError(field.name, {
+                    type: "manual",
+                    message: "Only PDF, JPG or PNG files are allowed",
+                  });
+                }
+
+                if (file.size > 2 * 1024 * 1024) {
+                  setError(field.name, {
+                    type: "manual",
+                    message: "File size should not exceed 2MB",
+                  });
+                }
+              }
+            }}
+            className="mb-4"
+            watch={watch}
+            accept=".pdf,.jpg,.jpeg,.png"
+            defaultValue={formData[field.name]}
+            autoFocus={field.autoFocus}
+          />
+        );
+
+      default:
+        return (
+          <InputText
+            label={field.label}
+            required={field.required}
+            name={field.name}
+            key={field.name}
+            type={field.type}
+            placeholder={field.placeholder}
+            register={register(field?.name, {
+              ...field.validation,
+            })}
+            onChange={handleChange}
+            errors={errors}
+            readOnly={field.readOnly}
+            icon={field.icon}
+            maxlength={field?.maxlength}
+            onKeyDown={field?.keyDown}
+            disabled={field?.disabled || false}
+            className="mb-4"
+            style={{
+              borderColor: errors[field.name] ? "#dc3545" : "#ced4da",
+              backgroundColor: errors[field.name] ? "#fff8f8" : "white",
+            }}
+            autoFocus={field.autoFocus}
+          />
+        );
     }
   };
+
+  const stepTitles = [
+    {
+      title: t("vesselOwnerRegistration.Vessel Owner Details"),
+      icon: FaBuilding,
+    },
+    {
+      title: t("vesselOwnerRegistration.Authorized Person's Details"),
+      icon: FaUser,
+    },
+    {
+      title: t("vesselOwnerRegistration.Documents Upload"),
+      icon: FaFileUpload,
+    },
+  ];
 
   return (
     <>
       <NewLoader ref={loaderRef} />
-      <Container fluid className="p-4">
-        <Card className="mb-4">
-          <Card.Header
-            className="bg-primary text-white d-flex align-items-center justify-content-center position-relative"
+      <Container fluid className="registration-container py-5">
+        <div
+          style={{
+            position: "absolute",
+            top: "10px",
+            right: "10px",
+            zIndex: 1050,
+          }}
+        >
+          <NavDropdown
+            title={
+              <MdOutlineLanguage
+                className="language-icon"
+                style={{ fontSize: "1.5rem", color: "#fff" }}
+              />
+            }
+            id="language-nav-dropdown"
+            className="mx-2"
             style={{
-              minHeight: 56,
-              background: "linear-gradient(135deg, #00429c, #4695ff)",
-              border: "none",
+              display: "inline-block",
+              marginTop: "10px",
+              zIndex: 1050,
+              position: "relative",
             }}
           >
-            <button
-              className="btn back-button"
-              onClick={() => navigate("/iwt/employee-management")}
+            <NavDropdown.Item
+              onClick={() => changeLanguage("en")}
+              className="small-text"
               style={{
-                color: "white",
-                fontSize: "0.9rem",
-                position: "absolute",
-                left: 0,
-                top: "50%",
-                transform: "translateY(-50%)",
-                textDecoration: "none",
+                color: "#000000",
+                padding: "10px 15px",
               }}
             >
-              <FaArrowAltCircleLeft size={22} />
-            </button>
-
-            <div style={{ fontWeight: 600, fontSize: 22, color: "#fff" }}>
-              {isEditMode ? t("Edit Employee") : t("addEmployee.Add Employee")}
-            </div>
-
-            <div style={{ width: 40 }}></div>
-          </Card.Header>
-          <Card.Body>
-            <form onSubmit={handleSubmit(onSubmit)} className="employee-form">
-              {/* Personal Details Section */}
-              <Collapsible
-                title={
-                  <div className="d-flex align-items-center">
-                    <FaUser className="me-2" style={{ color: "#2466BF" }} />
-                    <span style={{ color: "#2466BF" }}>
-                      {t("addEmployee.Personal Details")}
-                    </span>
-                  </div>
-                }
-                defaultOpen={true}
-              >
-                <Card className="form-section-card">
-                  <Card.Body>
-                    <Row className="g-3">
-                      <Col md={4}>
-                        <InputText
-                          name="firstName"
-                          label={t("addEmployee.First Name")}
-                          placeholder={t("addEmployee.Enter first name")}
-                          required={true}
-                          register={{
-                            ...register("firstName", {
-                              required: t("addEmployee.First Name is required"),
-                            }),
-                          }}
-                          errors={errors}
-                        />
-                      </Col>
-                      <Col md={4}>
-                        <InputText
-                          name="lastName"
-                          label={t("addEmployee.Last Name")}
-                          placeholder={t("addEmployee.Enter last name")}
-                          required={true}
-                          register={{
-                            ...register("lastName", {
-                              required: t("addEmployee.Last Name is required"),
-                            }),
-                          }}
-                          errors={errors}
-                        />
-                      </Col>
-                      <Col md={4}>
-                        <InputText
-                          name="email"
-                          label={t("addEmployee.Email ID")}
-                          type="email"
-                          placeholder={t("addEmployee.Enter email address")}
-                          required={true}
-                          register={{
-                            ...register("email", {
-                              required: t("addEmployee.Email is required"),
-                              pattern: {
-                                value: CONSTANT_REGEX.EMAIL,
-                                message: t("addEmployee.Invalid email address"),
-                              },
-                            }),
-                          }}
-                          errors={errors}
-                        />
-                      </Col>
-                      <Col md={4}>
-                        <InputText
-                          name="phoneNumber"
-                          label={t("addEmployee.Phone Number")}
-                          placeholder={t(
-                            "addEmployee.Enter 10-digit phone number"
-                          )}
-                          required={true}
-                          maxlength={10}
-                          register={{
-                            ...register("phoneNumber", {
-                              required: t(
-                                "addEmployee.Phone Number is required"
-                              ),
-                              pattern: {
-                                value: CONSTANT_REGEX.MOBILE,
-                                message: t(
-                                  "addEmployee.Phone number must be 10 digits"
-                                ),
-                              },
-                            }),
-                          }}
-                          errors={errors}
-                        />
-                      </Col>
-                      <Col md={4}>
-                        <InputSelect
-                          name="gender"
-                          label={t("addEmployee.Gender")}
-                          required={true}
-                          options={[
-                            {
-                              value: "",
-                              label: t("addEmployee.Select Gender"),
-                            },
-                            ...(masterData?.genders?.map((type) => ({
-                              value: type.valueCode,
-                              label: type.valueLabel,
-                            })) || [
-                              { value: "MALE", label: "MALE" },
-                              { value: "FEMALE", label: "FEMALE" },
-                              { value: "OTHER", label: "OTHER" },
-                            ]),
-                          ]}
-                          register={register("gender", {
-                            required: t("addEmployee.Gender is required"),
-                          })}
-                          errors={errors}
-                          value={watch("gender") || ""}
-                          onChange={(value) =>
-                            setValue("gender", value, { shouldValidate: true })
-                          }
-                        />
-                      </Col>
-                      <Col md={4}>
-                        <InputText
-                          name="dateOfBirth"
-                          label={t("addEmployee.Date of Birth")}
-                          type="date"
-                          placeholder={t("addEmployee.Select date of birth")}
-                          required={true}
-                          register={{
-                            ...register("dateOfBirth", {
-                              required: t(
-                                "addEmployee.Date of Birth is required"
-                              ),
-                            }),
-                          }}
-                          errors={errors}
-                        />
-                      </Col>
-                    </Row>
-                  </Card.Body>
-                </Card>
-              </Collapsible>
-
-              {/* Address Details Section */}
-              <Collapsible
-                title={
-                  <div className="d-flex align-items-center">
-                    <FaMapMarkerAlt
-                      className="me-2"
-                      style={{ color: "#2466BF" }}
+              English
+            </NavDropdown.Item>
+            <NavDropdown.Item
+              onClick={() => changeLanguage("bn")}
+              className="small-text"
+              style={{
+                color: "#000000",
+                padding: "10px 15px",
+              }}
+            >
+              বাংলা
+            </NavDropdown.Item>
+          </NavDropdown>
+        </div>
+        <Row className="justify-content-center">
+          <Col lg={10} xl={9}>
+            <Card className="registration-card">
+              <Card.Header className="registration-header p-0">
+                <div className="registration-header-content">
+                  <div className="header-logo-container">
+                    <Image
+                      src={IWT_FULL_IMG}
+                      alt="IWT Logo"
+                      className="header-logo"
                     />
-                    <span style={{ color: "#2466BF" }}>
-                      {t("addEmployee.Address Details")}
-                    </span>
                   </div>
-                }
-                defaultOpen={true}
-              >
-                <Card className="form-section-card">
-                  <Card.Body>
-                    <Row className="g-3">
-                      <Col md={6}>
-                        <InputText
-                          name="addressLine1"
-                          label={t("addEmployee.Address Line-1")}
-                          placeholder={t("addEmployee.Enter address line 1")}
-                          required={true}
-                          register={{
-                            ...register("addressLine1", {
-                              required: t(
-                                "addEmployee.Address Line-1 is required"
-                              ),
-                            }),
-                          }}
-                          errors={errors}
-                        />
-                      </Col>
-                      <Col md={6}>
-                        <InputText
-                          name="addressLine2"
-                          label={t("addEmployee.Address Line-2")}
-                          placeholder={t(
-                            "addEmployee.Enter address line 2 (optional)"
-                          )}
-                          register={{
-                            ...register("addressLine2"),
-                          }}
-                          errors={errors}
-                        />
-                      </Col>
-                      <Col md={3}>
-                        <InputText
-                          name="pin"
-                          label={t("addEmployee.PIN")}
-                          placeholder={t("addEmployee.Enter 6-digit PIN code")}
-                          required={true}
-                          register={{
-                            ...register("pin", {
-                              required: t("addEmployee.PIN Code is required"),
-                              pattern: {
-                                value: /^[0-9]{6}$/,
-                                message: t("addEmployee.PIN must be 6 digits"),
-                              },
-                            }),
-                          }}
-                          onChange={(e) => {
-                            const pinValue = e.target.value;
-                            if (pinValue.length === 6) {
-                              loaderRef.current?.show();
-                              fetchAddressDetails(pinValue);
-                            }
-                          }}
-                          errors={errors}
-                        />
-                      </Col>
-                      <Col md={3}>
-                        <InputText
-                          name="district"
-                          label={t("addEmployee.District")}
-                          required={true}
-                          placeholder={t("addEmployee.Auto-populated")}
-                          register={{
-                            ...register("district"),
-                          }}
-                          errors={errors}
-                          readOnly
-                        />
-                      </Col>
-                      <Col md={3}>
-                        <InputText
-                          name="stateUt"
-                          label={t("addEmployee.State/UT")}
-                          required={true}
-                          placeholder={t("addEmployee.Auto-populated")}
-                          register={{
-                            ...register("stateUt"),
-                          }}
-                          errors={errors}
-                          readOnly
-                        />
-                      </Col>
-                      <Col md={3}>
-                        <InputText
-                          name="country"
-                          label={t("addEmployee.Country")}
-                          required={true}
-                          placeholder={t("addEmployee.Auto-populated")}
-                          register={{
-                            ...register("country"),
-                          }}
-                          errors={errors}
-                          readOnly
-                        />
-                      </Col>
-                    </Row>
-                  </Card.Body>
-                </Card>
-              </Collapsible>
+                  <h3 className="header-title">
+                    {t("vesselOwnerRegistration.Vessel Owner Registration")}
+                  </h3>
+                </div>
+              </Card.Header>
 
-              {/* Education Details Section */}
-              <Collapsible
-                title={
-                  <div className="d-flex align-items-center">
-                    <FaGraduationCap
-                      className="me-2"
-                      style={{ color: "#2466BF" }}
-                    />
-                    <span style={{ color: "#2466BF" }}>
-                      {t("addEmployee.Education Details")}
-                    </span>
-                  </div>
-                }
-                defaultOpen={true}
-              >
-                <Card className="form-section-card">
-                  <Card.Body>
-                    {fields.map((field, index) => (
-                      <Row key={field.id} className="g-3">
-                        <Col md={4}>
-                          <InputText
-                            required={true}
-                            name={`educationDetails.${index}.qualification`}
-                            label={t("addEmployee.Qualification")}
-                            placeholder={t("addEmployee.Enter qualification")}
-                            register={register(
-                              `educationDetails.${index}.qualification`,
-                              {
-                                required: t(
-                                  "addEmployee.Qualification is required"
-                                ),
-                              }
-                            )}
-                            errors={errors}
-                          />
-                        </Col>
-                        <Col md={4}>
-                          <InputText
-                            name={`educationDetails.${index}.stream`}
-                            label={t("addEmployee.Stream")}
-                            placeholder={t("addEmployee.Enter stream")}
-                            register={register(
-                              `educationDetails.${index}.stream`,
-                              {
-                                required: t("addEmployee.Stream is required"),
-                              }
-                            )}
-                            errors={errors}
-                          />
-                        </Col>
-                        <Col md={4}>
-                          <InputText
-                            name={`educationDetails.${index}.yearOfPassing`}
-                            label={t("addEmployee.Year of Passing")}
-                            required={true}
-                            placeholder={t("addEmployee.Enter year of passing")}
-                            register={register(
-                              `educationDetails.${index}.yearOfPassing`,
-                              {
-                                required: t(
-                                  "addEmployee.Year of Passing is required"
-                                ),
-                              }
-                            )}
-                            errors={errors}
-                          />
-                        </Col>
-                        {index > 0 && (
-                          <Col md={12} className="text-end">
-                            <Button
-                              variant="danger"
-                              size="sm"
-                              onClick={() => remove(index)}
-                              className="mt-1"
-                            >
-                              <FaTrash /> Remove
-                            </Button>
-                          </Col>
-                        )}
-                      </Row>
-                    ))}
-                    <Button
-                      variant="outline-primary"
-                      onClick={() =>
-                        append({
-                          qualification: "",
-                          stream: "",
-                          yearOfPassing: "",
-                        })
-                      }
-                      className="add-education-btn"
+              <Card.Body className="registration-body p-4 p-md-5">
+                {isSubmitted ? (
+                  <div className="success-container text-center py-5">
+                    <div
+                      className="success-icon-container bg-success rounded-circle d-flex align-items-center justify-content-center mx-auto mb-4"
+                      style={{
+                        width: "90px",
+                        height: "90px",
+                        boxShadow: "0 10px 20px rgba(40, 167, 69, 0.3)",
+                      }}
                     >
-                      <FaPlus className="me-2" />{" "}
-                      {t("addEmployee.Add Education Details")}
+                      <FaCheck className="success-icon text-white fs-1" />
+                    </div>
+                    <h4 className="success-title text-success mb-3 fw-bold">
+                      Registration Successful!
+                    </h4>
+                    <div
+                      className="registration-id p-4 bg-light rounded mb-4"
+                      style={{ borderLeft: "4px solid #0077b6" }}
+                    >
+                      {successMessage ||
+                        "Your vessel builder registration has been submitted successfully. You will receive a confirmation email shortly."}
+                    </div>
+                    {/* <div className="registration-id p-4 bg-light rounded mb-4" style={{ borderLeft: '4px solid #0077b6' }}>
+                                  <strong>Registration ID:</strong> {Math.random().toString(36).substring(2, 10).toUpperCase()}
+                                </div> */}
+                    <Button
+                      variant="primary"
+                      size="lg"
+                      className="mt-2 d-flex align-items-center justify-content-center mx-auto"
+                      style={{
+                        background: "linear-gradient(135deg, #0077b6, #023e8a)",
+                        border: "none",
+                        boxShadow: "0 4px 15px rgba(0, 119, 182, 0.3)",
+                        borderRadius: "8px",
+                        padding: "12px 30px",
+                        fontWeight: "600",
+                        transition: "all 0.3s ease",
+                        minWidth: "150px",
+                        height: "50px",
+                      }}
+                      onClick={() => (window.location.href = "/")}
+                    >
+                      Go to Home
                     </Button>
-                  </Card.Body>
-                </Card>
-              </Collapsible>
-
-              {/* Professional Details Section */}
-              <Collapsible
-                title={
-                  <div className="d-flex align-items-center">
-                    <FaBriefcase
-                      className="me-2"
-                      style={{ color: "#2466BF" }}
-                    />
-                    <span style={{ color: "#2466BF" }}>
-                      {t("addEmployee.Professional Details")}
-                    </span>
                   </div>
-                }
-                defaultOpen={true}
-              >
-                <Card className="form-section-card">
-                  <Card.Body>
-                    <Row className="g-3">
-                      <Col md={4}>
-                        <InputText
-                          name="appointmentDate"
-                          label={t("addEmployee.Appointment Date")}
-                          type="date"
-                          placeholder={t("addEmployee.Select appointment date")}
-                          required={true}
-                          register={{
-                            ...register("appointmentDate", {
-                              required: t("addEmployee.Appointment Date is required"),
-                            }),
-                          }}
-                          errors={errors}
-                        />
-                      </Col>
-                      <Col md={4}>
-                        <InputSelect
-                          name="employeeType"
-                          label={t("addEmployee.Employee Type")}
-                          required={true}
-                          placeholder={t("addEmployee.Select employee type")}
-                          options={
-                            masterData?.employeeTypes?.map((type) => ({
-                              value: type.valueCode,
-                              label: type.valueLabel,
-                            })) || []
-                          }
-                          register={register("employeeType", {
-                            required: t("addEmployee.Employee Type is required"),
-                          })}
-                          errors={errors}
-                          value={watch("employeeType") || ""}
-                          onChange={(val) =>
-                            setValue("employeeType", val, { shouldValidate: true })
-                          }
-                        />
-                      </Col>
-                      <Col md={4}>
-                        <InputSelect
-                          name="employeeStatus"
-                          label={t("addEmployee.Employee Status")}
-                          required={true}
-                          placeholder={t("addEmployee.Select employee status")}
-                          options={
-                            masterData?.employeeStatuses?.map((type) => ({
-                              value: type.valueCode,
-                              label: type.valueLabel,
-                            })) || []
-                          }
-                          register={register("employeeStatus", {
-                            required: t("addEmployee.Employee Status is required"),
-                          })}
-                          errors={errors}
-                          value={watch("employeeStatus") || ""}
-                          onChange={(val) =>
-                            setValue("employeeStatus", val, { shouldValidate: true })
-                          }
-                        />
-                      </Col>
-                      <Col md={4}>
-                        <InputSelect
-                          name="designation"
-                          label={t("addEmployee.Designation")}
-                          required={true}
-                          placeholder={t("addEmployee.Select designation")}
-                          options={
-                            masterData?.designations?.map((type) => ({
-                              value: type.valueCode,
-                              label: type.valueLabel,
-                            })) || []
-                          }
-                          register={register("designation", {
-                            required: t("addEmployee.Designation is required"),
-                          })}
-                          errors={errors}
-                          value={watch("designation") || ""}
-                          onChange={(val) =>
-                            setValue("designation", val, { shouldValidate: true })
-                          }
-                        />
-                      </Col>
-                      <Col md={4}>
-                        <InputSelect
-                          name="department"
-                          label={t("addEmployee.Department")}
-                          required={true}
-                          placeholder={t("addEmployee.Select Department")}
-                          options={
-                            masterData?.departments?.map((type) => ({
-                              value: type.valueCode,
-                              label: type.valueLabel,
-                            })) || []
-                          }
-                          register={register("department", {
-                            required: t("addEmployee.Department is required"),
-                          })}
-                          errors={errors}
-                          value={watch("department") || ""}
-                          onChange={(val) =>
-                            setValue("department", val, { shouldValidate: true })
-                          }
-                        />
-                      </Col>
-                      <Col md={4}>
-                        <InputText
-                          name="section"
-                          label={t("addEmployee.Section")}
-                          placeholder={t("addEmployee.Enter section")}
-                          register={{
-                            ...register("section"),
-                          }}
-                          errors={errors}
-                        />
-                      </Col>
-                      <Col md={4}>
-                        <InputSelect
-                          name="roles"
-                          label={t("addEmployee.Roles")}
-                          required={true}
-                          placeholder={t("addEmployee.Select role")}
-                          options={
-                            masterData?.roles?.map((type) => ({
-                              value: type.valueCode,
-                              label: type.valueLabel,
-                            })) || []
-                          }
-                          register={register("roles", {
-                            required: t("addEmployee.Role is required"),
-                          })}
-                          errors={errors}
-                          value={watch("roles") || ""}
-                          onChange={(val) =>
-                            setValue("roles", val, { shouldValidate: true })
-                          }
-                        />
-                      </Col>
-                    </Row>
-                  </Card.Body>
-                </Card>
-              </Collapsible>
-
-                           <Collapsible
-                title={
-                  <div className="d-flex align-items-center">
-                    <FaFileUpload
-                      className="me-2"
-                      style={{ color: "#2466BF" }}
-                    />
-                    <span style={{ color: "#2466BF" }}>
-                      {t("addEmployee.Documents Upload")}
-                    </span>
-                  </div>
-                }
-                defaultOpen={true}
-              >
-                <Card className="form-section-card">
-                  <Card.Body>
-                    <Row className="g-3">
-                      {/* Address Proof */}
-                      <Col md={6}>
-                        <div className="document-upload-container">
-                          <label className="form-label fw-semibold">
-                            {t("addEmployee.Address Proof")}{" "}
-                            {!isEditMode && (
-                              <span className="text-danger">*</span>
-                            )}
-                          </label>
-                          <div className="file-input-wrapper">
-                            <input
-                              type="file"
-                              id="addressProof"
-                              className={`form-control file-input ${
-                                errors.addressProof ? "is-invalid" : ""
-                              }`}
-                              accept=".jpg,.jpeg,.png,.pdf"
-                              {...register("addressProof", {
-                                required:
-                                  !isEditMode &&
-                                  t("addEmployee.Address Proof is required"),
-                                validate: {
-                                  validFileType: (files) => {
-                                    if (!files || !files.length) return true;
-                                    const file = files[0];
-                                    const validExtensions = [
-                                      ".jpg",
-                                      ".jpeg",
-                                      ".png",
-                                      ".pdf",
-                                    ];
-                                    const extension = file.name
-                                      ?.substring(file.name.lastIndexOf("."))
-                                      .toLowerCase();
-                                    return (
-                                      validExtensions.includes(extension) ||
-                                      "Only JPG, PNG, and PDF files are allowed"
-                                    );
-                                  },
-                                  validFileSize: (files) => {
-                                    if (!files || !files.length) return true;
-                                    return (
-                                      files[0].size <= 2 * 1024 * 1024 ||
-                                      "File size must be less than 2MB"
-                                    );
-                                  },
-                                },
-                              })}
-                              onChange={(e) => {
-                                const files = e.target.files;
-                                if (!files || !files.length) return;
-
-                                const file = files[0];
-                                const validExtensions = [
-                                  ".jpg",
-                                  ".jpeg",
-                                  ".png",
-                                  ".pdf",
-                                ];
-                                const extension = file.name
-                                  ?.substring(file.name.lastIndexOf("."))
-                                  .toLowerCase();
-
-                                if (
-                                  !extension ||
-                                  !validExtensions.includes(extension)
-                                ) {
-                                  toast.error(
-                                    "Only JPG, PNG, and PDF files are allowed"
-                                  );
-                                  e.target.value = "";
-                                  return;
-                                }
-
-                                if (file.size > 2 * 1024 * 1024) {
-                                  toast.error(
-                                    "File size must be less than 2MB"
-                                  );
-                                  e.target.value = "";
-                                  return;
-                                }
-
-                                const fileName = `Address Proof${extension}`;
-                                file.originalName = fileName;
-                                setAddressProofFile(renameFile(file, fileName));
-                                clearErrors("addressProof");
-                              }}
-                            />
-                            <label
-                              htmlFor="addressProof"
-                              className="file-input-label"
-                            >
-                              <span className="file-input-text">
-                                {addressProofFile
-                                  ? addressProofFile.name
-                                  : t("Choose file...")}
-                              </span>
-                              <span className="file-input-button">
-                                {t("Browse")}
-                              </span>
-                            </label>
-                          </div>
-                          <small className="text-muted d-block mt-1">
-                            {t("Allowed formats: PDF, JPG, PNG (Max: 2MB)")}
-                          </small>
-                          {errors.addressProof && (
-                            <div
-                              className="invalid-feedback d-block"
-                              style={{ color: "#dc3545" }}
-                            >
-                              {errors.addressProof.message}
-                            </div>
+                ) : (
+                  <FormProvider {...methods}>
+                    <form>
+                      <div className="text-center mb-4">
+                        <p className="text-muted">
+                          {t(
+                            "vesselOwnerRegistration.Please complete all required information to register your vessel"
                           )}
-                          {isEditMode &&
-                            employeeData?.fileStoreMaps?.[0]?.downLoadFile && (
-                              <div className="mt-2 download-link">
-                                <Button
-                                  variant="link"
-                                  className="p-0 text-primary text-decoration-none"
-                                  onClick={() =>
-                                    handleFileDownload(
-                                      employeeData.fileStoreMaps[0].downLoadFile
-                                    )
-                                  }
+                        </p>
+                      </div>
+
+                      <div className="stepper-container mb-5">
+                        <div className="stepper d-flex justify-content-between">
+                          {[1, 2, 3].map((step) => (
+                            <React.Fragment key={step}>
+                              <div
+                                className={`step ${
+                                  currentStep >= step ? "active" : ""
+                                } ${
+                                  currentStep > step ? "completed" : ""
+                                } flex-grow-1 text-center`}
+                              >
+                                <div
+                                  className="step-icon d-flex align-items-center justify-content-center mx-auto mb-2"
+                                  style={{
+                                    width: "60px",
+                                    height: "60px",
+                                    borderRadius: "50%",
+                                    fontSize: "20px",
+                                    fontWeight: "bold",
+                                    boxShadow:
+                                      currentStep >= step
+                                        ? "0 5px 15px rgba(0, 119, 182, 0.3)"
+                                        : "0 4px 10px rgba(0, 0, 0, 0.1)",
+                                    background:
+                                      currentStep >= step
+                                        ? currentStep > step
+                                          ? "linear-gradient(135deg, #28a745, #20c997)"
+                                          : "linear-gradient(135deg, #0077b6, #023e8a)"
+                                        : "#ffffff",
+                                    border:
+                                      currentStep >= step
+                                        ? "none"
+                                        : "2px solid #e9ecef",
+                                    color:
+                                      currentStep >= step ? "#fff" : "#6c757d",
+                                    transition: "all 0.4s ease",
+                                  }}
                                 >
-                                  <FaDownload className="me-1" />
-                                  Download address proof
-                                </Button>
+                                  {currentStep > step ? (
+                                    <FaCheck size={22} />
+                                  ) : (
+                                    React.createElement(
+                                      stepTitles[step - 1].icon,
+                                      { size: 22 }
+                                    )
+                                  )}
+                                </div>
+                                <div
+                                  className="step-label fw-bold"
+                                  style={{
+                                    color:
+                                      currentStep >= step
+                                        ? currentStep > step
+                                          ? "#28a745"
+                                          : "#0077b6"
+                                        : "#6c757d",
+                                    fontSize: "0.9rem",
+                                    transition: "all 0.3s ease",
+                                  }}
+                                >
+                                  {stepTitles[step - 1].title}
+                                </div>
                               </div>
-                            )}
+                              {step < 3 && (
+                                <div className="step-connector flex-grow-1 d-flex align-items-center px-2">
+                                  <div
+                                    className={`connector-line w-100 ${
+                                      currentStep > step ? "active" : ""
+                                    }`}
+                                    style={{
+                                      height: "4px",
+                                      background:
+                                        currentStep > step
+                                          ? "linear-gradient(to right, #28a745, #20c997)"
+                                          : "#e9ecef",
+                                      borderRadius: "2px",
+                                      transition: "all 0.5s ease",
+                                    }}
+                                  ></div>
+                                </div>
+                              )}
+                            </React.Fragment>
+                          ))}
                         </div>
-                      </Col>
+                      </div>
 
-                      {/* Identity Proof */}
-                      <Col md={6}>
-                        <div className="document-upload-container">
-                          <label className="form-label fw-semibold">
-                            {t("addEmployee.Identity Proof")}{" "}
-                            {!isEditMode && (
-                              <span className="text-danger">*</span>
+                      <div className="step-content">
+                        <div className="form-section p-4 rounded mb-4">
+                          <div className="section-title">
+                            {React.createElement(
+                              stepTitles[currentStep - 1].icon,
+                              { className: "section-icon" }
                             )}
-                          </label>
-                          <div className="file-input-wrapper">
-                            <input
-                              type="file"
-                              id="identityProof"
-                              className={`form-control file-input ${
-                                errors.identityProof ? "is-invalid" : ""
-                              }`}
-                              accept=".jpg,.jpeg,.png,.pdf"
-                              {...register("identityProof", {
-                                required:
-                                  !isEditMode &&
-                                  t("addEmployee.Identity Proof is required"),
-                                validate: {
-                                  validFileType: (files) => {
-                                    if (!files || !files.length) return true;
-                                    const file = files[0];
-                                    const validExtensions = [
-                                      ".jpg",
-                                      ".jpeg",
-                                      ".png",
-                                      ".pdf",
-                                    ];
-                                    const extension = file.name
-                                      ?.substring(file.name.lastIndexOf("."))
-                                      .toLowerCase();
-                                    return (
-                                      validExtensions.includes(extension) ||
-                                      "Only JPG, PNG, and PDF files are allowed"
-                                    );
-                                  },
-                                  validFileSize: (files) => {
-                                    if (!files || !files.length) return true;
-                                    return (
-                                      files[0].size <= 2 * 1024 * 1024 ||
-                                      "File size must be less than 2MB"
-                                    );
-                                  },
-                                },
-                              })}
-                              onChange={(e) => {
-                                const files = e.target.files;
-                                if (!files || !files.length) return;
-
-                                const file = files[0];
-                                const validExtensions = [
-                                  ".jpg",
-                                  ".jpeg",
-                                  ".png",
-                                  ".pdf",
-                                ];
-                                const extension = file.name
-                                  ?.substring(file.name.lastIndexOf("."))
-                                  .toLowerCase();
-
-                                if (
-                                  !extension ||
-                                  !validExtensions.includes(extension)
-                                ) {
-                                  toast.error(
-                                    "Only JPG, PNG, and PDF files are allowed"
-                                  );
-                                  e.target.value = "";
-                                  return;
-                                }
-
-                                if (file.size > 2 * 1024 * 1024) {
-                                  toast.error(
-                                    "File size must be less than 2MB"
-                                  );
-                                  e.target.value = "";
-                                  return;
-                                }
-
-                                const fileName = `Identity Proof${extension}`;
-                                file.originalName = fileName;
-                                setIdentityProofFile(
-                                  renameFile(file, fileName)
-                                );
-                                clearErrors("identityProof");
-                              }}
-                            />
-                            <label
-                              htmlFor="identityProof"
-                              className="file-input-label"
-                            >
-                              <span className="file-input-text">
-                                {identityProofFile
-                                  ? identityProofFile.name
-                                  : t("Choose file...")}
-                              </span>
-                              <span className="file-input-button">
-                                {t("Browse")}
-                              </span>
-                            </label>
+                            <h4 className="mb-0 fw-bold">
+                              {stepTitles[currentStep - 1].title}
+                            </h4>
+                            {stepTitles[currentStep - 1].dropdown}{" "}
+                            {/* Render the dropdown */}
                           </div>
-                          <small className="text-muted d-block mt-1">
-                            {t("Allowed formats: PDF, JPG, PNG (Max: 2MB)")}
-                          </small>
-                          {errors.identityProof && (
-                            <div
-                              className="invalid-feedback d-block"
-                              style={{ color: "#dc3545" }}
-                            >
-                              {errors.identityProof.message}
-                            </div>
-                          )}
-                          {isEditMode &&
-                            employeeData?.fileStoreMaps?.[1]?.downLoadFile && (
-                              <div className="mt-2 download-link">
-                                <Button
-                                  variant="link"
-                                  className="p-0 text-primary text-decoration-none"
-                                  onClick={() =>
-                                    handleFileDownload(
-                                      employeeData.fileStoreMaps[1].downLoadFile
-                                    )
-                                  }
+
+                          <div className="form-content py-3">
+                            <Row className="g-4">
+                              {getCurrentStepFields().map((field, index) => (
+                                <Col
+                                  key={index}
+                                  md={field.colSize || 12}
+                                  className="mb-2"
                                 >
-                                  <FaDownload className="me-1" />
-                                  Download identity proof
-                                </Button>
-                              </div>
-                            )}
-                        </div>
-                      </Col>
-
-                      {/* Appointment Letter */}
-                      <Col md={6}>
-                        <div className="document-upload-container">
-                          <label className="form-label fw-semibold">
-                            {t("addEmployee.Appointment Letter")}{" "}
-                            {!isEditMode && (
-                              <span className="text-danger">*</span>
-                            )}
-                          </label>
-                          <div className="file-input-wrapper">
-                            <input
-                              type="file"
-                              id="appointmentLetter"
-                              className={`form-control file-input ${
-                                errors.appointmentLetter ? "is-invalid" : ""
-                              }`}
-                              accept=".jpg,.jpeg,.png,.pdf"
-                              {...register("appointmentLetter", {
-                                required:
-                                  !isEditMode &&
-                                  t(
-                                    "addEmployee.Appointment Letter is required"
-                                  ),
-                                validate: {
-                                  validFileType: (files) => {
-                                    if (!files || !files.length) return true;
-                                    const file = files[0];
-                                    const validExtensions = [
-                                      ".jpg",
-                                      ".jpeg",
-                                      ".png",
-                                      ".pdf",
-                                    ];
-                                    const extension = file.name
-                                      ?.substring(file.name.lastIndexOf("."))
-                                      .toLowerCase();
-                                    return (
-                                      validExtensions.includes(extension) ||
-                                      "Only JPG, PNG, and PDF files are allowed"
-                                    );
-                                  },
-                                  validFileSize: (files) => {
-                                    if (!files || !files.length) return true;
-                                    return (
-                                      files[0].size <= 2 * 1024 * 1024 ||
-                                      "File size must be less than 2MB"
-                                    );
-                                  },
-                                },
-                              })}
-                              onChange={(e) => {
-                                const files = e.target.files;
-                                if (!files || !files.length) return;
-
-                                const file = files[0];
-                                const validExtensions = [
-                                  ".jpg",
-                                  ".jpeg",
-                                  ".png",
-                                  ".pdf",
-                                ];
-                                const extension = file.name
-                                  ?.substring(file.name.lastIndexOf("."))
-                                  .toLowerCase();
-
-                                if (
-                                  !extension ||
-                                  !validExtensions.includes(extension)
-                                ) {
-                                  toast.error(
-                                    "Only JPG, PNG, and PDF files are allowed"
-                                  );
-                                  e.target.value = "";
-                                  return;
-                                }
-
-                                if (file.size > 2 * 1024 * 1024) {
-                                  toast.error(
-                                    "File size must be less than 2MB"
-                                  );
-                                  e.target.value = "";
-                                  return;
-                                }
-
-                                const fileName = `Appointment Letter${extension}`;
-                                file.originalName = fileName;
-                                setAppointmentLetterFile(
-                                  renameFile(file, fileName)
-                                );
-                                clearErrors("appointmentLetter");
-                              }}
-                            />
-                            <label
-                              htmlFor="appointmentLetter"
-                              className="file-input-label"
-                            >
-                              <span className="file-input-text">
-                                {appointmentLetterFile
-                                  ? appointmentLetterFile.name
-                                  : t("Choose file...")}
-                              </span>
-                              <span className="file-input-button">
-                                {t("Browse")}
-                              </span>
-                            </label>
+                                  <DynamicField field={field} />
+                                </Col>
+                              ))}
+                            </Row>
                           </div>
-                          <small className="text-muted d-block mt-1">
-                            {t("Allowed formats: PDF, JPG, PNG (Max: 2MB)")}
-                          </small>
-                          {errors.appointmentLetter && (
-                            <div
-                              className="invalid-feedback d-block"
-                              style={{ color: "#dc3545" }}
-                            >
-                              {errors.appointmentLetter.message}
-                            </div>
-                          )}
-                          {isEditMode &&
-                            employeeData?.fileStoreMaps?.[2]?.downLoadFile && (
-                              <div className="mt-2 download-link">
-                                <Button
-                                  variant="link"
-                                  className="p-0 text-primary text-decoration-none"
-                                  onClick={() =>
-                                    handleFileDownload(
-                                      employeeData.fileStoreMaps[2].downLoadFile
-                                    )
-                                  }
-                                >
-                                  <FaDownload className="me-1" />
-                                  Download appointment letter
-                                </Button>
-                              </div>
-                            )}
                         </div>
-                      </Col>
-                    </Row>
-                  </Card.Body>
-                </Card>
-              </Collapsible>
+                      </div>
 
-              {/* Form Actions */}
-              <div className="d-flex justify-content-end mt-4 gap-2">
-                <Col style={{ display: "flex" }}>
-                  <strong style={{ marginTop: "5px" }}>
-                    {t("addEmployee.User Status")} :
-                  </strong>
-                  &nbsp; &nbsp;
-                  <Controller
-                    name="isActive"
-                    control={control}
-                    defaultValue={true}
-                    render={({ field }) => (
-                      <AppToggleButton
-                        labels={[
-                          t("addEmployee.In-Active"),
-                          t("addEmployee.Active"),
-                        ]}
-                        value={toggleValue}
-                        onChange={(val) => {
-                          field.onChange(val);
-                          setToggleValue(val);
-                          setValue("isActive", val);
-                        }}
-                      />
-                    )}
-                  />
-                </Col>
+                      <div
+                        className="form-navigation  mt-4"
+                        style={{ display: "block" }}
+                      >
+                        {currentStep > 1 && (
+                          <Button
+                            variant="outline-secondary"
+                            onClick={handlePrevious}
+                            // hidden={currentStep === 1}
+                            className="prev-btn"
+                            style={{ float: "left" }}
+                          >
+                            <FaArrowLeft className="btn-icon me-2" />{" "}
+                            {t("Previous")}
+                          </Button>
+                        )}
 
-                <Button variant="secondary" onClick={handleCancel}>
-                  {t("addEmployee.Cancel")}
-                </Button>
-                <Button
-                  variant="primary"
-                  type="submit"
-                  style={{
-                    background: "linear-gradient(135deg, #0077b6, #023e8a)",
-                    border: "none",
-                    boxShadow: "0 4px 6px rgba(0, 0, 0, 0.1)",
-                    padding: "8px 20px",
-                  }}
-                >
-                  {isEditMode
-                    ? t("addEmployee.Update")
-                    : t("addEmployee.Submit")}
-                </Button>
-              </div>
-            </form>
-          </Card.Body>
-        </Card>
+                        <Button
+                          variant="primary"
+                          onClick={handleNext}
+                          className="next-btn"
+                          style={{ float: "right" }}
+                        >
+                          {currentStep === totalSteps
+                            ? t("Submit Registration")
+                            : t("Next")}
+                          {currentStep !== totalSteps && (
+                            <FaArrowRight className="btn-icon ms-2" />
+                          )}
+                        </Button>
+                      </div>
+                    </form>
+                  </FormProvider>
+                )}
+              </Card.Body>
+            </Card>
+          </Col>
+        </Row>
       </Container>
     </>
   );
 };
 
-export default EmployeeRegistration;
+export default VesselOwnerRegistrationPage;
