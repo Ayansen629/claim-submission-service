@@ -1,110 +1,162 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { useForm, FormProvider } from 'react-hook-form';
-import { Container, Row, Col, Button, Card, Badge, Stack } from 'react-bootstrap';
-import { FaFileAlt, FaFileUpload, FaArrowLeft, FaArrowRight, FaDownload, FaArrowAltCircleLeft, FaCheckCircle, FaFileExcel, FaUser, FaBuilding } from 'react-icons/fa';
-import { BsFileEarmarkX, BsDownload } from 'react-icons/bs';
-import { useNavigate, useParams, useLocation } from 'react-router-dom';
-import ActionDropdown from '../../../common/ActionDropdown';
-import ApprovalModal from '../../../common/ApprovalModal';
-import './userViewPage.css';
-import NewLoader from '../../../common/NewLoader';
-import DynamicViewFields from '../../../common/DynamicViewFields';
-import { useTranslation } from 'react-i18next';
+import React, { useState, useEffect } from "react";
+import { Box, Typography, Stack } from "@mui/material";
+import { useParams, useLocation, useNavigate } from "react-router-dom";
+import Stepper from "../../../common/Stepper.jsx";
+import VesselDetails from "./VesselDetails.js";
+import Documents from "./Documents.js";
+import NoteSheet from "./NoteSheet.js";
+import { useForm } from "react-hook-form";
+import Invoicing from "../../../common/Invoicing.js";
+import PaymentModal from "../../../common/PaymentModal.js"; 
+import ActionDropdown from "../../../common/ActionDropdown";
+import ApprovalModal from "../../../common/ApprovalModal";
+import NewVesselRegistrationSuccess from "./newVesselRegistrationSuccess.js";
+import { useTranslation } from "react-i18next";
+import { useLanguageContext } from "../../../common/LanguageContext.js";
+import { toast } from "react-toastify";
+import { Button } from "react-bootstrap";
+import { BsSticky } from "react-icons/bs";
+import PaymentDetailsView from "./paymentDetailsView.js";
+import { getFromLocalStorage } from "../../../../utils/localStorageUtils.js";
+// import VesselRegistrationPreview from "./VesselRegistrationPreview.js";
 
-const UserViewPage = () => {
+const NewVesselRegistration = () => {
   const { t } = useTranslation();
-  const { type, id } = useParams();
+  const { changeLanguage } = useLanguageContext();
+  const { id } = useParams();
   const location = useLocation();
-  const [currentStep, setCurrentStep] = useState(1);
-  const [formData, setFormData] = useState({});
-  const [isLoading, setIsLoading] = useState(true);
+  const navigate = useNavigate();
+    const ownerDetails = getFromLocalStorage("ownerDetails")
+    ? JSON.parse(getFromLocalStorage("ownerDetails"))
+    : "";
+  const isEditMode = !!id && location.pathname.includes('/edit/');
+  const isViewMode = !!id && location.pathname.includes('/view/');
+  const isNormalMode = !isEditMode && !isViewMode;
+  
+  const methods = useForm({ mode: "onTouched" });
+  const { trigger, getValues, setError, setValue, reset } = methods;
+
+  const [showModal, setShowModal] = useState(false);
+  const [paymentMode, setPaymentMode] = useState("offline");
+  const [challanFile, setChallanFile] = useState(null);
+  const [isLoading, setIsLoading] = useState(false);
   const [showApprovalModal, setShowApprovalModal] = useState(false);
   const [selectedAction, setSelectedAction] = useState("");
-  const [completedSteps, setCompletedSteps] = useState(new Set());
-  const navigate = useNavigate();
+  const [showNoteSheet, setShowNoteSheet] = useState(false);
+
   const actionsFromAPI = ["Approve", "Reject", "Request Changes"];
-  const loaderRef = useRef();
 
-  const isOwner = type === 'owner';
-  const isBuilder = type === 'builder';
-  const totalSteps = isOwner ? 3 : 2;
-  const applicationData = location.state?.application;
-  const applicationNumber = applicationData?.appNo || `${isOwner ? 'OWN' : 'BLD'}-2025-001`;
+  const initialNotes = [
+    { id: 1, title: "Initial Review", content: "Document verification completed successfully. All required documents are present and properly formatted.", date: "2024-01-15", author: "John Doe" },
+    { id: 2, title: "Technical Assessment", content: "All technical drawings have been reviewed and approved by the engineering team.", date: "2024-01-16", author: "Jane Smith" }
+  ];
 
-  const mockOwnerData = {
-    categoryOfOwner: "Individual",
-    ownerCompanyName: applicationData?.companyName || "John Doe Marine Services",
-    emailId: "john.doe@example.com",
-    phoneNumber: applicationData?.phoneNumber || "9876543210",
-    panNo: "ABCDE1234F",
-    gstNo: "22ABCDE1234F1Z5",
-    addressLine1: "123 Marine Drive",
-    addressLine2: "Building A",
-    pin: "700001",
-    district: applicationData?.district || "Kolkata",
-    state: applicationData?.stateUt || "West Bengal",
-    country: "India",
-    authorisedFname: "John",
-    authorisedLname: "Doe",
-    authorisedMob: "9876543210",
-    authorisedEmail: "john.doe@example.com",
-    panCardUpload: "pan_card.pdf",
-    gstCertificate: "gst_certificate.pdf",
-    addressProof: "address_proof.pdf",
-    authorizationLetter: "authorization_letter.pdf",
-    status: applicationData?.status || "Pending Review"
-  };
-
-  const mockBuilderData = {
-    builderName: applicationData?.companyName || "Marine Shipyard Pvt Ltd",
-    emailId: "info@marineship.com",
-    phoneNumber: applicationData?.phoneNumber || "9876543210",
-    panNo: "ABCDE1234F",
-    gstNo: "22ABCDE1234F1Z5",
-    addressLine1: "456 Industrial Area",
-    addressLine2: "Sector 5",
-    pin: "700002",
-    district: applicationData?.district || "Howrah",
-    state: applicationData?.stateUt || "West Bengal",
-    country: "India",
-    companyDetails: "company_details.pdf",
-    gstCertificate: "gst_certificate.pdf",
-    panCardUpload: "pan_card.pdf",
-    factoryLicense: "factory_license.pdf",
-    addressProof: "address_proof.pdf",
-    fireCertificate: "",
-    esipfRegistration: "",
-    iso9001: "iso9001.pdf",
-    iso14001: "iso14001.pdf",
-    iso45001: "",
-    pollutionCertificate: "",
-    experienceCertificate: "experience.pdf",
-    status: applicationData?.status || "Pending Review"
+  const staticData = {
+    ownerName: "John Doe",
+    ownerAddress: "123 Main Street, Harbor City, State 12345",
+    mobile: "9876543210",
+    email: "john.doe@example.com",
+    pan: "ABCDE1234F",
+    aadhar: "123456789012",
+    tradeLicence: "TL123456789",
+    gst: "GST123456789012",
+    grt: "500",
+    workOrderValue: "1000000",
+    vesselType: "new",
+    category: "A",
+    zone: "1",
+    supervisionAuthority: "classificationSociety",
+    purchaseType: "new",
+    classificationSociety: "Lloyd's Register Classification Society",
+    constructedBy: "2",
+    builder: "builder1",
+    builderName: "ABC Marine Shipyard Pvt Ltd",
+    builderAddress: "456 Port Road, Shipyard Complex, Harbor City 54321",
+    builderEmail: "contact@abcshipyard.com",
+    builderMobile: "9876543211",
+    builderTradeLicence: "BTL789012345",
+    builderGST: "BGST987654321098",
+    builderAuth: "auth",
+    termsAccepted: true,
+    
+    // Work Order Files (50 files)
+    ...Array.from({ length: 50 }, (_, i) => ({
+      [`workOrder_file_${i + 1}`]: { 
+        name: `WorkOrder_${String(i + 1).padStart(2, '0')}.pdf`, 
+        size: Math.floor(Math.random() * 2000000) + 500000 
+      },
+      [`workOrder_desc_${i + 1}`]: `Work order document ${i + 1} - ${[
+        'Main contract document',
+        'Amendment and modifications',
+        'Technical specifications',
+        'Timeline and milestones',
+        'Budget breakdown',
+        'Quality requirements',
+        'Safety protocols',
+        'Environmental compliance',
+        'Material specifications',
+        'Equipment details'
+      ][i % 10]}`
+    })).reduce((acc, curr) => ({ ...acc, ...curr }), {}),
+    
+    // Drawing Files (50 files)
+    ...Array.from({ length: 50 }, (_, i) => ({
+      [`drawings_file_${i + 1}`]: { 
+        name: `Drawing_${String(i + 1).padStart(2, '0')}.pdf`, 
+        size: Math.floor(Math.random() * 3000000) + 800000 
+      },
+      [`drawings_desc_${i + 1}`]: `Technical drawing ${i + 1} - ${[
+        'General arrangement plan',
+        'Hull structure details',
+        'Machinery layout',
+        'Electrical schematic',
+        'Piping diagram',
+        'Safety equipment layout',
+        'Navigation equipment',
+        'Interior arrangement',
+        'Deck plan',
+        'Cross-section view'
+      ][i % 10]}`
+    })).reduce((acc, curr) => ({ ...acc, ...curr }), {}),
+    
+    tonnageBooklets: { name: "Tonnage_Booklets.pdf", size: 512000 },
+    stabilityBooklets: { name: "Stability_Booklets.pdf", size: 768000 },
+    authLetter: { name: "Authorization_Letter.pdf", size: 256000 }
   };
 
   useEffect(() => {
-    setIsLoading(true);
-    loaderRef.current?.show?.();
-    setTimeout(() => {
-      setFormData(isOwner ? mockOwnerData : mockBuilderData);
-      setIsLoading(false);
-      loaderRef.current?.hide?.();
-      setCompletedSteps(new Set([1]));
-    }, 500);
-  }, [isOwner]);
-
-  const methods = useForm({ defaultValues: { country: 'India' } });
-  const { setValue } = methods;
-
-  useEffect(() => {
-    if (!isLoading) {
-      Object.keys(formData).forEach(key => {
-        if (formData[key]) {
-          setValue(key, formData[key]);
-        }
-      });
+    if (isNormalMode) {
+      reset();
+    } else if (isEditMode || isViewMode) {
+      setTimeout(() => {
+        Object.keys(staticData).forEach(key => {
+          setValue(key, staticData[key]);
+        });
+      }, 100);
     }
-  }, [isLoading, formData, setValue]);
+  }, [isEditMode, isViewMode, isNormalMode, setValue, reset, location.pathname]);
+
+
+    useEffect(() => {
+    if (!ownerDetails) return; 
+
+    const userInfoFields = {
+      ownerName: ownerDetails?.ownerCompanyName || "",
+      ownerAddress: ownerDetails?.addressLine1+" , "+ownerDetails?.addressLine2,
+      mobile: ownerDetails.phoneNumber || "",
+      email: ownerDetails.emailId || "",
+      pan: ownerDetails.panNo || "",
+      gst: ownerDetails.gstNo || "",
+      category: ownerDetails?.categoryOfOwner || "",
+      // aadhar: "",        
+      // tradeLicence: ""      
+    };
+    Object.entries(userInfoFields)?.forEach(([key, value]) => {
+      setValue(key, value, { shouldDirty: false, shouldTouch: false });
+    });
+
+  }, [ownerDetails, setValue]); 
+
 
   const handleActionClick = (action) => {
     setSelectedAction(action);
@@ -114,9 +166,12 @@ const UserViewPage = () => {
   const handleActionSubmit = (formData) => {
     const payload = {
       action: selectedAction,
-      ...formData,
+      comments: formData.comments,
     };
+    
     console.log("Action submitted:", payload);
+    toast.success(`${selectedAction} action submitted successfully`);
+    
     setShowApprovalModal(false);
     setSelectedAction("");
   };
@@ -126,308 +181,359 @@ const UserViewPage = () => {
     setSelectedAction("");
   };
 
-  const handleDownload = (filename) => {
-    const blob = new Blob(["Dummy file content"], { type: "text/plain" });
-    const link = document.createElement("a");
-    link.href = window.URL.createObjectURL(blob);
-    link.download = filename;
-    link.click();
-    window.URL.revokeObjectURL(link.href);
+  const handleChallanUpload = (e) => {
+    setChallanFile(e.target.files?.[0] || null);
   };
 
-  const renderFileField = (value, fieldName) => {
-    const hasFile = formData[fieldName] && formData[fieldName].trim() !== '';
+  const handleOnlinePay = () => {
+    setIsLoading(true);
+    setShowModal(false);
+   
+    setTimeout(() => {
+      setIsLoading(false);
+      navigate("/new-vessel/registration-success", { 
+        state: { registrationId: "VR2024001" }
+      });
+    }, 1500);
+  };
+
+  const handleOfflineSubmit = () => {
+    setShowModal(false);
+    setIsLoading(true);
     
-    return (
-      <div className="file-display-container">
-        {!hasFile ? (
-          <div className="file-display-no-doc">
-            <BsFileEarmarkX className="no-doc-icon text-muted me-2" size={16} />
-            <span className="no-doc-text">No document uploaded</span>
-          </div>
-        ) : (
-          <div className="file-display-with-doc">
-            <div className="file-info">
-              <FaFileExcel className="file-icon text-success me-2" size={16} />
-              <span className="file-name">
-                {formData[fieldName]}
-              </span>
-            </div>
-            <Button
-              variant="link"
-              size="sm"
-              className="file-download-btn p-0"
-              onClick={() => handleDownload(formData[fieldName])}
-              tabIndex={-1}
-              title="Download"
-            >
-              <BsDownload size={12} className="m-1" />
-            </Button>
-          </div>
-        )}
-      </div>
-    );
+    setTimeout(() => {
+      setIsLoading(false);
+      navigate("/new-vessel/registration-success", { 
+        state: { registrationId: "VR2024001" }
+      });
+    }, 1500);
   };
 
-  const getFormFieldsConfig = () => {
-    if (isOwner) {
-      return {
-        step1: [
-          { name: "categoryOfOwner", label: t("vesselOwnerRegistration.Category of Owner"), type: "text", colSize: 6 },
-          { name: "ownerCompanyName", label: t("vesselOwnerRegistration.Owner/Company Name"), type: "text", colSize: 6 },
-          { name: "emailId", label: t("vesselOwnerRegistration.Email ID"), type: "email", colSize: 6 },
-          { name: "phoneNumber", label: t("vesselOwnerRegistration.Phone Number"), type: "text", colSize: 6 },
-          { name: "panNo", label: t("vesselOwnerRegistration.PAN Number"), type: "text", colSize: 6 },
-          { name: "gstNo", label: t("vesselOwnerRegistration.GST Number"), type: "text", colSize: 6 },
-          { name: "addressLine1", label: t("vesselOwnerRegistration.Address Line-1"), type: "text", colSize: 6 },
-          { name: "addressLine2", label: t("vesselOwnerRegistration.Address Line-2"), type: "text", colSize: 6 },
-          { name: "pin", label: t("vesselOwnerRegistration.PIN"), type: "text", colSize: 6 },
-          { name: "district", label: t("vesselOwnerRegistration.District"), type: "text", colSize: 6 },
-          { name: "state", label: t("vesselOwnerRegistration.State / UT"), type: "text", colSize: 6 },
-          { name: "country", label: t("vesselOwnerRegistration.Country"), type: "text", colSize: 6 },
-        ],
-        step2: [
-          { name: "authorisedFname", label: t("vesselOwnerRegistration.First Name"), type: "text", colSize: 6 },
-          { name: "authorisedLname", label: t("vesselOwnerRegistration.Last Name"), type: "text", colSize: 6 },
-          { name: "authorisedMob", label: t("vesselOwnerRegistration.Primary Mobile Number"), type: "text", colSize: 6 },
-          { name: "authorisedEmail", label: t("vesselOwnerRegistration.Email ID"), type: "email", colSize: 6 },
-          { name: "authorizationLetter", label: t("vesselOwnerRegistration.Letter of Authorization"), type: "file", colSize: 12 },
-        ],
-        step3: [
-          { name: "panCardUpload", label: t("vesselOwnerRegistration.PAN Card"), type: "file", colSize: 6 },
-          { name: "gstCertificate", label: t("vesselOwnerRegistration.GST Certificate"), type: "file", colSize: 6 },
-          { name: "addressProof", label: t("vesselOwnerRegistration.Address Proof"), type: "file", colSize: 6 },
-        ]
-      };
-    } else {
-      return {
-        step1: [
-          { name: "builderName", label: t("builderRegistration.builderName"), type: "text", colSize: 6 },
-          { name: "emailId", label: t("builderRegistration.Email ID"), type: "email", colSize: 6 },
-          { name: "phoneNumber", label: t("builderRegistration.Phone Number"), type: "text", colSize: 6 },
-          { name: "panNo", label: t("builderRegistration.PAN Number"), type: "text", colSize: 6 },
-          { name: "gstNo", label: t("builderRegistration.GST Number"), type: "text", colSize: 6 },
-          { name: "addressLine1", label: t("builderRegistration.Address Line-1"), type: "text", colSize: 6 },
-          { name: "addressLine2", label: t("builderRegistration.Address Line-2"), type: "text", colSize: 6 },
-          { name: "pin", label: t("builderRegistration.PIN"), type: "text", colSize: 6 },
-          { name: "district", label: t("builderRegistration.District"), type: "text", colSize: 6 },
-          { name: "state", label: t("builderRegistration.State / UT"), type: "text", colSize: 6 },
-          { name: "country", label: t("builderRegistration.Country"), type: "text", colSize: 6 },
-        ],
-        step2: [
-          { name: "companyDetails", label: t("builderRegistration.Company Details"), type: "file", colSize: 6 },
-          { name: "gstCertificate", label: t("builderRegistration.GST Certificate"), type: "file", colSize: 6 },
-          { name: "panCardUpload", label: t("builderRegistration.PAN Card"), type: "file", colSize: 6 },
-          { name: "factoryLicense", label: t("builderRegistration.Factory License"), type: "file", colSize: 6 },
-          { name: "addressProof", label: t("builderRegistration.Address Proof"), type: "file", colSize: 6 },
-          { name: "fireCertificate", label: t("builderRegistration.Fire Certificate"), type: "file", colSize: 6 },
-          { name: "esipfRegistration", label: t("builderRegistration.ESIPF Registration"), type: "file", colSize: 6 },
-          { name: "iso9001", label: t("builderRegistration.ISO 9001 Certificate"), type: "file", colSize: 6 },
-          { name: "iso14001", label: t("builderRegistration.ISO 14001 Certificate"), type: "file", colSize: 6 },
-          { name: "iso45001", label: t("builderRegistration.ISO 45001 Certificate"), type: "file", colSize: 6 },
-          { name: "pollutionCertificate", label: t("builderRegistration.Pollution Certificate"), type: "file", colSize: 6 },
-          { name: "experienceCertificate", label: t("builderRegistration.Experience Certificate"), type: "file", colSize: 6 },
-        ]
-      };
+  const handlePayNow = () => {
+    setShowModal(true);
+  };
+
+  // Validation functions
+  const validateVesselDetails = async () => {
+    if (isViewMode) return true;
+    const basicFields = [
+      "ownerName", "ownerAddress", "mobile", "email", "pan", 
+      "aadhar", "tradeLicence", "gst", "grt", "workOrderValue",
+      "vesselType", "category", "purchaseType", "constructedBy"
+    ];
+    
+    const constructedBy = getValues("constructedBy");
+    if (constructedBy === "2") {
+      basicFields.push(
+        "builderName", "builderAddress", "builderEmail", 
+        "builderMobile", "builderTradeLicence", "builderGST", 
+        "builderAuth"
+      );
+      
+      const authLetter = getValues("authLetter");
+      if (!authLetter && !isEditMode) {
+        basicFields.push("authLetter");
+      }
     }
+    
+    const valid = await trigger(basicFields);
+    return valid;
   };
 
-  const formFields = getFormFieldsConfig();
-
-  const getDisabledFormFieldsConfig = () => {
-    const config = {};
-    Object.keys(formFields).forEach(stepKey => {
-      config[stepKey] = formFields[stepKey].map(field => ({
-        ...field,
-        disabled: true,
-        inputClassName: 'disabled-field',
-        render: field.type === 'file' ? (value) => renderFileField(value, field.name) : undefined
-      }));
+  const validateDocuments = async () => {
+    if (isViewMode) return true;
+    
+    const requiredFields = [];
+    
+    const tonnageBooklets = getValues("tonnageBooklets");
+    const stabilityBooklets = getValues("stabilityBooklets");
+    const termsAccepted = getValues("termsAccepted");
+    
+    if (!tonnageBooklets && !isEditMode) {
+      requiredFields.push('tonnageBooklets');
+    }
+    
+    if (!stabilityBooklets && !isEditMode) {
+      requiredFields.push('stabilityBooklets');
+    }
+    
+    if (!termsAccepted) {
+      requiredFields.push('termsAccepted');
+    }
+    
+    let hasErrors = false;
+    
+    requiredFields.forEach(fieldName => {
+      const fieldValue = getValues(fieldName);
+      
+      if (!fieldValue || (fieldValue instanceof FileList && fieldValue.length === 0)) {
+        setError(fieldName, {
+          type: 'required',
+          message: `${fieldName} is required`
+        });
+        hasErrors = true;
+      }
     });
-    return config;
-  };
-
-  const disabledFormFields = getDisabledFormFieldsConfig();
-
-  const getCurrentStepFields = () => {
-    switch (currentStep) {
-      case 1: return disabledFormFields.step1;
-      case 2: return disabledFormFields.step2;
-      case 3: return disabledFormFields.step3 || [];
-      default: return [];
-    }
-  };
-
-  const handleNext = () => {
-    if (currentStep < totalSteps) {
-      setCompletedSteps(prev => new Set([...prev, currentStep]));
-      setCurrentStep(currentStep + 1);
-      window.scrollTo(0, 0);
-    }
-  };
-
-  const handlePrevious = () => {
-    setCurrentStep(Math.max(1, currentStep - 1));
-    window.scrollTo(0, 0);
-  };
-
-  const handleBackToList = () => {
-    navigate('/dashboard');
-  };
-
-  const getStatusBadge = (status) => {
-    const statusMap = {
-      'Pending Review': 'warning',
-      'Pending': 'warning',
-      'Approved': 'success',
-      'Completed': 'success',
-      'Rejected': 'danger',
-      'Processing': 'info'
-    };
-    return <Badge bg={statusMap[status] || 'secondary'} className="status-badge">{status}</Badge>;
-  };
-
-  const getStepIcon = (stepNumber) => {
-    if (completedSteps.has(stepNumber)) {
-      return <FaCheckCircle className="text-white" size={18} />;
-    }
     
-    if (isOwner) {
-      const ownerIcons = [FaUser, FaUser, FaFileUpload];
-      return currentStep === stepNumber ? 
-        React.createElement(ownerIcons[stepNumber - 1], { className: "text-white", size: 16 }) : 
-        stepNumber;
-    } else {
-      const builderIcons = [FaBuilding, FaFileUpload];
-      return currentStep === stepNumber ? 
-        React.createElement(builderIcons[stepNumber - 1], { className: "text-white", size: 16 }) : 
-        stepNumber;
-    }
+    return !hasErrors;
   };
 
-  const getStepTitles = () => {
-    if (isOwner) {
-      return [
-        t("vesselOwnerRegistration.Vessel Owner Details"),
-        t("vesselOwnerRegistration.Authorized Person's Details"),
-        t("vesselOwnerRegistration.Documents Upload")
-      ];
-    } else {
-      return [
-        t("builderRegistration.Vessel Builder Details"),
-        t("builderRegistration.Documents Upload")
-      ];
+  const supervisionAuthority = methods.watch("supervisionAuthority");
+
+  const steps = isViewMode ? [
+    {
+      label: t("Vessel Details"),
+      component: <VesselDetails formMethods={methods} viewMode={isViewMode} editMode={isEditMode} />,
+      validate: validateVesselDetails,
+    },
+    {
+      label: t("Documents"),
+      component: <Documents formMethods={methods} viewMode={isViewMode} editMode={isEditMode} />,
+      validate: validateDocuments,
+    },
+    {
+      label: t("Payment Details"),
+      component: <PaymentDetailsView supervisionAuthority={supervisionAuthority} formData={methods.getValues()} />,
+      validate: () => true,
     }
+  ] : [
+    {
+      label: t("vesselDetails.Vessel Details"),
+      component: <VesselDetails formMethods={methods} viewMode={isViewMode} editMode={isEditMode} />,
+      validate: validateVesselDetails,
+    },
+    {
+      label: t("vesselDetails.Documents"),
+      component: <Documents formMethods={methods} viewMode={isViewMode} editMode={isEditMode} />,
+      validate: validateDocuments,
+    },
+      //  {
+    //   label : t("Preview"),
+    //   component: <VesselRegistrationPreview formData={methods.getValues()} isPreview={true}
+    // />
+    // },
+    {
+      label: t("vesselDetails.Invoicing"),
+      component: (
+        <Invoicing
+          supervisionAuthority={supervisionAuthority}
+          onPayNow={handlePayNow}
+        />
+      ),
+      validate: () => true,
+    },
+  ];
+
+  const handleSave = () => {
+    setIsLoading(true);
+    setTimeout(() => {
+      setIsLoading(false);
+      navigate("/new-vessel/registration-success", { 
+        state: { registrationId: "VR2024001" }
+      });
+    }, 1500);
   };
 
-  const stepTitles = getStepTitles();
-
-  if (isLoading) {
-    return <NewLoader ref={loaderRef} />;
-  }
+  const actionDropdown = isViewMode ? (
+    <ActionDropdown
+      actions={actionsFromAPI}
+      onActionClick={handleActionClick}
+      variant="contained"
+      sx={{
+        backgroundColor: "#2E57A7",
+        fontWeight: "bold",
+        borderRadius: "0.5rem",
+        minWidth: "8rem",
+        fontSize: "0.9rem",
+        color: "#fff",
+        "&:hover": {
+          backgroundColor: "#1f4ea0",
+        },
+      }}
+    />
+  ) : null;
 
   return (
-    <>
-      <Container fluid className="py-4 officer-view-container">
-        <Row className="justify-content-center">
-          <Col size={12}>
-            <Card className="shadow-lg border-0 modern-card">
-              <Card.Header className="modern-header">
-                <Stack direction="horizontal" gap={3} className="flex-wrap justify-content-between align-items-center">
-                  <button
-                    className="btn back-button modern-back-btn"
-                    onClick={handleBackToList}
-                  >
-                    <FaArrowAltCircleLeft size={20} className="text-primary" />
-                  </button>
+    <Box sx={{ padding: "1rem 0.5rem 0 0.5rem", backgroundColor: "#f5f6fa", minHeight: "100vh" }}>
+      {isLoading ? (
+        <div className="d-flex justify-content-center align-items-center" style={{ height: "80vh" }}>
+          <div className="text-center">
+            <div className="spinner-border text-primary" role="status" style={{ width: "3rem", height: "3rem" }}>
+              <span className="visually-hidden">Loading...</span>
+            </div>
+            <p className="mt-3">Processing your request...</p>
+          </div>
+        </div>
+      ) : (
+        <>
+          
+          <div className="d-flex flex-column flex-md-row justify-content-between align-items-start align-items-md-center mb-3 gap-2">
+            <Stack spacing={0.5} className="flex-grow-1">
+              <Typography
+                sx={{
+                  fontWeight: 550,
+                  color: "#2E57A7",
+                  fontSize: { xs: "1rem", sm: "1.1rem", md: "1.2rem" },
+                  lineHeight: 1.2,
+                }}
+              >
+               {isViewMode ? t("View Vessel Registration") + ` - ${id}` : 
+                isEditMode ? t("Edit Vessel Registration") + ` - ${id}` : t("vesselDetails.New Vessel Registration")}
+              </Typography>
+              <Typography
+                sx={{
+                  color: "#666",
+                  fontSize: { xs: "0.6rem", sm: "0.65rem" },
+                  lineHeight: 1.3,
+                }}
+              >
+                {isViewMode ? t("(View vessel registration details)") :
+                 isEditMode ? t("(Update vessel registration details)") : t("vesselDetails.(Fill in the vessel details to complete registration)")}
+              </Typography>
+            </Stack>
+            
+            {/* Note Sheet Button - Only for View Mode */}
+            {isViewMode && (
+              <Button
+                variant="primary"
+                className="d-flex align-items-center shadow-sm flex-shrink-0"
+                style={{
+                  background: "linear-gradient(135deg, #2466bf 0%, #1a4fa0 100%)",
+                  border: "none",
+                  borderRadius: "8px",
+                  padding: "6px 12px",
+                  fontSize: "0.8rem",
+                  fontWeight: "600",
+                  minWidth: "auto",
+                  whiteSpace: "nowrap"
+                }}
+                onClick={() => setShowNoteSheet(true)}
+              >
+                <BsSticky className="me-1 me-sm-2" size={14} />
+                <span className="d-none d-sm-inline">{t("Note Sheet")}</span>
+                <span className="d-sm-none">{t("Notes")}</span>
+              </Button>
+            )}
+          </div>
+          
+          <Stepper 
+            steps={steps} 
+            onSave={handleSave} 
+            viewMode={isViewMode}
+            actionComponent={actionDropdown}
+            onPayNow={handlePayNow}
+          />
 
-                  <div className="flex-grow-1 d-flex flex-column align-items-center">
-                    <div className="d-flex flex-wrap align-items-center justify-content-center gap-2">
-                      <span className="application-label">Application Number:</span>
-                      <span className="application-number">
-                        {applicationNumber}
-                      </span>
-                    </div>
-                  </div>
-                  
-                  <div className="status-container">
-                    {getStatusBadge(formData.status)}
-                  </div>
-                </Stack>
-              </Card.Header>
-
-              <Card.Body className="modern-body">
-                <div className="modern-stepper-wrapper">
-                  {Array.from({ length: totalSteps }, (_, i) => i + 1).map((step, index) => (
-                    <React.Fragment key={step}>
-                      <div className={`modern-stepper-item ${currentStep === step ? 'active' : ''} ${completedSteps.has(step) ? 'completed' : ''}`}>
-                        <div className="modern-step-counter">
-                          {getStepIcon(step)}
-                        </div>
-                        <div className="modern-step-name">{stepTitles[step - 1]}</div>
-                      </div>
-                      
-                      {index < totalSteps - 1 && (
-                        <div className="stepper-connector"></div>
-                      )}
-                    </React.Fragment>
-                  ))}
-                </div>
-
-                <FormProvider {...methods}>
-                  <form>
-                    <div className="form-content">
-                      <Row className="g-4">
-                        <DynamicViewFields
-                          fields={getCurrentStepFields()}
-                          setFormData={setFormData}
-                        />
-                      </Row>
-                    </div>
-
-                    <div className="navigation-footer">
-                      <Button
-                        variant="outline-primary"
-                        onClick={handlePrevious}
-                        disabled={currentStep === 1}
-                        className="nav-btn prev-btn"
-                      >
-                        <FaArrowLeft className="me-2" size={14} /> Previous
-                      </Button>
-                      
-                      {currentStep < totalSteps ? (
-                        <Button
-                          variant="primary"
-                          onClick={handleNext}
-                          className="nav-btn next-btn"
-                        >
-                          Next <FaArrowRight className="ms-2" size={14} />
-                        </Button>
-                      ) : (
-                        <ActionDropdown
-                          actions={actionsFromAPI}
-                          onActionClick={handleActionClick}
-                          variant="primary"
-                          className="action-dropdown"
-                        />
-                      )}
-                    </div>
-                  </form>
-                </FormProvider>
-              </Card.Body>
-            </Card>
-          </Col>
-        </Row>
-
-        <ApprovalModal
-          show={showApprovalModal}
-          handleClose={handleCloseModal}
-          handleSubmitData={handleActionSubmit}
-          selectedAction={selectedAction}
-        />
-      </Container>
-    </>
+        
+          <NoteSheet
+            show={showNoteSheet}
+            onHide={() => setShowNoteSheet(false)}
+            initialNotes={initialNotes}
+          />
+          
+          {!isViewMode && (
+            <PaymentModal
+              show={showModal}
+              onHide={() => setShowModal(false)}
+              paymentMode={paymentMode}
+              setPaymentMode={setPaymentMode}
+              challanFile={challanFile}
+              onChallanUpload={handleChallanUpload}
+              onOnlinePay={handleOnlinePay}
+              onOfflineSubmit={handleOfflineSubmit}
+              isLoading={isLoading}
+              formMethods={methods}
+            />
+          )}
+          
+          {isViewMode && (
+            <ApprovalModal
+              show={showApprovalModal}
+              handleClose={handleCloseModal}
+              handleSubmitData={handleActionSubmit}
+              selectedAction={selectedAction}
+            />
+          )}
+        </>
+      )}
+    </Box>
   );
 };
 
-export default UserViewPage;
+export default NewVesselRegistration;
+import React, { useRef, useEffect, useState } from "react";
+import { IoArrowDownCircle } from "react-icons/io5";
+import { useLocation } from "react-router-dom";
+import styles from "./styles/Collapsible.module.css";
+
+const Collapsible = ({ children, title, openStat = true }) => {
+  const [isOpen, setIsOpen] = useState(openStat);
+  const [maxHeight, setMaxHeight] = useState("0px");
+  const contentRef = useRef(null);
+  const location = useLocation();
+
+  const toggleOpen = (e) => {
+    e.preventDefault();
+    setIsOpen((prev) => !prev);
+  };
+
+  useEffect(() => {
+    setMaxHeight(isOpen ? `${contentRef.current.scrollHeight}px` : "0px");
+  }, [isOpen, children]);
+
+  const isSpecialPath = ["/registration"].includes(
+    location.pathname
+  );
+
+  return (
+    <div
+      className={`${styles.collapseContainer} ${
+        isOpen ? styles.open : styles.closed
+      }`}
+    >
+      <div className={styles.collapseHeader} onClick={toggleOpen}>
+        <div className={styles.collapseTitleWrapper}>
+          <div
+            className={styles.openCollapse}
+            style={{
+              backgroundColor: isOpen ? "#2466BF" : "#d3d3d3",
+              ...(isSpecialPath && { width: "auto" }),
+            }}
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="15"
+              height="15"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="white"
+              strokeWidth="3"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M20 6L9 17l-5-5" />
+            </svg>
+          </div>
+          <span className={styles.collapseTitle}>{title}</span>
+        </div>
+        <button
+          className={`${styles.collapseToggleBtn} ${
+            isOpen ? styles.rotateIcon : ""
+          }`}
+        >
+          <IoArrowDownCircle />
+        </button>
+      </div>
+      <div
+        className={styles.collapseContentWrapper}
+        ref={contentRef}
+        style={{ maxHeight }}
+      >
+        <div className={styles.collapseContent}>{children}</div>
+      </div>
+    </div>
+  );
+};
+
+export default Collapsible;
+Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render.
