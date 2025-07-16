@@ -1,449 +1,760 @@
-import React, { useState, useEffect } from "react";
-import { Box, Typography, Stack } from "@mui/material";
-import { useParams, useLocation, useNavigate } from "react-router-dom";
-import Stepper from "../../../common/Stepper.jsx";
-import VesselDetails from "./VesselDetails.js";
-import Documents from "./Documents.js";
-import NoteSheet from "./NoteSheet.js";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useForm } from "react-hook-form";
-import Invoicing from "../../../common/Invoicing.js";
-import PaymentModal from "../../../common/PaymentModal.js"; 
-import ActionDropdown from "../../../common/ActionDropdown";
-import ApprovalModal from "../../../common/ApprovalModal";
-import NewVesselRegistrationSuccess from "./newVesselRegistrationSuccess.js";
+import { Row, Col } from "react-bootstrap";
+import InputText from "../../../common/InputText.tsx";
+import InputSelect from "../../../common/InputSelect.tsx";
+import InputRadio from "../../../common/InputRadio.tsx";
+import InputFile from "../../../common/InputFile.tsx";
+import Collapsible from "../../../common/Collapsible.js";
 import { useTranslation } from "react-i18next";
 import { useLanguageContext } from "../../../common/LanguageContext.js";
-import { toast } from "react-toastify";
-import { Button } from "react-bootstrap";
-import { BsSticky } from "react-icons/bs";
-import PaymentDetailsView from "./paymentDetailsView.js";
-import { getFromLocalStorage } from "../../../../utils/localStorageUtils.js";
+import { renameFile } from "../../../../utils/constants.ts";
+import { BsDownload } from "react-icons/bs";
+import { FaClipboardList, FaShip, FaUser } from "react-icons/fa";
+import { useMasterData } from "../../../context/MasterDataContext.js";
 
-const NewVesselRegistration = () => {
-  const { t } = useTranslation();
+const VesselDetails = ({ formMethods, viewMode = false, editMode = false }) => {
+  const { i18n, t } = useTranslation();
   const { changeLanguage } = useLanguageContext();
-  const { id } = useParams();
-  const location = useLocation();
-  const navigate = useNavigate();
-  const ownerDetails = getFromLocalStorage("ownerDetails")
-    ? JSON.parse(getFromLocalStorage("ownerDetails"))
-    : "";
-  const isEditMode = !!id && location.pathname.includes('/edit/');
-  const isViewMode = !!id && location.pathname.includes('/view/');
-  const isNormalMode = !isEditMode && !isViewMode;
-  
-  const methods = useForm({ mode: "onTouched" });
-  const { trigger, getValues, setError, setValue, reset } = methods;
+  const [formData, setFormData] = useState({});
+  const { masterData } = useMasterData();
 
-  const [showModal, setShowModal] = useState(false);
-  const [paymentMode, setPaymentMode] = useState("offline");
-  const [challanFile, setChallanFile] = useState(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const [showApprovalModal, setShowApprovalModal] = useState(false);
-  const [selectedAction, setSelectedAction] = useState("");
-  const [showNoteSheet, setShowNoteSheet] = useState(false);
-
-  const actionsFromAPI = ["Approve", "Reject", "Request Changes"];
-
-  const initialNotes = [
-    { id: 1, title: "Initial Review", content: "Document verification completed successfully. All required documents are present and properly formatted.", date: "2024-01-15", author: "John Doe" },
-    { id: 2, title: "Technical Assessment", content: "All technical drawings have been reviewed and approved by the engineering team.", date: "2024-01-16", author: "Jane Smith" }
-  ];
-
-  const staticData = {
-    ownerName: "John Doe",
-    ownerAddress: "123 Main Street, Harbor City, State 12345",
-    mobile: "9876543210",
-    email: "john.doe@example.com",
-    pan: "ABCDE1234F",
-    aadhar: "123456789012",
-    tradeLicence: "TL123456789",
-    gst: "GST123456789012",
-    grt: "500",
-    workOrderValue: "1000000",
-    vesselType: "new",
-    category: "A",
-    zone: "1",
-    supervisionAuthority: "classificationSociety",
-    purchaseType: "new",
-    classificationSociety: "Lloyd's Register Classification Society",
-    constructedBy: "2",
-    builder: "builder1",
-    builderName: "ABC Marine Shipyard Pvt Ltd",
-    builderAddress: "456 Port Road, Shipyard Complex, Harbor City 54321",
-    builderEmail: "contact@abcshipyard.com",
-    builderMobile: "9876543211",
-    builderTradeLicence: "BTL789012345",
-    builderGST: "BGST987654321098",
-    builderAuth: "auth",
-    termsAccepted: true,
-    
-    // Work Order Files (50 files)
-    ...Array.from({ length: 50 }, (_, i) => ({
-      [`workOrder_file_${i + 1}`]: { 
-        name: `WorkOrder_${String(i + 1).padStart(2, '0')}.pdf`, 
-        size: Math.floor(Math.random() * 2000000) + 500000 
-      },
-      [`workOrder_desc_${i + 1}`]: `Work order document ${i + 1} - ${[
-        'Main contract document',
-        'Amendment and modifications',
-        'Technical specifications',
-        'Timeline and milestones',
-        'Budget breakdown',
-        'Quality requirements',
-        'Safety protocols',
-        'Environmental compliance',
-        'Material specifications',
-        'Equipment details'
-      ][i % 10]}`
-    })).reduce((acc, curr) => ({ ...acc, ...curr }), {}),
-    
-    // Drawing Files (50 files)
-    ...Array.from({ length: 50 }, (_, i) => ({
-      [`drawings_file_${i + 1}`]: { 
-        name: `Drawing_${String(i + 1).padStart(2, '0')}.pdf`, 
-        size: Math.floor(Math.random() * 3000000) + 800000 
-      },
-      [`drawings_desc_${i + 1}`]: `Technical drawing ${i + 1} - ${[
-        'General arrangement plan',
-        'Hull structure details',
-        'Machinery layout',
-        'Electrical schematic',
-        'Piping diagram',
-        'Safety equipment layout',
-        'Navigation equipment',
-        'Interior arrangement',
-        'Deck plan',
-        'Cross-section view'
-      ][i % 10]}`
-    })).reduce((acc, curr) => ({ ...acc, ...curr }), {}),
-    
-    tonnageBooklets: { name: "Tonnage_Booklets.pdf", size: 512000 },
-    stabilityBooklets: { name: "Stability_Booklets.pdf", size: 768000 },
-    authLetter: { name: "Authorization_Letter.pdf", size: 256000 }
+  const defaultValues = {
+    ownerName: "",
+    ownerAddress: "",
+    mobile: "",
+    email: "",
+    pan: "",
+    aadhar: "",
+    tradeLicence: "",
+    gst: "",
+    grt: "",
+    workOrderValue: "",
+    vesselType: "",
+    category: "",
+    zone: "",
+    supervisionAuthority: "",
+    purchaseType: "",
+    classificationSociety: "",
+    constructedBy: "",
+    builder: "",
+    builderName: "",
+    builderAddress: "",
+    builderEmail: "",
+    builderMobile: "",
+    builderTradeLicence: "",
+    builderGST: "",
+    builderAuth: "",
+    authLetter: "",
+    termsAccepted: false,
+    tonnageBooklets: null,
+    stabilityBooklets: null,
   };
+
+  const internalFormMethods = useForm({
+    defaultValues,
+    mode: "onTouched",
+  });
+
+  const methods = formMethods || internalFormMethods;
+
+  const isCompMount = useRef(true);
+
+  const {
+    register,
+    watch,
+    setValue,
+    clearErrors,
+    trigger,
+    getValues,
+    setError,
+    formState: { errors },
+  } = methods;
+
+  const constructedBy = watch("constructedBy");
+  const category = watch("category");
 
   useEffect(() => {
-    if (isNormalMode) {
-      reset();
-    } else if (isEditMode || isViewMode) {
-      setTimeout(() => {
-        Object.keys(staticData).forEach(key => {
-          setValue(key, staticData[key]);
-        });
-      }, 100);
+    if (isCompMount.current) {
+      isCompMount.current = false;
+      return;
     }
-  }, [isEditMode, isViewMode, isNormalMode, setValue, reset]);
+    const fieldsWithErrors = Object.keys(errors);
+    trigger(fieldsWithErrors);
+  }, [i18n.language]);
 
   useEffect(() => {
-    if (!ownerDetails) return; 
-
-    const userInfoFields = {
-      ownerName: ownerDetails?.ownerCompanyName || "",
-      ownerAddress: ownerDetails?.addressLine1+" , "+ownerDetails?.addressLine2,
-      mobile: ownerDetails.phoneNumber || "",
-      email: ownerDetails.emailId || "",
-      pan: ownerDetails.panNo || "",
-      gst: ownerDetails.gstNo || "",
-      category: ownerDetails?.categoryOfOwner || "",
-    };
-    Object.entries(userInfoFields)?.forEach(([key, value]) => {
-      setValue(key, value, { shouldDirty: false, shouldTouch: false });
-    });
-  }, []);
-
-  const handleActionClick = (action) => {
-    setSelectedAction(action);
-    setShowApprovalModal(true);
-  };
-
-  const handleActionSubmit = (formData) => {
-    const payload = {
-      action: selectedAction,
-      comments: formData.comments,
-    };
-    
-    console.log("Action submitted:", payload);
-    toast.success(`${selectedAction} action submitted successfully`);
-    
-    setShowApprovalModal(false);
-    setSelectedAction("");
-  };
-
-  const handleCloseModal = () => {
-    setShowApprovalModal(false);
-    setSelectedAction("");
-  };
-
-  const handleChallanUpload = (e) => {
-    setChallanFile(e.target.files?.[0] || null);
-  };
-
-  const handleOnlinePay = () => {
-    setIsLoading(true);
-    setShowModal(false);
-   
     setTimeout(() => {
-      setIsLoading(false);
-      navigate("/new-vessel/registration-success", { 
-        state: { registrationId: "VR2024001" }
+      Object.keys(formData).forEach((key) => {
+        if (formData[key] !== undefined) {
+          setValue(key, formData[key], { shouldValidate: false });
+        }
       });
-    }, 1500);
-  };
+    }, 0);
+  }, [setValue, formData]);
 
-  const handleOfflineSubmit = () => {
-    setShowModal(false);
-    setIsLoading(true);
-    
-    setTimeout(() => {
-      setIsLoading(false);
-      navigate("/new-vessel/registration-success", { 
-        state: { registrationId: "VR2024001" }
-      });
-    }, 1500);
-  };
+  const handleInputChange = useCallback(
+    (name, value) => {
+      setValue(name, value, { shouldValidate: true });
+      clearErrors(name);
+      setFormData((prev) => ({
+        ...prev,
+        [name]: value,
+      }));
+    },
+    [setValue, clearErrors]
+  );
 
-  const handlePayNow = () => {
-    setShowModal(true);
-  };
+  const handleFileChange = useCallback(
+    (name, file) => {
+      if (!file) return;
 
-  // Validation functions
-  const validateVesselDetails = async () => {
-    if (isViewMode) return true;
-    const basicFields = [
-      "ownerName", "ownerAddress", "mobile", "email", "pan", 
-      "aadhar", "tradeLicence", "gst", "grt", "workOrderValue",
-      "vesselType", "category", "purchaseType", "constructedBy"
-    ];
-    
-    const constructedBy = getValues("constructedBy");
-    if (constructedBy === "2") {
-      basicFields.push(
-        "builderName", "builderAddress", "builderEmail", 
-        "builderMobile", "builderTradeLicence", "builderGST", 
-        "builderAuth"
-      );
-      
-      const authLetter = getValues("authLetter");
-      if (!authLetter && !isEditMode) {
-        basicFields.push("authLetter");
-      }
-    }
-    
-    const valid = await trigger(basicFields);
-    return valid;
-  };
-
-  const validateDocuments = async () => {
-    if (isViewMode) return true;
-    
-    const requiredFields = [];
-    
-    const tonnageBooklets = getValues("tonnageBooklets");
-    const stabilityBooklets = getValues("stabilityBooklets");
-    const termsAccepted = getValues("termsAccepted");
-    
-    if (!tonnageBooklets && !isEditMode) {
-      requiredFields.push('tonnageBooklets');
-    }
-    
-    if (!stabilityBooklets && !isEditMode) {
-      requiredFields.push('stabilityBooklets');
-    }
-    
-    if (!termsAccepted) {
-      requiredFields.push('termsAccepted');
-    }
-    
-    let hasErrors = false;
-    
-    requiredFields.forEach(fieldName => {
-      const fieldValue = getValues(fieldName);
-      
-      if (!fieldValue || (fieldValue instanceof FileList && fieldValue.length === 0)) {
-        setError(fieldName, {
-          type: 'required',
-          message: `${fieldName} is required`
+      const validTypes = [
+        "application/pdf",
+        "image/jpeg",
+        "image/png",
+        "image/jpg",
+      ];
+      if (!validTypes.includes(file.type)) {
+        setError(name, {
+          type: "manual",
+          message: t("Only PDF, JPG or PNG files are allowed"),
         });
-        hasErrors = true;
+        setValue(name, null);
+        return;
       }
-    });
-    
-    return !hasErrors;
-  };
 
-  const supervisionAuthority = methods.watch("supervisionAuthority");
+      if (file.size > 10 * 1024 * 1024) {
+        setError(name, {
+          type: "manual",
+          message: t("File size should not exceed 10MB"),
+        });
+        setValue(name, null);
+        return;
+      }
 
-  const steps = isViewMode ? [
-    {
-      label: t("Vessel Details"),
-      component: <VesselDetails formMethods={methods} viewMode={isViewMode} editMode={isEditMode} />,
-      validate: validateVesselDetails,
-    },
-    {
-      label: t("Documents"),
-      component: <Documents formMethods={methods} viewMode={isViewMode} editMode={isEditMode} />,
-      validate: validateDocuments,
-    },
-    {
-      label: t("Payment Details"),
-      component: <PaymentDetailsView supervisionAuthority={supervisionAuthority} formData={methods.getValues()} />,
-      validate: () => true,
-    }
-  ] : [
-    {
-      label: t("vesselDetails.Vessel Details"),
-      component: <VesselDetails formMethods={methods} viewMode={isViewMode} editMode={isEditMode} />,
-      validate: validateVesselDetails,
-    },
-    {
-      label: t("vesselDetails.Documents"),
-      component: <Documents formMethods={methods} viewMode={isViewMode} editMode={isEditMode} />,
-      validate: validateDocuments,
-    },
-    {
-      label: t("vesselDetails.Invoicing"),
-      component: (
-        <Invoicing
-          supervisionAuthority={supervisionAuthority}
-          onPayNow={handlePayNow}
-        />
-      ),
-      validate: () => true,
-    },
-  ];
+      const extension = file?.name?.substring(file?.name?.lastIndexOf("."));
+      const fileName = `${name}${extension}`;
+      file.originalName = fileName;
+      const renamedFile = renameFile(file, fileName);
 
-  const handleSave = () => {
-    setIsLoading(true);
-    setTimeout(() => {
-      setIsLoading(false);
-      navigate("/new-vessel/registration-success", { 
-        state: { registrationId: "VR2024001" }
+      clearErrors(name);
+      setValue(name, renamedFile, { shouldValidate: true });
+      setFormData((prev) => ({
+        ...prev,
+        [name]: renamedFile,
+      }));
+    },
+    [setValue, clearErrors, setError, t]
+  );
+
+  useEffect(() => {
+    if (category === "A") {
+      setValue("ZONE", "1", { shouldValidate: true });
+      setValue("supervisionAuthority", "CLASSIFICATION SOCIETY", {
+        shouldValidate: true,
       });
-    }, 1500);
-  };
+      clearErrors("ZONE");
+      clearErrors("supervisionAuthority");
+    }
+  }, [category, setValue, clearErrors]);
 
-  const actionDropdown = isViewMode ? (
-    <ActionDropdown
-      actions={actionsFromAPI}
-      onActionClick={handleActionClick}
-      variant="contained"
-      sx={{
-        backgroundColor: "#2E57A7",
-        fontWeight: "bold",
-        borderRadius: "0.5rem",
-        minWidth: "8rem",
-        fontSize: "0.9rem",
-        color: "#fff",
-        "&:hover": {
-          backgroundColor: "#1f4ea0",
-        },
-      }}
-    />
-  ) : null;
+  const handleDownload = (fileName) => {
+    const link = document.createElement("a");
+    link.href = "#";
+    link.download = fileName;
+    link.click();
+  };
 
   return (
-    <Box sx={{ padding: "1rem 0.5rem 0 0.5rem", backgroundColor: "#f5f6fa", minHeight: "100vh" }}>
-      {isLoading ? (
-        <div className="d-flex justify-content-center align-items-center" style={{ height: "80vh" }}>
-          <div className="text-center">
-            <div className="spinner-border text-primary" role="status" style={{ width: "3rem", height: "3rem" }}>
-              <span className="visually-hidden">Loading...</span>
-            </div>
-            <p className="mt-3">Processing your request...</p>
-          </div>
-        </div>
-      ) : (
-        <>
-          <div className="d-flex flex-column flex-md-row justify-content-between align-items-start align-items-md-center mb-3 gap-2">
-            <Stack spacing={0.5} className="flex-grow-1">
-              <Typography
-                sx={{
-                  fontWeight: 550,
-                  color: "#2E57A7",
-                  fontSize: { xs: "1rem", sm: "1.1rem", md: "1.2rem" },
-                  lineHeight: 1.2,
-                }}
-              >
-               {isViewMode ? t("View Vessel Registration") + ` - ${id}` : 
-                isEditMode ? t("Edit Vessel Registration") + ` - ${id}` : t("vesselDetails.New Vessel Registration")}
-              </Typography>
-              <Typography
-                sx={{
-                  color: "#666",
-                  fontSize: { xs: "0.6rem", sm: "0.65rem" },
-                  lineHeight: 1.3,
-                }}
-              >
-                {isViewMode ? t("(View vessel registration details)") :
-                 isEditMode ? t("(Update vessel registration details)") : t("vesselDetails.(Fill in the vessel details to complete registration)")}
-              </Typography>
-            </Stack>
-            
-            {isViewMode && (
-              <Button
-                variant="primary"
-                className="d-flex align-items-center shadow-sm flex-shrink-0"
-                style={{
-                  background: "linear-gradient(135deg, #2466bf 0%, #1a4fa0 100%)",
-                  border: "none",
-                  borderRadius: "8px",
-                  padding: "6px 12px",
-                  fontSize: "0.8rem",
-                  fontWeight: "600",
-                  minWidth: "auto",
-                  whiteSpace: "nowrap"
-                }}
-                onClick={() => setShowNoteSheet(true)}
-              >
-                <BsSticky className="me-1 me-sm-2" size={14} />
-                <span className="d-none d-sm-inline">{t("Note Sheet")}</span>
-                <span className="d-sm-none">{t("Notes")}</span>
-              </Button>
-            )}
-          </div>
-          
-          <Stepper 
-            steps={steps} 
-            onSave={handleSave} 
-            viewMode={isViewMode}
-            actionComponent={actionDropdown}
-            onPayNow={handlePayNow}
-          />
+    <form autoComplete="off">
+      <Collapsible
+        title={
+          <>
+            <FaClipboardList className="me-2" style={{ color: "#2466BF" }} />
+            <span>{t("Basic Information")}</span>
+          </>
+        }
+        openStat={true}
+      >
+        <Row className="gy-3" style={{ padding: "1rem" }}>
+          <Col md={4}>
+            <InputText
+              label={t("vesselDetails.Name of Owner")}
+              required={true}
+              name="ownerName"
+              placeholder={t("vesselDetails.Please enter Name of Owner")}
+              register={register("ownerName", {
+                required: t("vesselDetails.Name is required"),
+              })}
+              errors={errors}
+              disabled={viewMode || !!getValues("ownerName")}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("vesselDetails.Address of Owner")}
+              required={true}
+              name="ownerAddress"
+              placeholder={t("vesselDetails.Please enter Address of Owner")}
+              register={register("ownerAddress", {
+                required: t("vesselDetails.Address is required"),
+              })}
+              errors={errors}
+              disabled={viewMode || !!getValues("ownerAddress")}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("vesselDetails.Mobile")}
+              required={true}
+              name="mobile"
+              placeholder={t("vesselDetails.Please enter Mobile")}
+              register={register("mobile", {
+                required: t("vesselDetails.Mobile is required"),
+              })}
+              errors={errors}
+              disabled={viewMode || !!getValues("mobile")}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("vesselDetails.Email Id")}
+              required={true}
+              name="email"
+              type="email"
+              placeholder={t("vesselDetails.Please enter Email Id")}
+              register={register("email", {
+                required: t("vesselDetails.Email is required"),
+              })}
+              errors={errors}
+              disabled={viewMode || !!getValues("email")}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("vesselDetails.PAN")}
+              required={true}
+              name="pan"
+              placeholder={t("vesselDetails.Please enter PAN")}
+              register={register("pan", {
+                required: t("vesselDetails.PAN is required"),
+              })}
+              errors={errors}
+              disabled={viewMode || !!getValues("pan")}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("vesselDetails.Aadhar")}
+              required={true}
+              name="aadhar"
+              placeholder={t("vesselDetails.Please enter Aadhar")}
+              register={register("aadhar", {
+                required: t("vesselDetails.Aadhar is required"),
+              })}
+              errors={errors}
+              disabled={viewMode || !!getValues("aadhar")}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("vesselDetails.Trade Licence")}
+              required={true}
+              name="tradeLicence"
+              placeholder={t("vesselDetails.Please enter Trade Licence")}
+              register={register("tradeLicence", {
+                required: t("vesselDetails.Trade Licence is required"),
+              })}
+              errors={errors}
+              disabled={viewMode || !!getValues("tradeLicence")}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("vesselDetails.GST")}
+              required={true}
+              name="gst"
+              placeholder={t("vesselDetails.Please enter GST")}
+              register={register("gst", {
+                required: t("vesselDetails.GST is required"),
+              })}
+              errors={errors}
+              disabled={viewMode || !!getValues("gst")}
+            />
+          </Col>
+        </Row>
+      </Collapsible>
 
-          <NoteSheet
-            show={showNoteSheet}
-            onHide={() => setShowNoteSheet(false)}
-            initialNotes={initialNotes}
-          />
-          
-          {!isViewMode && (
-            <PaymentModal
-              show={showModal}
-              onHide={() => setShowModal(false)}
-              paymentMode={paymentMode}
-              setPaymentMode={setPaymentMode}
-              challanFile={challanFile}
-              onChallanUpload={handleChallanUpload}
-              onOnlinePay={handleOnlinePay}
-              onOfflineSubmit={handleOfflineSubmit}
-              isLoading={isLoading}
-              formMethods={methods}
+      <Collapsible
+        title={
+          <div className="d-flex align-items-center">
+            <FaShip className="me-2" style={{ color: "#2466BF" }} />
+            <span style={{ color: "#2466BF" }}>{t("Vessel Details")}</span>
+          </div>
+        }
+        openStat={true}
+      >
+        <Row className="gy-3" style={{ padding: "1rem" }}>
+          <Col md={4}>
+            <InputSelect
+              label={t("vesselDetails.Type of Vessel")}
+              required={true}
+              name="vesselType"
+              options={[
+                {
+                  value: "",
+                  label: "-- Select --",
+                },
+                ...(masterData?.vesselTypes?.map((type) => ({
+                  value: type.valueCode,
+                  label: type.valueLabel,
+                })) || []),
+              ]}
+              register={register("vesselType", {
+                required: t("vesselDetails.vesselType is required"),
+              })}
+              errors={errors}
+              value={formData.vesselType || watch("vesselType") || ""}
+              onChange={(value) =>
+                !viewMode && handleInputChange("vesselType", value)
+              }
+              disabled={viewMode}
             />
-          )}
-          
-          {isViewMode && (
-            <ApprovalModal
-              show={showApprovalModal}
-              handleClose={handleCloseModal}
-              handleSubmitData={handleActionSubmit}
-              selectedAction={selectedAction}
+          </Col>
+          <Col md={4}>
+            <InputSelect
+              label={t("vesselDetails.Category")}
+              required={true}
+              name="category"
+              options={[
+                {
+                  value: "",
+                  label: "-- Select --",
+                },
+                ...(masterData?.vesselCategories?.map((type) => ({
+                  value: type.valueCode,
+                  label: type.valueLabel,
+                })) || [
+                  { value: "A", label: t("vesselDetails.Category A") },
+                  { value: "B", label: t("vesselDetails.Category B") },
+                  { value: "C", label: t("vesselDetails.Category C") },
+                ]),
+              ]}
+              register={register("category", {
+                required: t("vesselDetails.category is required"),
+              })}
+              errors={errors}
+              value={formData.category || watch("category") || ""}
+              onChange={(value) =>
+                !viewMode && handleInputChange("category", value)
+              }
+              disabled={viewMode}
             />
+          </Col>
+          <Col md={4}>
+            <InputSelect
+              label={t("vesselDetails.Zone")}
+              required={true}
+              name="zone"
+              options={[
+                {
+                  value: "",
+                  label: "-- Select --",
+                },
+                ...(masterData?.zones?.map((type) => ({
+                  value: type.valueCode,
+                  label: type.valueLabel,
+                })) || [
+                  { value: "1", label: t("vesselDetails.Zone 1") },
+                  { value: "2", label: t("vesselDetails.Zone 2") },
+                  { value: "3", label: t("vesselDetails.Zone 3") },
+                ]),
+              ]}
+              register={register("zone", {
+                required: category !== "A" && t("zone is required"),
+              })}
+              errors={errors}
+              value={formData.zone || watch("zone") || ""}
+              onChange={(value) =>
+                !viewMode && handleInputChange("zone", value)
+              }
+              disabled={viewMode || category === "A"}
+            />
+          </Col>
+
+          <Col md={4}>
+            <InputText
+              label={t("vesselDetails.Gross Tonnage (GRT)")}
+              required={true}
+              name="grt"
+              placeholder={t("vesselDetails.Please enter GRT")}
+              register={register("grt", {
+                required: t("vesselDetails.GRT is required"),
+              })}
+              errors={errors}
+              disabled={viewMode}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("vesselDetails.Work Order Value")}
+              required={true}
+              name="workOrderValue"
+              placeholder={t("vesselDetails.Enter Work Order Value")}
+              register={register("workOrderValue", {
+                required: t("vesselDetails.Work Order Value is required"),
+                pattern: {
+                  value: /^[0-9]+$/,
+                  message: t("vesselDetails.Please enter a valid number"),
+                },
+              })}
+              errors={errors}
+              disabled={viewMode}
+            />
+          </Col>
+
+          <Col md={4}>
+            <InputSelect
+              label={t("vesselDetails.Supervision Authority")}
+              required={true}
+              name="supervisionAuthority"
+              options={[
+                {
+                  value: "",
+                  label: "-- Select --",
+                },
+                ...(masterData?.supervisionAuthorites?.map((type) => ({
+                  value: type.valueCode,
+                  label: type.valueLabel,
+                })) || [
+                  { value: "IWT", label: t("IWT") },
+                  {
+                    value: "CLASSIFICATION SOCIETY",
+                    label: t("vesselDetails.Classification Society"),
+                  },
+                ]),
+              ]}
+              register={register("supervisionAuthority", {
+                required:
+                  category !== "A" &&
+                  t("vesselDetails.Supervision Authority is required"),
+              })}
+              errors={errors}
+              value={
+                formData.supervisionAuthority ||
+                watch("supervisionAuthority") ||
+                ""
+              }
+              onChange={(value) =>
+                !viewMode && handleInputChange("supervisionAuthority", value)
+              }
+              disabled={viewMode || category === "A"}
+            />
+          </Col>
+          <Col md={4}>
+            <InputSelect
+              label={t("vesselDetails.Purchase Type")}
+              required={true}
+              name="purchaseType"
+              options={[
+                {
+                  value: "",
+                  label: "-- Select --",
+                },
+                ...(masterData?.purchaseTypes?.map((type) => ({
+                  value: type.valueCode,
+                  label: type.valueLabel,
+                })) || [
+                  { value: "NEW", label: t("vesselDetails.New") },
+                  { value: "USED", label: t("vesselDetails.Used") },
+                ]),
+              ]}
+              register={register("purchaseType", {
+                required: t("vesselDetails.Purchase Type is required"),
+              })}
+              errors={errors}
+              value={formData.purchaseType || watch("purchaseType") || ""}
+              onChange={(value) =>
+                !viewMode && handleInputChange("purchaseType", value)
+              }
+              disabled={viewMode}
+            />
+          </Col>
+          <Col md={5}>
+            <InputText
+              label={t("vesselDetails.Name of the Classification Society")}
+              name="classificationSociety"
+              placeholder={t(
+                "vesselDetails.Please enter Name of the Classification Society"
+              )}
+              register={register("classificationSociety")}
+              errors={errors}
+              disabled={viewMode}
+            />
+          </Col>
+          <Col md={6} style={{ paddingTop: "1rem" }}>
+            <InputRadio
+              name="constructedBy"
+              label={t("vesselDetails.Constructed By ?")}
+              options={[
+                { label: t("vesselDetails.Self"), value: "1" },
+                { label: t("vesselDetails.Builder"), value: "2" },
+              ]}
+              register={register}
+              rules={{
+                required: t("vesselDetails.Please select a Constructor Type"),
+              }}
+              errors={errors}
+              onChange={() => !viewMode && clearErrors("constructedBy")}
+              disabled={viewMode}
+            />
+          </Col>
+          {constructedBy === "2" && (
+            <Col md={6}>
+              <InputSelect
+                label={t("vesselDetails.Builder")}
+                required={true}
+                name="builder"
+                options={[
+                  { value: "builder1", label: t("vesselDetails.Builder 1") },
+                  { value: "builder2", label: t("vesselDetails.Builder 2") },
+                ]}
+                register={register("builder", {
+                  required: t("vesselDetails.Builder is required"),
+                })}
+                errors={errors}
+                value={formData.builder || watch("builder") || ""}
+                onChange={(value) =>
+                  !viewMode && handleInputChange("builder", value)
+                }
+                disabled={viewMode}
+              />
+            </Col>
           )}
-        </>
+        </Row>
+      </Collapsible>
+
+      {constructedBy === "2" && (
+        <Collapsible
+          title={
+            <div className="d-flex align-items-center">
+              <FaUser className="me-2" style={{ color: "#2466BF" }} />
+              <span style={{ color: "#2466BF" }}>{t("Builder Details")}</span>
+            </div>
+          }
+          openStat={true}
+        >
+          <Row className="gy-3" style={{ padding: "1rem" }}>
+            <Col md={4}>
+              <InputText
+                label={t("vesselDetails.Builder Name")}
+                required={true}
+                name="builderName"
+                placeholder={t("vesselDetails.Please enter Builder Name")}
+                register={register("builderName", {
+                  required: t("vesselDetails.Builder Name is required"),
+                })}
+                errors={errors}
+                disabled={viewMode}
+              />
+            </Col>
+            <Col md={4}>
+              <InputText
+                label={t("vesselDetails.Builder Address")}
+                required={true}
+                name="builderAddress"
+                placeholder={t("vesselDetails.Please enter Builder Address")}
+                register={register("builderAddress", {
+                  required: t("vesselDetails.Builder Address is required"),
+                })}
+                errors={errors}
+                disabled={viewMode}
+              />
+            </Col>
+            <Col md={4}>
+              <InputText
+                label={t("vesselDetails.Builder Email Id")}
+                required={true}
+                name="builderEmail"
+                type="email"
+                placeholder={t("vesselDetails.Please enter Builder Email Id")}
+                register={register("builderEmail", {
+                  required: t("vesselDetails.Builder Email is required"),
+                  pattern: {
+                    value: /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i,
+                    message: t("vesselDetails.Invalid email address"),
+                  },
+                })}
+                errors={errors}
+                disabled={viewMode}
+              />
+            </Col>
+            <Col md={4}>
+              <InputText
+                label={t("vesselDetails.Mobile")}
+                required={true}
+                name="builderMobile"
+                placeholder={t("vesselDetails.Please enter Mobile")}
+                register={register("builderMobile", {
+                  required: t("vesselDetails.Builder Mobile is required"),
+                  pattern: {
+                    value: /^[0-9]{10}$/,
+                    message: t("vesselDetails.Invalid mobile number"),
+                  },
+                })}
+                errors={errors}
+                disabled={viewMode}
+              />
+            </Col>
+            <Col md={4}>
+              <InputText
+                label={t("vesselDetails.Trade Licence")}
+                required={true}
+                name="builderTradeLicence"
+                placeholder={t("vesselDetails.Please enter Trade Licence")}
+                register={register("builderTradeLicence", {
+                  required: t(
+                    "vesselDetails.Builder Trade Licence is required"
+                  ),
+                })}
+                errors={errors}
+                disabled={viewMode}
+              />
+            </Col>
+            <Col md={4}>
+              <InputText
+                label={t("vesselDetails.GST")}
+                required={true}
+                name="builderGST"
+                placeholder={t("vesselDetails.Please enter GST")}
+                register={register("builderGST", {
+                  required: t("vesselDetails.Builder GST is required"),
+                })}
+                errors={errors}
+                disabled={viewMode}
+              />
+            </Col>
+            <Col md={4}>
+              <InputSelect
+                label={t("vesselDetails.Builder Authorization")}
+                required={true}
+                name="builderAuth"
+                options={[
+                  { value: "auth", label: t("vesselDetails.Authorized") },
+                  { value: "rejected", label: t("vesselDetails.Rejected") },
+                ]}
+                register={register("builderAuth", {
+                  required: t(
+                    "vesselDetails.Builder Authorization is required"
+                  ),
+                })}
+                errors={errors}
+                value={formData.builderAuth || watch("builderAuth") || ""}
+                onChange={(value) =>
+                  !viewMode && handleInputChange("builderAuth", value)
+                }
+                disabled={viewMode}
+              />
+            </Col>
+            <Col md={6}>
+              {viewMode ? (
+                watch("authLetter") && watch("authLetter").name ? (
+                  <div className="mb-3">
+                    <label
+                      className="form-label fw-bold"
+                      style={{ fontSize: "0.9rem" }}
+                    >
+                      {t("Authorization Letter")}
+                    </label>
+                    <div className="p-2 p-sm-3 border rounded bg-light">
+                      <div className="d-flex flex-column flex-sm-row justify-content-between align-items-start align-items-sm-center gap-2">
+                        <div className=" min-width-0">
+                          <div
+                            className="fw-semibold text-primary mb-1"
+                            style={{
+                              fontSize: "0.8rem",
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {watch("authLetter").name}
+                          </div>
+                          <small
+                            className="text-muted"
+                            style={{ fontSize: "0.7rem" }}
+                          >
+                            {(
+                              (watch("authLetter").size || 0) /
+                              1024 /
+                              1024
+                            ).toFixed(1)}{" "}
+                            MB
+                          </small>
+                        </div>
+                        <button
+                          type="button"
+                          className="btn btn-outline-primary btn-sm d-flex align-items-center flex-shrink-0"
+                          style={{ fontSize: "0.75rem", padding: "4px 8px" }}
+                          onClick={() =>
+                            handleDownload(watch("authLetter").name)
+                          }
+                        >
+                          <BsDownload size={12} className="me-1" />
+                          <span>{t("Download")}</span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="mb-3">
+                    <label
+                      className="form-label fw-bold"
+                      style={{ fontSize: "0.9rem" }}
+                    >
+                      {t("Authorization Letter")}
+                    </label>
+                    <div
+                      className="p-2 p-sm-3 border rounded bg-light text-muted text-center"
+                      style={{ fontSize: "0.8rem" }}
+                    >
+                      {t("No file uploaded")}
+                    </div>
+                  </div>
+                )
+              ) : (
+                <div className="mb-2">
+                  <InputFile
+                    label={t("Authorization Letter")}
+                    required={true}
+                    name="authLetter"
+                    register={register("authLetter", {
+                      required: t(
+                        "vesselDetails.Authorization Letter is required"
+                      ),
+                    })}
+                    errors={errors}
+                    onChange={(e) => {
+                      if (viewMode) return;
+                      if (e.target.files && e?.target?.files[0]) {
+                        handleFileChange("authLetter", e.target.files[0]);
+                      }
+                    }}
+                    disabled={viewMode}
+                    watch={watch}
+                    defaultValue={watch("authLetter")}
+                    clearErrors={clearErrors}
+                    accept=".pdf,.jpg,.jpeg,.png"
+                  />
+                </div>
+              )}
+            </Col>
+          </Row>
+        </Collapsible>
       )}
-    </Box>
+    </form>
   );
 };
 
-export default NewVesselRegistration;
+export default VesselDetails;
