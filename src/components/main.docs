@@ -1,235 +1,439 @@
-import React, { useState, useEffect } from "react";
-import WelcomeBox from "../../../common/WelcomeBox.js";
-import { Card, Form, InputGroup, Button, Row, Col } from "react-bootstrap";
-import { BsSearch, BsFilter } from "react-icons/bs";
-import ActionTable from "../../../common/ActionTable.tsx";
-import { useNavigate } from "react-router-dom";
-import UserRegFilter from "./userRegFilter.js"; // Our new filter component
-import { headerStyle } from "../../../../utils/constants.ts";
+import React, { useState, useEffect, useRef } from 'react';
+import { useForm, FormProvider } from 'react-hook-form';
+import { Container, Row, Col, Button, Card, Badge, Stack } from 'react-bootstrap';
+import { FaFileAlt, FaFileUpload, FaArrowLeft, FaArrowRight, FaDownload, FaArrowAltCircleLeft, FaCheckCircle, FaFileExcel, FaUser, FaBuilding } from 'react-icons/fa';
+import { BsFileEarmarkX, BsDownload } from 'react-icons/bs';
+import { useNavigate, useParams } from 'react-router-dom';
+import ActionDropdown from '../../../common/ActionDropdown';
+import ApprovalModal from '../../../common/ApprovalModal';
+import './userViewPage.css';
+import NewLoader from '../../../common/NewLoader';
+import DynamicViewFields from '../../../common/DynamicViewFields';
+import createFormFieldsConfig from '../../../common/FormFieldsConfig';
+import useCreateFormFieldsConfig from '../../../common/FormFieldsConfig';
+import { useTranslation } from 'react-i18next';
 
-const INBOX_COLUMNS = [
-  {
-    colName: "Application No",
-    fieldName: "appNo",
-    clsName: "column-text-start",
-  },
-  {
-    colName: "Application Type",
-    fieldName: "appType",
-    clsName: "column-text-start",
-  },
-  {
-    colName: "Phone No",
-    fieldName: "phoneNumber",
-    clsName: "column-text-start",
-  },
-  {
-    colName: "State",
-    fieldName: "stateUt",
-    clsName: "column-text-start",
-  },
-  {
-    colName: "District",
-    fieldName: "district",
-    clsName: "column-text-start",
-  },
-  {
-    colName: "Date of Submission",
-    fieldName: "date",
-    clsName: "column-text-start",
-  },
-  {
-    colName: "Status",
-    fieldName: "status",
-    clsName: "column-text-start",
-    render: (value) => (
-      <span className={`status-badge ${value.toLowerCase()}`}>{value}</span>
-    ),
-  },
-  {
-    colName: "Action",
-    fieldName: "action",
-    actions: ['view'],
-    clsName: "col-sm-2 column-text-start actions-column",
-  },
-];
-
-const UserRegDashboard = () => {
+const UserViewPage = () => {
+  const { t } = useTranslation();
+  const { type, id } = useParams();
+  const [currentStep, setCurrentStep] = useState(1);
+  const [formData, setFormData] = useState({});
+  const [isLoading, setIsLoading] = useState(true);
+  const [showApprovalModal, setShowApprovalModal] = useState(false);
+  const [selectedAction, setSelectedAction] = useState("");
+  const [completedSteps, setCompletedSteps] = useState(new Set());
   const navigate = useNavigate();
-  const [inboxData, setInboxData] = useState([]);
-  const [filteredData, setFilteredData] = useState([]);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [searchTerm, setSearchTerm] = useState("");
-  const [filters, setFilters] = useState({});
-  const itemsPerPage = 5;
+  const actionsFromAPI = ["Approve", "Reject", "Request Changes"];
+  const loaderRef = useRef();
 
+  const isOwner = type === 'owner';
+  const isBuilder = type === 'builder';
+  const totalSteps = isOwner ? 3 : 2;
 
-  const generateInboxData = () => {
-    const statuses = ["Pending", "Completed", "Processing", "Rejected"];
-    const states = ["West Bengal", "Kerala", "Tamil Nadu", "Gujarat", "Maharashtra"];
-    const districts = ["Kolkata", "Howrah", "North 24 Parganas", "South 24 Parganas", "Hooghly"];
-    const phoneNumbers = ["9876543210", "8765432109", "7654321098", "6543210987", "9432109876"];
+  const applicationNumber = `${isOwner ? 'OWN' : 'BLD'}-2025-001`;
 
-    return Array.from({ length: 20 }, (_, i) => ({
-      id: i + 1,
-      appNo: `APP-2025-${(i + 1).toString().padStart(3, "0")}`,
-      appType: i % 2 === 0 ? "Ship Builder" : "Vessel Owner",
-      phoneNumber: phoneNumbers[i % 5],
-      stateUt: states[i % 5],
-      district: districts[i % 5],
-      date: new Date(
-        2025,
-        Math.floor(Math.random() * 12),
-        Math.floor(Math.random() * 28) + 1
-      )
-        .toISOString()
-        .split("T")[0],
-      status: statuses[Math.floor(Math.random() * statuses.length)],
-    }));
+  
+  const mockOwnerData = {
+    categoryOfOwner: "Individual",
+    ownerCompanyName: "John Doe Marine Services",
+    emailId: "john.doe@example.com",
+    phoneNumber: "9876543210",
+    panNo: "ABCDE1234F",
+    gstNo: "22ABCDE1234F1Z5",
+    addressLine1: "123 Marine Drive",
+    addressLine2: "Building A",
+    pin: "700001",
+    district: "Kolkata",
+    state: "West Bengal",
+    country: "India",
+    authorisedFname: "John",
+    authorisedLname: "Doe",
+    authorisedMob: "9876543210",
+    authorisedEmail: "john.doe@example.com",
+    panCardUpload: "pan_card.pdf",
+    gstCertificate: "gst_certificate.pdf",
+    addressProof: "address_proof.pdf",
+    authorizationLetter: "authorization_letter.pdf",
+    status: "Pending Review"
   };
 
- 
-  useEffect(() => {
-    const data = generateInboxData();
-    setInboxData(data);
-    setFilteredData(data);
-  }, []);
+  const mockBuilderData = {
+    builderName: "Marine Shipyard Pvt Ltd",
+    emailId: "info@marineship.com",
+    phoneNumber: "9876543210",
+    panNo: "ABCDE1234F",
+    gstNo: "22ABCDE1234F1Z5",
+    addressLine1: "456 Industrial Area",
+    addressLine2: "Sector 5",
+    pin: "700002",
+    district: "Howrah",
+    state: "West Bengal",
+    country: "India",
+    companyDetails: "company_details.pdf",
+    gstCertificate: "gst_certificate.pdf",
+    panCardUpload: "pan_card.pdf",
+    factoryLicense: "factory_license.pdf",
+    addressProof: "address_proof.pdf",
+    fireCertificate: "",
+    esipfRegistration: "",
+    iso9001: "iso9001.pdf",
+    iso14001: "iso14001.pdf",
+    iso45001: "",
+    pollutionCertificate: "",
+    experienceCertificate: "experience.pdf",
+    status: "Pending Review"
+  };
 
   useEffect(() => {
-    const results = inboxData.filter(
-      (item) =>
-        item.appNo.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        item.appType.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        item.phoneNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        item.stateUt.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        item.district.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        item.status.toLowerCase().includes(searchTerm.toLowerCase())
-    );
-    setFilteredData(results);
-    setCurrentPage(1);
-  }, [searchTerm, inboxData]);
+    setIsLoading(true);
+    loaderRef.current?.show?.();
+    setTimeout(() => {
+      setFormData(isOwner ? mockOwnerData : mockBuilderData);
+      setIsLoading(false);
+      loaderRef.current?.hide?.();
+      setCompletedSteps(new Set([1]));
+    }, 500);
+  }, [isOwner]);
 
- 
-  const applyFilters = (filterData) => {
-    setFilters(filterData);
-    
-    let results = inboxData;
-    
-   
-    if (filterData.applicationNumber) {
-      results = results.filter(item =>
-        item.appNo.toLowerCase().includes(filterData.applicationNumber.toLowerCase())
-      );
-    }
-    
-    if (filterData.applicationType) {
-      results = results.filter(item =>
-        item.appType.toLowerCase().replace(/\s+/g, '_') === filterData.applicationType.toLowerCase()
-      );
-    }
-    
-    if (filterData.applicationStatus) {
-      results = results.filter(item =>
-        item.status.toLowerCase() === filterData.applicationStatus.toLowerCase()
-      );
-    }
-    
-    if (filterData.phoneNumber) {
-      results = results.filter(item =>
-        item.phoneNumber.includes(filterData.phoneNumber)
-      );
-    }
-    
-    if (filterData.fromDate && filterData.toDate) {
-      results = results.filter(item => {
-        const itemDate = new Date(item.date);
-        const fromDate = new Date(filterData.fromDate);
-        const toDate = new Date(filterData.toDate);
-        return itemDate >= fromDate && itemDate <= toDate;
+  const methods = useForm({ defaultValues: { country: 'India' } });
+  const { setValue } = methods;
+
+  useEffect(() => {
+    if (!isLoading) {
+      Object.keys(formData).forEach(key => {
+        if (formData[key]) {
+          setValue(key, formData[key]);
+        }
       });
     }
+  }, [isLoading, formData, setValue]);
+
+  const handleActionClick = (action) => {
+    setSelectedAction(action);
+    setShowApprovalModal(true);
+  };
+
+  const handleActionSubmit = (formData) => {
+    const payload = {
+      action: selectedAction,
+      ...formData,
+    };
+    console.log("Action submitted:", payload);
+    setShowApprovalModal(false);
+    setSelectedAction("");
+  };
+
+  const handleCloseModal = () => {
+    setShowApprovalModal(false);
+    setSelectedAction("");
+  };
+
+  const handleDownload = (filename) => {
+    const blob = new Blob(["Dummy file content"], { type: "text/plain" });
+    const link = document.createElement("a");
+    link.href = window.URL.createObjectURL(blob);
+    link.download = filename;
+    link.click();
+    window.URL.revokeObjectURL(link.href);
+  };
+
+ 
+  const noFileFields = ['fireCertificate', 'esipfRegistration', 'iso45001', 'pollutionCertificate'];
+  
+  const renderFileField = (value, fieldName) => {
+    const hasFile = formData[fieldName] && formData[fieldName].trim() !== '';
+    const shouldShowNoFile = isBuilder && noFileFields.includes(fieldName) && !hasFile;
     
-    setFilteredData(results);
-    setCurrentPage(1);
+    return (
+      <div className="file-display-container">
+        {shouldShowNoFile ? (
+          <div className="file-display-no-doc">
+            <BsFileEarmarkX className="no-doc-icon text-muted me-2" size={16} />
+            <span className="no-doc-text">No document uploaded</span>
+          </div>
+        ) : (
+          <div className="file-display-with-doc">
+            <div className="file-info">
+              <FaFileExcel className="file-icon text-success me-2" size={16} />
+              <span className="file-name">
+                {hasFile ? formData[fieldName] : `${fieldName.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}.pdf`}
+              </span>
+            </div>
+            <Button
+              variant="link"
+              size="sm"
+              className="file-download-btn"
+              onClick={() => handleDownload(hasFile ? formData[fieldName] : `${fieldName}.pdf`)}
+              tabIndex={-1}
+              title="Download"
+            >
+              <BsDownload size={12} />
+            </Button>
+          </div>
+        )}
+      </div>
+    );
   };
 
-  const handleTablePageChange = (page) => {
-    setCurrentPage(page);
+  const getFormFieldsConfig = () => {
+    if (isOwner) {
+     
+      return {
+        step1: [
+          { name: "categoryOfOwner", label: t("vesselOwnerRegistration.Category of Owner"), type: "text", colSize: 6 },
+          { name: "ownerCompanyName", label: t("vesselOwnerRegistration.Owner/Company Name"), type: "text", colSize: 6 },
+          { name: "emailId", label: t("vesselOwnerRegistration.Email ID"), type: "email", colSize: 6 },
+          { name: "phoneNumber", label: t("vesselOwnerRegistration.Phone Number"), type: "text", colSize: 6 },
+          { name: "panNo", label: t("vesselOwnerRegistration.PAN Number"), type: "text", colSize: 6 },
+          { name: "gstNo", label: t("vesselOwnerRegistration.GST Number"), type: "text", colSize: 6 },
+          { name: "addressLine1", label: t("vesselOwnerRegistration.Address Line-1"), type: "text", colSize: 6 },
+          { name: "addressLine2", label: t("vesselOwnerRegistration.Address Line-2"), type: "text", colSize: 6 },
+          { name: "pin", label: t("vesselOwnerRegistration.PIN"), type: "text", colSize: 6 },
+          { name: "district", label: t("vesselOwnerRegistration.District"), type: "text", colSize: 6 },
+          { name: "state", label: t("vesselOwnerRegistration.State / UT"), type: "text", colSize: 6 },
+          { name: "country", label: t("vesselOwnerRegistration.Country"), type: "text", colSize: 6 },
+        ],
+        step2: [
+          { name: "authorisedFname", label: t("vesselOwnerRegistration.First Name"), type: "text", colSize: 6 },
+          { name: "authorisedLname", label: t("vesselOwnerRegistration.Last Name"), type: "text", colSize: 6 },
+          { name: "authorisedMob", label: t("vesselOwnerRegistration.Primary Mobile Number"), type: "text", colSize: 6 },
+          { name: "authorisedEmail", label: t("vesselOwnerRegistration.Email ID"), type: "email", colSize: 6 },
+          { name: "authorizationLetter", label: t("vesselOwnerRegistration.Letter of Authorization"), type: "file", colSize: 12 },
+        ],
+        step3: [
+          { name: "panCardUpload", label: t("vesselOwnerRegistration.PAN Card"), type: "file", colSize: 6 },
+          { name: "gstCertificate", label: t("vesselOwnerRegistration.GST Certificate"), type: "file", colSize: 6 },
+          { name: "addressProof", label: t("vesselOwnerRegistration.Address Proof"), type: "file", colSize: 6 },
+        ]
+      };
+    } else {
+ 
+      return {
+        step1: [
+          { name: "builderName", label: t("builderRegistration.builderName"), type: "text", colSize: 6 },
+          { name: "emailId", label: t("builderRegistration.Email ID"), type: "email", colSize: 6 },
+          { name: "phoneNumber", label: t("builderRegistration.Phone Number"), type: "text", colSize: 6 },
+          { name: "panNo", label: t("builderRegistration.PAN Number"), type: "text", colSize: 6 },
+          { name: "gstNo", label: t("builderRegistration.GST Number"), type: "text", colSize: 6 },
+          { name: "addressLine1", label: t("builderRegistration.Address Line-1"), type: "text", colSize: 6 },
+          { name: "addressLine2", label: t("builderRegistration.Address Line-2"), type: "text", colSize: 6 },
+          { name: "pin", label: t("builderRegistration.PIN"), type: "text", colSize: 6 },
+          { name: "district", label: t("builderRegistration.District"), type: "text", colSize: 6 },
+          { name: "state", label: t("builderRegistration.State / UT"), type: "text", colSize: 6 },
+          { name: "country", label: t("builderRegistration.Country"), type: "text", colSize: 6 },
+        ],
+        step2: [
+          { name: "companyDetails", label: t("builderRegistration.Company Details"), type: "file", colSize: 6 },
+          { name: "gstCertificate", label: t("builderRegistration.GST Certificate"), type: "file", colSize: 6 },
+          { name: "panCardUpload", label: t("builderRegistration.PAN Card"), type: "file", colSize: 6 },
+          { name: "factoryLicense", label: t("builderRegistration.Factory License"), type: "file", colSize: 6 },
+          { name: "addressProof", label: t("builderRegistration.Address Proof"), type: "file", colSize: 6 },
+          { name: "fireCertificate", label: t("builderRegistration.Fire Certificate"), type: "file", colSize: 6 },
+          { name: "esipfRegistration", label: t("builderRegistration.ESIPF Registration"), type: "file", colSize: 6 },
+          { name: "iso9001", label: t("builderRegistration.ISO 9001 Certificate"), type: "file", colSize: 6 },
+          { name: "iso14001", label: t("builderRegistration.ISO 14001 Certificate"), type: "file", colSize: 6 },
+          { name: "iso45001", label: t("builderRegistration.ISO 45001 Certificate"), type: "file", colSize: 6 },
+          { name: "pollutionCertificate", label: t("builderRegistration.Pollution Certificate"), type: "file", colSize: 6 },
+          { name: "experienceCertificate", label: t("builderRegistration.Experience Certificate"), type: "file", colSize: 6 },
+        ]
+      };
+    }
   };
 
-  const handleOnViewRow = (rowData) => {
-    navigate('/user-dashboard/owner/123', {
-      state: { application: rowData },
+  const formFields = getFormFieldsConfig();
+
+  const getDisabledFormFieldsConfig = () => {
+    const config = {};
+    Object.keys(formFields).forEach(stepKey => {
+      config[stepKey] = formFields[stepKey].map(field => ({
+        ...field,
+        disabled: true,
+        inputClassName: 'disabled-field',
+        render: field.type === 'file' ? (value) => renderFileField(value, field.name) : undefined
+      }));
     });
+    return config;
   };
 
+  const disabledFormFields = getDisabledFormFieldsConfig();
+
+  const getCurrentStepFields = () => {
+    switch (currentStep) {
+      case 1: return disabledFormFields.step1;
+      case 2: return disabledFormFields.step2;
+      case 3: return disabledFormFields.step3 || [];
+      default: return [];
+    }
+  };
+
+  const handleNext = () => {
+    if (currentStep < totalSteps) {
+      setCompletedSteps(prev => new Set([...prev, currentStep]));
+      setCurrentStep(currentStep + 1);
+      window.scrollTo(0, 0);
+    }
+  };
+
+  const handlePrevious = () => {
+    setCurrentStep(Math.max(1, currentStep - 1));
+    window.scrollTo(0, 0);
+  };
+
+  const handleBackToList = () => {
+    navigate(isOwner ? '/vessel-owner/view' : '/vessel-builder/view');
+  };
+
+  const getStatusBadge = (status) => {
+    const statusMap = {
+      'Pending Review': 'warning',
+      'Approved': 'success',
+      'Rejected': 'danger',
+      'Processing': 'info'
+    };
+    return <Badge bg={statusMap[status] || 'secondary'} className="status-badge">{status}</Badge>;
+  };
+
+  const getStepIcon = (stepNumber) => {
+    if (completedSteps.has(stepNumber)) {
+      return <FaCheckCircle className="text-white" size={18} />;
+    }
+    
+    if (isOwner) {
+      const ownerIcons = [FaUser, FaUser, FaFileUpload];
+      return currentStep === stepNumber ? 
+        React.createElement(ownerIcons[stepNumber - 1], { className: "text-white", size: 16 }) : 
+        stepNumber;
+    } else {
+      const builderIcons = [FaBuilding, FaFileUpload];
+      return currentStep === stepNumber ? 
+        React.createElement(builderIcons[stepNumber - 1], { className: "text-white", size: 16 }) : 
+        stepNumber;
+    }
+  };
+
+  const getStepTitles = () => {
+    if (isOwner) {
+      return [
+        t("vesselOwnerRegistration.Vessel Owner Details"),
+        t("vesselOwnerRegistration.Authorized Person's Details"),
+        t("vesselOwnerRegistration.Documents Upload")
+      ];
+    } else {
+      return [
+        t("builderRegistration.Vessel Builder Details"),
+        t("builderRegistration.Documents Upload")
+      ];
+    }
+  };
+
+  const stepTitles = getStepTitles();
+
+  if (isLoading) {
+    return <NewLoader ref={loaderRef} />;
+  }
 
   return (
     <>
-   
-      
-      {/* Filter Component */}
-      <UserRegFilter onFilterSubmit={applyFilters} handleGoBack={()=> navigate('/dashboard')} />
-      
-      {/* Inbox Table */}
-      <Card className="bg-transparent mt-4 dashboard-card">
-        <Card.Header
-          style={headerStyle}
-          className="dashboard-card-header d-flex justify-content-between align-items-center flex-wrap"
-        >
-          <div className="d-flex align-items-center">
-            <h5 className="mb-0 me-2">Inbox</h5>
-            <span className="badge bg-primary rounded-pill">
-              {filteredData.length}
-            </span>
-          </div>
-          <div className="d-flex align-items-center">
-            <Button variant="outline-secondary" className="filter-btn me-2">
-              <BsFilter size={18} />
-              <span className="ms-1 d-none d-sm-inline">Filter</span>
-            </Button>
-            <Form className="inbox-search">
-              <InputGroup>
-                <Form.Control
-                  type="text"
-                  placeholder="Search inbox..."
-                  aria-label="Search inbox"
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                />
-                <Button variant="primary">
-                  <BsSearch />
-                </Button>
-              </InputGroup>
-            </Form>
-          </div>
-        </Card.Header>
-        <div style={{ position: 'relative', bottom: '2rem' }}>
-          <ActionTable
-            columns={INBOX_COLUMNS}
-            rowData={filteredData}
-            tableHeader={null}
-            hideExportBtn={true}
-            hideSearchBar={true}
-            pagination={true}
-            currentPage={currentPage}
-            itemsPerPage={itemsPerPage}
-            onPageChange={handleTablePageChange}
-            onViewRow={handleOnViewRow}
-            noDataText={
-              <div className="no-results text-center py-4">
-                <BsSearch size={24} className="mb-2" />
-                <p>No results found</p>
-                <small>
-                  Try adjusting your search to find what you're looking for.
-                </small>
-              </div>
-            }
-          />
-        </div>
-      </Card>
+      <Container fluid className="py-4 officer-view-container">
+        <Row className="justify-content-center">
+          <Col size={12}>
+            <Card className="shadow-lg border-0 modern-card">
+              <Card.Header className="modern-header">
+                <Stack direction="horizontal" gap={3} className="flex-wrap justify-content-between align-items-center">
+                  <button
+                    className="btn back-button modern-back-btn"
+                    onClick={handleBackToList}
+                  >
+                    <FaArrowAltCircleLeft size={20} className="text-primary" />
+                  </button>
+
+                  <div className="flex-grow-1 d-flex flex-column align-items-center">
+                    <div className="d-flex flex-wrap align-items-center justify-content-center gap-2">
+                      <span className="application-label">Application Number:</span>
+                      <span className="application-number">
+                        {applicationNumber}
+                      </span>
+                    </div>
+                  </div>
+                  
+                  <div className="status-container">
+                    {getStatusBadge(formData.status)}
+                  </div>
+                </Stack>
+              </Card.Header>
+
+              <Card.Body className="modern-body">
+                <div className="modern-stepper-wrapper">
+                  {Array.from({ length: totalSteps }, (_, i) => i + 1).map((step, index) => (
+                    <React.Fragment key={step}>
+                      <div className={`modern-stepper-item ${currentStep === step ? 'active' : ''} ${completedSteps.has(step) ? 'completed' : ''}`}>
+                        <div className="modern-step-counter">
+                          {getStepIcon(step)}
+                        </div>
+                        <div className="modern-step-name">{stepTitles[step - 1]}</div>
+                      </div>
+                      
+                      {index < totalSteps - 1 && (
+                        <div className="stepper-connector"></div>
+                      )}
+                    </React.Fragment>
+                  ))}
+                </div>
+
+                <FormProvider {...methods}>
+                  <form>
+                    <div className="form-content">
+                      <Row className="g-4">
+                        <DynamicViewFields
+                          fields={getCurrentStepFields()}
+                          setFormData={setFormData}
+                        />
+                      </Row>
+                    </div>
+
+                    <div className="navigation-footer">
+                      <Button
+                        variant="outline-primary"
+                        onClick={handlePrevious}
+                        disabled={currentStep === 1}
+                        className="nav-btn prev-btn"
+                      >
+                        <FaArrowLeft className="me-2" size={14} /> Previous
+                      </Button>
+                      
+                      {currentStep < totalSteps ? (
+                        <Button
+                          variant="primary"
+                          onClick={handleNext}
+                          className="nav-btn next-btn"
+                        >
+                          Next <FaArrowRight className="ms-2" size={14} />
+                        </Button>
+                      ) : (
+                        <ActionDropdown
+                          actions={actionsFromAPI}
+                          onActionClick={handleActionClick}
+                          variant="primary"
+                          className="action-dropdown"
+                        />
+                      )}
+                    </div>
+                  </form>
+                </FormProvider>
+              </Card.Body>
+            </Card>
+          </Col>
+        </Row>
+
+        <ApprovalModal
+          show={showApprovalModal}
+          handleClose={handleCloseModal}
+          handleSubmitData={handleActionSubmit}
+          selectedAction={selectedAction}
+        />
+      </Container>
     </>
   );
 };
 
-export default UserRegDashboard;
+export default UserViewPage;
