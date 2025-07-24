@@ -1,31 +1,786 @@
-/* Add this to your existing CSS */
-.file-field {
-  padding-left: 12px; /* Add left gap for all file fields */
-}
+import React, { useState, useEffect, useRef } from "react";
+import { useForm, FormProvider } from "react-hook-form";
+import {
+  Container,
+  Row,
+  Col,
+  Button,
+  Card,
+  Badge,
+  Stack,
+} from "react-bootstrap";
+import {
+  FaFileAlt,
+  FaFileUpload,
+  FaArrowLeft,
+  FaArrowRight,
+  FaDownload,
+  FaArrowAltCircleLeft,
+  FaCheckCircle,
+  FaFileExcel,
+  FaUser,
+  FaBuilding,
+} from "react-icons/fa";
+import { BsFileEarmarkX, BsDownload } from "react-icons/bs";
+import { useNavigate, useParams, useLocation } from "react-router-dom";
+import ActionDropdown from "../../../common/ActionDropdown";
+import ApprovalModal from "../../../common/ApprovalModal";
+import "./userViewPage.css";
+import NewLoader from "../../../common/NewLoader";
+import DynamicViewFields from "../../../common/DynamicViewFields";
+import { useTranslation } from "react-i18next";
 
-/* Specific adjustment for authorization letter */
-.file-field.authorization-letter {
-  padding-left: 12px; /* Consistent left gap */
-}
+const UserViewPage = () => {
+  const { t } = useTranslation();
+  const { type, id } = useParams();
+  const location = useLocation();
+  const applicationInfo = location.state?.application;
 
-.file-field.authorization-letter .file-display {
-  max-width: 100%; /* Allow it to take full width but with padding */
-}
+  const [currentStep, setCurrentStep] = useState(1);
+  const [formData, setFormData] = useState({});
+  const [isLoading, setIsLoading] = useState(true);
+  const [showApprovalModal, setShowApprovalModal] = useState(false);
+  const [selectedAction, setSelectedAction] = useState("");
+  const [completedSteps, setCompletedSteps] = useState(new Set());
+  const navigate = useNavigate();
+  const [actionsFromAPI, setActionsFromAPI] = useState([]);
+  const loaderRef = useRef();
 
-/* Ensure consistent file display for all files */
-.file-display {
-  border-left: 3px solid #e9ecef; /* Subtle left border */
-  padding-left: 12px; /* Space between border and content */
-  margin-left: 8px; /* Additional left gap */
-  max-width: calc(100% - 20px); /* Prevent full width */
-}
+  const isOwner = applicationInfo?.userType === "VESSEL_OWNER";
+  const isBuilder = applicationInfo?.userType === "VESSEL_BUILDER";
+  const totalSteps = isOwner ? 3 : 2;
 
-/* Field label spacing */
-.field-label {
-  margin-left: 12px; /* Add left gap to match fields */
-}
+  useEffect(() => {
+    setIsLoading(true);
+    loaderRef.current?.show?.();
 
-/* Text field left spacing */
-.text-field {
-  padding-left: 12px; /* Consistent left gap */
-}
+    if (applicationInfo) {
+      let processedData = {};
+
+      if (isOwner && applicationInfo.ownerDetails) {
+        const ownerData = applicationInfo.ownerDetails;
+        processedData = {
+          categoryOfOwner: ownerData.categoryOfOwner,
+          ownerCompanyName: ownerData.ownerCompanyName,
+          emailId: ownerData.emailId,
+          phoneNumber: ownerData.phoneNumber,
+          panNo: ownerData.panNo,
+          gstNo: ownerData.gstNo,
+          addressLine1: ownerData.addressLine1,
+          addressLine2: ownerData.addressLine2,
+          pin: ownerData.pin,
+          district: ownerData.district,
+          state: ownerData.state,
+          country: ownerData.country,
+          authorisedFname: ownerData.authorisedFname,
+          authorisedLname: ownerData.authorisedLname,
+          authorisedMob: ownerData.authorisedMob,
+          authorisedEmail: ownerData.authorisedEmail,
+          aadharNumber: ownerData.aadharNumber,
+          tradeLicenseNumber: ownerData.tradeLicenseNumber,
+          cinNo: ownerData.cinNo,
+          dinNo: ownerData.dinNo,
+          registrationNumber:
+            applicationInfo.userBasicDetails.registrationNumber,
+          status: applicationInfo.userBasicDetails.isActive
+            ? "Approved"
+            : "Pending Review",
+          fileStoreMap: ownerData.fileStoreMap || [],
+        };
+      } else if (isBuilder && applicationInfo.builderDetails) {
+        const builderData = applicationInfo.builderDetails;
+        processedData = {
+          builderName: builderData.builderName,
+          emailId: builderData.emailId,
+          phoneNumber: builderData.phone,
+          panNo: builderData.panNo,
+          gstNo: builderData.gstNo,
+          addressLine1: builderData.addressLine1,
+          addressLine2: builderData.addressLine2,
+          pin: builderData.pin,
+          district: builderData.district,
+          state: builderData.state,
+          country: builderData.country,
+          registrationNumber:
+            applicationInfo.userBasicDetails.registrationNumber,
+          status: applicationInfo.userBasicDetails.isActive
+            ? "Approved"
+            : "Pending Review",
+          fileStoreMap: builderData.fileStoreMap || [],
+        };
+      }
+      setFormData(processedData);
+      setActionsFromAPI(
+        applicationInfo?.processActionMapResponce?.processs[0].actions || []
+      );
+      setCompletedSteps(new Set([1]));
+    }
+
+    setTimeout(() => {
+      setIsLoading(false);
+      loaderRef.current?.hide?.();
+    }, 500);
+  }, [applicationInfo, isOwner, isBuilder]);
+
+  const methods = useForm({ defaultValues: { country: "India" } });
+  const { setValue } = methods;
+
+  useEffect(() => {
+    if (!isLoading && Object.keys(formData).length > 0) {
+      Object.keys(formData).forEach((key) => {
+        if (formData[key] !== undefined && formData[key] !== null) {
+          setValue(key, formData[key]);
+        }
+      });
+    }
+  }, [isLoading, formData, setValue]);
+
+  const handleActionClick = (action) => {
+    setSelectedAction(action);
+    setShowApprovalModal(true);
+  };
+
+  const handleActionSubmit = (modalFormData) => {
+    const payload = {
+      applicationNo: formData?.registrationNumber,
+      action: selectedAction?.actionName,
+      processId:
+        applicationInfo?.processActionMapResponce?.processs?.[0]?.processId,
+      actionId: selectedAction?.actionId,
+      processName:
+        applicationInfo?.processActionMapResponce?.processs?.[0]?.processName,
+      document: modalFormData?.document,
+      reason: modalFormData?.reason,
+    };
+    console.log("Action submitted:", payload);
+    setShowApprovalModal(false);
+    setSelectedAction("");
+  };
+
+  // const handleActionSubmit = (formData) => {
+  //   const payload = {
+  //     action: selectedAction,
+  //     ...formData,
+  //   };
+
+  //   // let expPayload =       {
+  //   //     applicationNo: "IWT-OWNER-20250723-80802",
+  //   //     action: "forward",
+  //   //     processId: 17,
+  //   //     actionId: 37,
+  //   //     processName: "User Registration",
+  //   //     assignerUuid: "b97ddf21-30ca-49bd-9923-aaa6c156555b",
+  //   //     assignerRole: "L1",
+  //   //     assignerName: "Ravi"
+  //   //   };
+  //   console.log("Action submitted:", payload);
+  //   setShowApprovalModal(false);
+  //   setSelectedAction("");
+  // };
+
+  const handleCloseModal = () => {
+    setShowApprovalModal(false);
+    setSelectedAction("");
+  };
+
+  const handleDownload = (fileData) => {
+    if (fileData && fileData.downLoadFile) {
+      window.open(fileData.downLoadFile, "_blank");
+    } else {
+      console.warn("No download URL available for file");
+    }
+  };
+
+  const noFileFields = [
+    "fireCertificate",
+    "esipfRegistration",
+    "iso45001",
+    "pollutionCertificate",
+  ];
+
+  const renderFileField = (value, fieldName) => {
+    const fileData = formData.fileStoreMap?.find((file) =>
+      file.fieldName?.toLowerCase().includes(fieldName.toLowerCase())
+    );
+
+    const hasFile = fileData && fileData.fileName;
+    const shouldShowNoFile =
+      isBuilder && noFileFields.includes(fieldName) && !hasFile;
+
+    return (
+      <div className="file-display-container">
+        {shouldShowNoFile ? (
+          <div className="file-display-no-doc">
+            <BsFileEarmarkX className="no-doc-icon text-muted me-2" size={16} />
+            <span className="no-doc-text">No document uploaded</span>
+          </div>
+        ) : (
+          <div className="file-display-with-doc">
+            <div className="file-info">
+              <FaFileExcel className="file-icon text-success me-2" size={16} />
+              <span className="file-name">
+                {hasFile
+                  ? fileData.fileName
+                  : `${fieldName
+                      .replace(/([A-Z])/g, " $1")
+                      .replace(/^./, (str) => str.toUpperCase())}.pdf`}
+              </span>
+            </div>
+            {hasFile && (
+              <Button
+                variant="link"
+                size="sm"
+                className="file-download-btn"
+                onClick={() => handleDownload(fileData)}
+                tabIndex={-1}
+                title="Download"
+              >
+                <BsDownload size={12} />
+              </Button>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const getFormFieldsConfig = () => {
+    if (isOwner) {
+      return {
+        step1: [
+          {
+            name: "categoryOfOwner",
+            label: t("vesselOwnerRegistration.Category of Owner"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "ownerCompanyName",
+            label: t("vesselOwnerRegistration.Owner/Company Name"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "emailId",
+            label: t("vesselOwnerRegistration.Email ID"),
+            type: "email",
+            colSize: 6,
+          },
+          {
+            name: "phoneNumber",
+            label: t("vesselOwnerRegistration.Phone Number"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "panNo",
+            label: t("vesselOwnerRegistration.PAN Number"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "aadharNumber",
+            label: t("vesselOwnerRegistration.Aadhar Number"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "tradeLicenseNumber",
+            label: t("vesselOwnerRegistration.Trade License Number"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "gstNo",
+            label: t("vesselOwnerRegistration.GST Number"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "addressLine1",
+            label: t("vesselOwnerRegistration.Address Line-1"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "addressLine2",
+            label: t("vesselOwnerRegistration.Address Line-2"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "pin",
+            label: t("vesselOwnerRegistration.PIN"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "district",
+            label: t("vesselOwnerRegistration.District"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "state",
+            label: t("vesselOwnerRegistration.State / UT"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "country",
+            label: t("vesselOwnerRegistration.Country"),
+            type: "text",
+            colSize: 6,
+          },
+        ],
+        step2: [
+          {
+            name: "authorisedFname",
+            label: t("vesselOwnerRegistration.First Name"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "authorisedLname",
+            label: t("vesselOwnerRegistration.Last Name"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "authorisedMob",
+            label: t("vesselOwnerRegistration.Primary Mobile Number"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "authorisedEmail",
+            label: t("vesselOwnerRegistration.Email ID"),
+            type: "email",
+            colSize: 6,
+          },
+          {
+            name: "authorizationLetter",
+            label: t("vesselOwnerRegistration.Letter of Authorization"),
+            type: "file",
+            colSize: 12,
+          },
+        ],
+        step3: [
+          {
+            name: "panCardUpload",
+            label: t("vesselOwnerRegistration.PAN Card"),
+            type: "file",
+            colSize: 6,
+          },
+          {
+            name: "gstCertificate",
+            label: t("vesselOwnerRegistration.GST Certificate"),
+            type: "file",
+            colSize: 6,
+          },
+          {
+            name: "addressProof",
+            label: t("vesselOwnerRegistration.Address Proof"),
+            type: "file",
+            colSize: 6,
+          },
+          {
+            name: "companyRegistrationCertificate",
+            label: t(
+              "vesselOwnerRegistration.Company Registration Certificate"
+            ),
+            type: "file",
+            colSize: 6,
+          },
+          {
+            name: "moaCertificate",
+            label: t("vesselOwnerRegistration.MOA Certificate"),
+            type: "file",
+            colSize: 6,
+          },
+          {
+            name: "aoaCertificate",
+            label: t("vesselOwnerRegistration.AOA Certificate"),
+            type: "file",
+            colSize: 6,
+          },
+        ],
+      };
+    } else {
+      return {
+        step1: [
+          {
+            name: "builderName",
+            label: t("builderRegistration.builderName"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "emailId",
+            label: t("builderRegistration.Email ID"),
+            type: "email",
+            colSize: 6,
+          },
+          {
+            name: "phoneNumber",
+            label: t("builderRegistration.Phone Number"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "panNo",
+            label: t("builderRegistration.PAN Number"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "gstNo",
+            label: t("builderRegistration.GST Number"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "addressLine1",
+            label: t("builderRegistration.Address Line-1"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "addressLine2",
+            label: t("builderRegistration.Address Line-2"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "pin",
+            label: t("builderRegistration.PIN"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "district",
+            label: t("builderRegistration.District"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "state",
+            label: t("builderRegistration.State / UT"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "country",
+            label: t("builderRegistration.Country"),
+            type: "text",
+            colSize: 6,
+          },
+        ],
+        step2: [
+          {
+            name: "companyDetails",
+            label: t("builderRegistration.Company Details"),
+            type: "file",
+            colSize: 6,
+          },
+          {
+            name: "gstCertificate",
+            label: t("builderRegistration.GST Certificate"),
+            type: "file",
+            colSize: 6,
+          },
+          {
+            name: "panCardUpload",
+            label: t("builderRegistration.PAN Card"),
+            type: "file",
+            colSize: 6,
+          },
+          {
+            name: "factoryLicense",
+            label: t("builderRegistration.Factory License"),
+            type: "file",
+            colSize: 6,
+          },
+          {
+            name: "addressProof",
+            label: t("builderRegistration.Address Proof"),
+            type: "file",
+            colSize: 6,
+          },
+          {
+            name: "fireCertificate",
+            label: t("builderRegistration.Fire Certificate"),
+            type: "file",
+            colSize: 6,
+          },
+          {
+            name: "esipfRegistration",
+            label: t("builderRegistration.ESIPF Registration"),
+            type: "file",
+            colSize: 6,
+          },
+          {
+            name: "iso9001",
+            label: t("builderRegistration.ISO 9001 Certificate"),
+            type: "file",
+            colSize: 6,
+          },
+          {
+            name: "iso14001",
+            label: t("builderRegistration.ISO 14001 Certificate"),
+            type: "file",
+            colSize: 6,
+          },
+          {
+            name: "iso45001",
+            label: t("builderRegistration.ISO 45001 Certificate"),
+            type: "file",
+            colSize: 6,
+          },
+          {
+            name: "pollutionCertificate",
+            label: t("builderRegistration.Pollution Certificate"),
+            type: "file",
+            colSize: 6,
+          },
+          {
+            name: "experienceCertificate",
+            label: t("builderRegistration.Experience Certificate"),
+            type: "file",
+            colSize: 6,
+          },
+        ],
+      };
+    }
+  };
+
+  const formFields = getFormFieldsConfig();
+
+  const getDisabledFormFieldsConfig = () => {
+    const config = {};
+    Object.keys(formFields).forEach((stepKey) => {
+      config[stepKey] = formFields[stepKey].map((field) => ({
+        ...field,
+        disabled: true,
+        inputClassName: "disabled-field",
+        render:
+          field.type === "file"
+            ? (value) => renderFileField(value, field.name)
+            : undefined,
+      }));
+    });
+    return config;
+  };
+
+  const disabledFormFields = getDisabledFormFieldsConfig();
+
+  const getCurrentStepFields = () => {
+    switch (currentStep) {
+      case 1:
+        return disabledFormFields.step1;
+      case 2:
+        return disabledFormFields.step2;
+      case 3:
+        return disabledFormFields.step3 || [];
+      default:
+        return [];
+    }
+  };
+
+  const handleNext = () => {
+    if (currentStep < totalSteps) {
+      setCompletedSteps((prev) => new Set([...prev, currentStep]));
+      setCurrentStep(currentStep + 1);
+      window.scrollTo(0, 0);
+    }
+  };
+
+  const handlePrevious = () => {
+    setCurrentStep(Math.max(1, currentStep - 1));
+    window.scrollTo(0, 0);
+  };
+
+  const handleBackToList = () => {
+    navigate("/user-registration/view");
+  };
+
+  const getStatusBadge = (status) => {
+    const statusMap = {
+      "Pending Review": "warning",
+      Pending: "warning",
+      Approved: "success",
+      Completed: "success",
+      Rejected: "danger",
+      Processing: "info",
+    };
+    return (
+      <Badge bg={statusMap[status] || "secondary"} className="status-badge">
+        {status}
+      </Badge>
+    );
+  };
+
+  const getStepIcon = (stepNumber) => {
+    if (completedSteps.has(stepNumber)) {
+      return <FaCheckCircle className="text-white" size={18} />;
+    }
+
+    if (isOwner) {
+      const ownerIcons = [FaUser, FaUser, FaFileUpload];
+      return currentStep === stepNumber
+        ? React.createElement(ownerIcons[stepNumber - 1], {
+            className: "text-white",
+            size: 16,
+          })
+        : stepNumber;
+    } else {
+      const builderIcons = [FaBuilding, FaFileUpload];
+      return currentStep === stepNumber
+        ? React.createElement(builderIcons[stepNumber - 1], {
+            className: "text-white",
+            size: 16,
+          })
+        : stepNumber;
+    }
+  };
+
+  const getStepTitles = () => {
+    if (isOwner) {
+      return [
+        t("vesselOwnerRegistration.Vessel Owner Details"),
+        t("vesselOwnerRegistration.Authorized Person's Details"),
+        t("vesselOwnerRegistration.Documents Upload"),
+      ];
+    } else {
+      return [
+        t("builderRegistration.Vessel Builder Details"),
+        t("builderRegistration.Documents Upload"),
+      ];
+    }
+  };
+
+  const stepTitles = getStepTitles();
+
+  if (isLoading) {
+    return <NewLoader ref={loaderRef} />;
+  }
+
+  return (
+    <>
+      <Container fluid className="py-4 officer-view-container">
+        <Row className="justify-content-center">
+          <Col size={12}>
+            <Card className="shadow-lg border-0 modern-card">
+              <Card.Header className="modern-header">
+                <Stack
+                  direction="horizontal"
+                  gap={3}
+                  className="flex-wrap justify-content-between align-items-center"
+                >
+                  <button
+                    className="btn back-button modern-back-btn"
+                    onClick={handleBackToList}
+                  >
+                    <FaArrowAltCircleLeft size={20} className="text-primary" />
+                  </button>
+
+                  <div className="flex-grow-1 d-flex flex-column align-items-center">
+                    <div className="d-flex flex-wrap align-items-center justify-content-center gap-2">
+                      <span className="application-label">
+                        Application Number:
+                      </span>
+                      <span className="application-number">
+                        {formData.registrationNumber || "N/A"}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="status-container">
+                    {getStatusBadge(formData.status)}
+                  </div>
+                </Stack>
+              </Card.Header>
+
+              <Card.Body className="modern-body">
+                <div className="modern-stepper-wrapper">
+                  {Array.from({ length: totalSteps }, (_, i) => i + 1).map(
+                    (step, index) => (
+                      <React.Fragment key={step}>
+                        <div
+                          className={`modern-stepper-item ${
+                            currentStep === step ? "active" : ""
+                          } ${completedSteps.has(step) ? "completed" : ""}`}
+                        >
+                          <div className="modern-step-counter">
+                            {getStepIcon(step)}
+                          </div>
+                          <div className="modern-step-name">
+                            {stepTitles[step - 1]}
+                          </div>
+                        </div>
+
+                        {index < totalSteps - 1 && (
+                          <div className="stepper-connector"></div>
+                        )}
+                      </React.Fragment>
+                    )
+                  )}
+                </div>
+
+                <FormProvider {...methods}>
+                  <form>
+                    <div className="form-content">
+                      <Row className="g-4">
+                        <DynamicViewFields
+                          fields={getCurrentStepFields()}
+                          setFormData={setFormData}
+                        />
+                      </Row>
+                    </div>
+
+                    <div className="navigation-footer">
+                      <Button
+                        variant="outline-primary"
+                        onClick={handlePrevious}
+                        disabled={currentStep === 1}
+                        className="nav-btn prev-btn"
+                      >
+                        <FaArrowLeft className="me-2" size={14} /> Previous
+                      </Button>
+
+                      {currentStep < totalSteps ? (
+                        <Button
+                          variant="primary"
+                          onClick={handleNext}
+                          className="nav-btn next-btn"
+                        >
+                          Next <FaArrowRight className="ms-2" size={14} />
+                        </Button>
+                      ) : (
+                        <ActionDropdown
+                          actions={actionsFromAPI}
+                          onActionClick={handleActionClick}
+                          variant="primary"
+                          className="action-dropdown"
+                        />
+                      )}
+                    </div>
+                  </form>
+                </FormProvider>
+              </Card.Body>
+            </Card>
+          </Col>
+        </Row>
+
+        <ApprovalModal
+          show={showApprovalModal}
+          handleClose={handleCloseModal}
+          handleSubmitData={handleActionSubmit}
+          selectedAction={selectedAction}
+        />
+      </Container>
+    </>
+  );
+};
+
+export default UserViewPage;
