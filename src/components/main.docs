@@ -1,254 +1,2098 @@
-import React, { useImperativeHandle, forwardRef, useState } from "react";
-import { Box, Button, Typography, Paper, Divider, Stack } from "@mui/material";
-import { ChevronRight, CheckCircleFill } from "react-bootstrap-icons";
-import { toast } from "react-toastify";
+import React, { useState, useEffect, useRef, useCallback, use } from "react";
+import { useForm } from "react-hook-form";
+import { Row, Col } from "react-bootstrap";
+import InputText from "../../../common/InputText.tsx";
+import InputSelect from "../../../common/InputSelect.tsx";
+import InputRadio from "../../../common/InputRadio.tsx";
+import InputFile from "../../../common/InputFile.tsx";
+import Collapsible from "../../../common/Collapsible.js";
 import { useTranslation } from "react-i18next";
+import { useLanguageContext } from "../../../common/LanguageContext.js";
+import { renameFile } from "../../../../utils/constants.ts";
+import { BsDownload } from "react-icons/bs";
+import { FaClipboardList, FaShip, FaUser } from "react-icons/fa";
+import { useMasterData } from "../../../context/MasterDataContext.js";
+import { handleErrorMessage } from "../../../../utils/errorMessageHandler.js";
+import NewLoader from "../../../common/NewLoader.js";
+import { URLS_ENDPOINT } from "../../../../utils/urlsConstants.ts";
+import { postData, postFORMdata } from "../../../../services/http.service.ts";
 
-const themeColor = "#2E57A7";
-const successColor = "#28a745";
+const VesselDetails = ({ formMethods, viewMode = false, editMode = false }) => {
+  const { i18n, t } = useTranslation();
+  const [formData, setFormData] = useState({});
+  const { masterData } = useMasterData();
+  const loaderRef = useRef();
+  const [isBuilderDataLoaded, setIsBuilderDataLoaded] = useState(false);
+  const [selectedBuilderId, setSelectedBuilderId] = useState("");
 
-const Stepper = forwardRef(
-  (
-    {
-      steps,
-      onSave,
-      viewMode = false,
-      isEditMode = false,
-      actionComponent = null,
-      onNext,
-      onBack,
-      onPayNow,
-      onSyncData,
+  const defaultValues = {
+    ownerName: "",
+    ownerAddress: "",
+    mobile: "",
+    email: "",
+    pan: "",
+    aadhar: "",
+    tradeLicence: "",
+    gst: "",
+    grt: "",
+    workOrderValue: "",
+    vesselType: "",
+    category: "",
+    zone: "",
+    supervisionAuthority: "",
+    purchaseType: "",
+    classificationSociety: "",
+    constructedBy: "",
+    builder: "",
+    builderName: "",
+    builderAddress: "",
+    builderEmail: "",
+    builderMobile: "",
+    builderTradeLicence: "",
+    builderGST: "",
+    builderAuth: "",
+    authLetter: "",
+    termsAccepted: false,
+    tonnageBooklets: null,
+    stabilityBooklets: null,
+  };
+
+  const internalFormMethods = useForm({
+    defaultValues,
+    mode: "onTouched",
+  });
+
+  const methods = formMethods || internalFormMethods;
+
+  const isCompMount = useRef(true);
+
+  const {
+    register,
+    watch,
+    setValue,
+    clearErrors,
+    trigger,
+    getValues,
+    setError,
+    formState: { errors },
+  } = methods;
+
+  const constructedBy = watch("constructedBy");
+  const category = watch("category");
+
+  useEffect(() => {
+    if (isCompMount.current) {
+      isCompMount.current = false;
+      return;
+    }
+    const fieldsWithErrors = Object.keys(errors);
+    trigger(fieldsWithErrors);
+  }, [i18n.language]);
+
+  useEffect(() => {
+    setTimeout(() => {
+      Object.keys(formData).forEach((key) => {
+        if (formData[key] !== undefined) {
+          setValue(key, formData[key], { shouldValidate: false });
+        }
+      });
+    }, 0);
+  }, [setValue, formData]);
+
+  const handleInputChange = useCallback(
+    (name, value) => {
+      setValue(name, value, { shouldValidate: true });
+      clearErrors(name);
+      setFormData((prev) => ({
+        ...prev,
+        [name]: value,
+      }));
+      if (name === "builder") {
+        handleBuilderChange(value);
+      }
     },
-    ref
-  ) => {
-    const { t } = useTranslation();
-    const [activeStep, setActiveStep] = useState(0);
-    const [completed, setCompleted] = useState({});
-    const [errors, setErrors] = useState({});
+    [setValue, clearErrors]
+  );
 
-    const totalSteps = steps.length;
-    const currentStep = steps[activeStep];
+  const handleFileChange = useCallback(
+    (name, file) => {
+      if (!file) return;
 
-    const buttonStyle = {
-      fontWeight: "bold",
-      borderRadius: "0.5rem",
-      minWidth: "8rem",
-      fontSize: "0.9rem",
-      color: "#fff",
-      backgroundColor: themeColor,
-      "&:hover": {
-        backgroundColor: "#1f4ea0",
-      },
-    };
-
-    useImperativeHandle(ref, () => ({
-      goToNextStep,
-    }));
-
-    const goToNextStep = () => {
-      setActiveStep((prev) => Math.min(prev + 1, totalSteps - 1));
-    };
-
-    const markStepCompleted = () => {
-      setCompleted((prev) => ({ ...prev, [activeStep]: true }));
-    };
-
-    const validateAndProceed = async (callback) => {
-      if (currentStep.validate) {
-        const isValid = await currentStep.validate();
-        setErrors((prev) => ({ ...prev, [activeStep]: !isValid }));
-
-        if (!isValid) {
-          toast.error("Please fill all required fields before proceeding.");
-          return;
-        }
-      }
-
-      markStepCompleted();
-      callback();
-    };
-
-    const handleNext = () => {
-      if (viewMode || steps?.goToNextStepNoValidtion || isEditMode) {
-        goToNextStep();
-        markStepCompleted();
-      } else {
-        validateAndProceed(() => {
-          goToNextStep();
-          onNext?.(activeStep);
+      const validTypes = [
+        "application/pdf",
+        "image/jpeg",
+        "image/png",
+        "image/jpg",
+      ];
+      if (!validTypes.includes(file.type)) {
+        setError(name, {
+          type: "manual",
+          message: t("Only PDF, JPG or PNG files are allowed"),
         });
-      }
-    };
-
-    const handleBack = () => {
-      setActiveStep((prev) => Math.max(prev - 1, 0));
-      onBack?.(activeStep);
-    };
-
-    const handleSave = () => {
-      if (viewMode) return;
-
-      if (steps?.goToNextStepNoValidtion || isEditMode) {
-        if (activeStep < totalSteps - 1) {
-          goToNextStep();
-          markStepCompleted();
-        } else {
-          onSave?.();
-        }
+        setValue(name, null);
         return;
       }
 
-      validateAndProceed(() => {
-        if (activeStep < totalSteps - 1) {
-          const currentStepInfo = {
-            index: activeStep,
-            label: currentStep?.label,
-            component: currentStep?.component,
-            validate: currentStep?.validate,
-            isLastStep: activeStep === totalSteps - 1,
-            completedSteps: completed,
-            getFormData: currentStep?.getFormData,
-          };
-          onSyncData?.(currentStepInfo);
-          goToNextStep();
-        } else {
-          onSave?.();
-        }
-      });
-    };
-
-    const renderActionButton = () => {
-      if (viewMode) {
-        return activeStep === totalSteps - 1 ? (
-          actionComponent || (
-            <Button variant="contained" sx={buttonStyle}>
-              {t("Take Action")}
-            </Button>
-          )
-        ) : (
-          <Button variant="contained" sx={buttonStyle} onClick={handleNext}>
-            {t("Next")}
-          </Button>
-        );
+      if (file.size > 10 * 1024 * 1024) {
+        setError(name, {
+          type: "manual",
+          message: t("File size should not exceed 10MB"),
+        });
+        setValue(name, null);
+        return;
       }
 
-      return activeStep === totalSteps - 1 ? (
-        <Button variant="contained" sx={buttonStyle} onClick={handleSave}>
-          {t("Submit")}
-        </Button>
-      ) : (
-        <Button variant="contained" sx={buttonStyle} onClick={handleSave}>
-          {t("Save & Next")}
-        </Button>
+      const extension = file?.name?.substring(file?.name?.lastIndexOf("."));
+      const fileName = `${name}${extension}`;
+      file.originalName = fileName;
+      const renamedFile = renameFile(file, fileName);
+
+      clearErrors(name);
+      setValue(name, renamedFile, { shouldValidate: true });
+      setFormData((prev) => ({
+        ...prev,
+        [name]: renamedFile,
+      }));
+    },
+    [setValue, clearErrors, setError, t]
+  );
+
+  useEffect(() => {
+    if (category === "A" && masterData) {
+      const zone1 = masterData?.zones?.find(
+        (zone) => zone.valueCode === "ZONE 1"
       );
+      const zone1Value = zone1 ? zone1.valueCode : "ZONE 1";
+
+      const classificationSociety = masterData?.supervisionAuthorites?.find(
+        (auth) => auth.valueCode === "CLASSIFICATION SOCIETY"
+      );
+      const classificationSocietyValue = classificationSociety
+        ? classificationSociety.valueCode
+        : "CLASSIFICATION SOCIETY";
+
+      setValue("zone", zone1Value, { shouldValidate: true });
+      setValue("supervisionAuthority", classificationSocietyValue, {
+        shouldValidate: true,
+      });
+
+      clearErrors("zone");
+      clearErrors("supervisionAuthority");
+
+      setFormData((prev) => ({
+        ...prev,
+        zone: zone1Value,
+        supervisionAuthority: classificationSocietyValue,
+      }));
+    }
+  }, [category, masterData, setValue, clearErrors, setFormData]);
+
+  const handleDownload = (fileName) => {
+    const link = document.createElement("a");
+    link.href = "#";
+    link.download = fileName;
+    link.click();
+  };
+
+  useEffect(() => {
+    if (!!getValues("builderAuth")) {
+      setIsBuilderDataLoaded(true);
+    }
+  }, []);
+
+  const handleBuilderChange = async (selectedValue) => {
+    setIsBuilderDataLoaded(false);
+    setSelectedBuilderId("");
+
+    const fieldsMap = {
+      builderName: "builderName",
+      builderAddress: "address",
+      builderEmail: "emailId",
+      builderMobile: "phone",
+      builderTradeLicence: "tradeLicenseNumber",
+      builderGST: "gstNo",
+      builderAuth: "",
     };
 
-    return (
-      <Box sx={{ width: "100%", padding: "1rem" }}>
-        <Paper
-          elevation={3}
-          sx={{
-            padding: "0.75rem 1.5rem",
-            borderRadius: "0.75rem",
-            overflowX: "auto",
-            whiteSpace: "nowrap",
-            backgroundColor: "#fafafa",
-          }}
+    Object.keys(fieldsMap).forEach((field) => setValue(field, ""));
+
+    if (!selectedValue) return;
+
+    try {
+      const URL = `${process.env.REACT_APP_AUTH_URL}${URLS_ENDPOINT.USER_SERVICE.BUILDER_SEARCH}?ids=${selectedValue}`;
+      loaderRef?.current?.show();
+
+      const response = await postData(URL, {});
+      if (response?.data?.data?.length > 0) {
+        loaderRef?.current?.hide();
+        const builderDetails = response.data.data?.map((obj) => ({
+          ...obj,
+          address: [obj.addressLine1, obj.addressLine2]
+            .filter(Boolean)
+            .join(", "),
+        }));
+
+        Object.entries(fieldsMap).forEach(([formField, apiField]) => {
+          setValue(formField, builderDetails[0]?.[apiField] || "");
+        });
+        setIsBuilderDataLoaded(true);
+        setSelectedBuilderId(selectedValue);
+      }
+    } catch (err) {
+      setIsBuilderDataLoaded(false);
+      setSelectedBuilderId("");
+      console.error("Failed to fetch builder details", err);
+      loaderRef?.current?.hide();
+      handleErrorMessage(err?.response?.data);
+      Object.keys(fieldsMap).forEach((field) => setValue(field, ""));
+    }
+  };
+
+  return (
+    <>
+      <NewLoader ref={loaderRef} />
+      <form autoComplete="off">
+        <Collapsible
+          title={
+            <>
+              <FaClipboardList className="me-2" style={{ color: "#2466BF" }} />
+              <span>{t("Basic Information")}</span>
+            </>
+          }
+          openStat={true}
         >
-          <Stack direction="row" alignItems="center" spacing={1}>
-            {steps.map((step, index) => (
-              <React.Fragment key={index}>
-                <Stack
-                  direction="row"
-                  alignItems="center"
-                  spacing={0.5}
-                  sx={{ cursor: "pointer" }}
-                >
-                  {completed[index] ? (
-                    <CheckCircleFill size={18} color={successColor} />
-                  ) : (
-                    <Typography
-                      sx={{
-                        fontSize: "0.875rem",
-                        width: "1.5rem",
-                        height: "1.5rem",
-                        textAlign: "center",
-                        borderRadius: "50%",
-                        backgroundColor: index === activeStep ? themeColor : "#e0e0e0",
-                        display: "inline-flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        fontWeight: "bold",
-                        color: index === activeStep ? "#fff" : "#666",
-                      }}
-                    >
-                      {index + 1}
-                    </Typography>
+          <Row className="gy-3" style={{ padding: "1rem" }}>
+            <Col md={4}>
+              <InputText
+                label={t("vesselDetails.Name of Owner")}
+                required={true}
+                name="ownerName"
+                placeholder={t("vesselDetails.Please enter Name of Owner")}
+                register={register("ownerName", {
+                  required: t("vesselDetails.Name is required"),
+                })}
+                errors={errors}
+                disabled={
+                  viewMode || (!errors?.ownerName && !!getValues("ownerName"))
+                }
+              />
+            </Col>
+            <Col md={4}>
+              <InputText
+                label={t("vesselDetails.Address of Owner")}
+                required={true}
+                name="ownerAddress"
+                placeholder={t("vesselDetails.Please enter Address of Owner")}
+                register={register("ownerAddress", {
+                  required: t("vesselDetails.Address is required"),
+                })}
+                errors={errors}
+                disabled={
+                  viewMode ||
+                  (!errors?.ownerAddress && !!getValues("ownerAddress"))
+                }
+              />
+            </Col>
+            <Col md={4}>
+              <InputText
+                label={t("vesselDetails.Mobile")}
+                required={true}
+                name="mobile"
+                placeholder={t("vesselDetails.Please enter Mobile")}
+                register={register("mobile", {
+                  required: t("vesselDetails.Mobile is required"),
+                })}
+                errors={errors}
+                disabled={
+                  viewMode || (!errors?.mobile && !!getValues("mobile"))
+                }
+              />
+            </Col>
+            <Col md={4}>
+              <InputText
+                label={t("vesselDetails.Email Id")}
+                required={true}
+                name="email"
+                type="email"
+                placeholder={t("vesselDetails.Please enter Email Id")}
+                register={register("email", {
+                  required: t("vesselDetails.Email is required"),
+                })}
+                errors={errors}
+                disabled={viewMode || (!errors?.email && !!getValues("email"))}
+              />
+            </Col>
+            <Col md={4}>
+              <InputText
+                label={t("vesselDetails.PAN")}
+                required={true}
+                name="pan"
+                placeholder={t("vesselDetails.Please enter PAN")}
+                register={register("pan", {
+                  required: t("vesselDetails.PAN is required"),
+                })}
+                errors={errors}
+                disabled={viewMode || (!errors?.pan && !!getValues("pan"))}
+              />
+            </Col>
+            <Col md={4}>
+              <InputText
+                label={t("vesselDetails.Aadhar")}
+                required={true}
+                name="aadhar"
+                placeholder={t("vesselDetails.Please enter Aadhar")}
+                register={register("aadhar", {
+                  required: t("vesselDetails.Aadhar is required"),
+                })}
+                errors={errors}
+                maxLength={12}
+                disabled={
+                  viewMode || (!errors?.aadhar && !!getValues("aadhar"))
+                }
+              />
+            </Col>
+            <Col md={4}>
+              <InputText
+                label={t("vesselDetails.Trade Licence")}
+                required={true}
+                name="tradeLicence"
+                placeholder={t("vesselDetails.Please enter Trade Licence")}
+                register={register("tradeLicence", {
+                  required: t("vesselDetails.Trade Licence is required"),
+                })}
+                errors={errors}
+                disabled={
+                  viewMode ||
+                  (!errors?.tradeLicence && !!getValues("tradeLicence"))
+                }
+              />
+            </Col>
+            <Col md={4}>
+              <InputText
+                label={t("vesselDetails.GST")}
+                required={true}
+                name="gst"
+                placeholder={t("vesselDetails.Please enter GST")}
+                register={register("gst", {
+                  required: t("vesselDetails.GST is required"),
+                })}
+                errors={errors}
+                disabled={viewMode || (!errors?.gst && !!getValues("gst"))}
+              />
+            </Col>
+          </Row>
+        </Collapsible>
+
+        <Collapsible
+          title={
+            <div className="d-flex align-items-center">
+              <FaShip className="me-2" style={{ color: "#2466BF" }} />
+              <span style={{ color: "#2466BF" }}>{t("Vessel Details")}</span>
+            </div>
+          }
+          openStat={true}
+        >
+          <Row className="gy-3" style={{ padding: "1rem" }}>
+            <Col md={4}>
+              <InputSelect
+                label={t("vesselDetails.Type of Vessel")}
+                required={true}
+                name="vesselType"
+                options={[
+                  {
+                    value: "",
+                    label: "-- Select --",
+                  },
+                  ...(masterData?.vesselTypes?.map((type) => ({
+                    value: type.valueCode,
+                    label: type.valueLabel,
+                  })) || []),
+                ]}
+                register={register("vesselType", {
+                  required: t("vesselDetails.vesselType is required"),
+                })}
+                errors={errors}
+                value={formData.vesselType || watch("vesselType") || ""}
+                onChange={(value) =>
+                  !viewMode && handleInputChange("vesselType", value)
+                }
+                disabled={viewMode}
+              />
+            </Col>
+            <Col md={4}>
+              <InputSelect
+                label={t("vesselDetails.Category")}
+                required={true}
+                name="category"
+                options={[
+                  {
+                    value: "",
+                    label: "-- Select --",
+                  },
+                  ...(masterData?.vesselCategories?.map((type) => ({
+                    value: type.valueCode,
+                    label: type.valueLabel,
+                  })) || []),
+                ]}
+                register={register("category", {
+                  required: t("vesselDetails.category is required"),
+                })}
+                errors={errors}
+                value={formData.category || watch("category") || ""}
+                onChange={(value) =>
+                  !viewMode && handleInputChange("category", value)
+                }
+                disabled={viewMode}
+              />
+            </Col>
+            <Col md={4}>
+              <InputSelect
+                label={t("vesselDetails.Zone")}
+                required={true}
+                name="zone"
+                options={[
+                  {
+                    value: "",
+                    label: "-- Select --",
+                  },
+                  ...(masterData?.zones?.map((type) => ({
+                    value: type.valueCode,
+                    label: type.valueLabel,
+                  })) || []),
+                ]}
+                register={register("zone", {
+                  required: category !== "A" && t("zone is required"),
+                })}
+                errors={errors}
+                value={formData.zone || watch("zone") || ""}
+                onChange={(value) =>
+                  !viewMode &&
+                  category !== "A" &&
+                  handleInputChange("zone", value)
+                }
+                disabled={viewMode || category === "A"}
+                style={{
+                  backgroundColor: category === "A" ? "#f8f9fa" : "",
+                  cursor: category === "A" ? "not-allowed" : "pointer",
+                }}
+              />
+            </Col>
+
+            <Col md={4}>
+              <InputText
+                label={t("vesselDetails.Gross Tonnage (GRT)")}
+                required={true}
+                name="grt"
+                placeholder={t("vesselDetails.Please enter GRT")}
+                register={register("grt", {
+                  required: t("vesselDetails.GRT is required"),
+                })}
+                errors={errors}
+                disabled={viewMode}
+              />
+            </Col>
+            <Col md={4}>
+              <InputText
+                label={t("vesselDetails.Work Order Value")}
+                required={true}
+                name="workOrderValue"
+                placeholder={t("vesselDetails.Enter Work Order Value")}
+                register={register("workOrderValue", {
+                  required: t("vesselDetails.Work Order Value is required"),
+                  pattern: {
+                    value: /^[0-9]+$/,
+                    message: t("vesselDetails.Please enter a valid number"),
+                  },
+                })}
+                errors={errors}
+                disabled={viewMode}
+              />
+            </Col>
+
+            <Col md={4}>
+              <InputSelect
+                label={t("vesselDetails.Purchase Type")}
+                required={true}
+                name="purchaseType"
+                options={[
+                  {
+                    value: "",
+                    label: "-- Select --",
+                  },
+                  ...(masterData?.purchaseTypes?.map((type) => ({
+                    value: type.valueCode,
+                    label: type.valueLabel,
+                  })) || []),
+                ]}
+                register={register("purchaseType", {
+                  required: t("vesselDetails.Purchase Type is required"),
+                })}
+                errors={errors}
+                value={formData.purchaseType || watch("purchaseType") || ""}
+                onChange={(value) =>
+                  !viewMode && handleInputChange("purchaseType", value)
+                }
+                disabled={viewMode}
+              />
+            </Col>
+
+            <Col md={4}>
+              <InputSelect
+                label={t("vesselDetails.Supervision Authority")}
+                required={true}
+                name="supervisionAuthority"
+                options={[
+                  {
+                    value: "",
+                    label: "-- Select --",
+                  },
+                  ...(masterData?.supervisionAuthorites?.map((type) => ({
+                    value: type.valueCode,
+                    label: type.valueLabel,
+                  })) || []),
+                ]}
+                register={register("supervisionAuthority", {
+                  required:
+                    category !== "A" &&
+                    t("vesselDetails.Supervision Authority is required"),
+                })}
+                errors={errors}
+                value={
+                  formData.supervisionAuthority ||
+                  watch("supervisionAuthority") ||
+                  ""
+                }
+                onChange={(value) =>
+                  !viewMode &&
+                  category !== "A" &&
+                  handleInputChange("supervisionAuthority", value)
+                }
+                disabled={viewMode || category === "A"}
+                style={{
+                  backgroundColor: category === "A" ? "#f8f9fa" : "",
+                  cursor: category === "A" ? "not-allowed" : "pointer",
+                }}
+              />
+            </Col>
+
+            {formData?.supervisionAuthority === "CLASSIFICATION SOCIETY" && (
+              <Col md={8}>
+                <InputText
+                  label={t("vesselDetails.Name of the Classification Society")}
+                  name="classificationSociety"
+                  placeholder={t(
+                    "vesselDetails.Please enter Name of the Classification Society"
                   )}
-                  <Typography
-                    sx={{
-                      fontWeight: index === activeStep ? "bold" : "normal",
-                      color: index === activeStep ? themeColor : "#999",
-                      fontSize: "0.875rem",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {step.label}
-                  </Typography>
-                </Stack>
-                {index < steps.length - 1 && (
-                  <ChevronRight size={14} color="#ccc" />
-                )}
-              </React.Fragment>
-            ))}
-          </Stack>
-        </Paper>
+                  register={register("classificationSociety")}
+                  errors={errors}
+                  disabled={viewMode}
+                />
+              </Col>
+            )}
+          </Row>
 
-        <Paper
-          elevation={2}
-          sx={{
-            marginTop: "1rem",
-            borderRadius: "0.75rem",
-            backgroundColor: "#fff",
-            width: "100%",
-          }}
-        >
-          {currentStep.component}
-        </Paper>
+          <Row>
+            <Col md={6} style={{ paddingTop: "1rem" }}>
+              <InputRadio
+                name="constructedBy"
+                label={t("vesselDetails.Constructed By ?")}
+                options={[
+                  { label: t("vesselDetails.Self"), value: "1" },
+                  { label: t("vesselDetails.Builder"), value: "2" },
+                ]}
+                register={register}
+                rules={{
+                  required: t("vesselDetails.Please select a Constructor Type"),
+                }}
+                errors={errors}
+                onChange={() => !viewMode && clearErrors("constructedBy")}
+                disabled={viewMode}
+              />
+            </Col>
+            {constructedBy === "2" && (
+              <Col md={6}>
+                <InputSelect
+                  label={t("vesselDetails.Builder")}
+                  required={true}
+                  name="builder"
+                  options={[
+                    {
+                      value: "",
+                      label: "-- Select --",
+                    },
+                    ...(masterData?.builderNames?.map((type) => ({
+                      value: type.valueCode,
+                      label: type.valueLabel,
+                    })) || []),
+                  ]}
+                  register={register("builder", {
+                    required: t("vesselDetails.Builder is required"),
+                  })}
+                  errors={errors}
+                  value={formData.builder || watch("builder") || ""}
+                  onChange={(value) =>
+                    !viewMode && handleInputChange("builder", value)
+                  }
+                  disabled={viewMode}
+                />
+              </Col>
+            )}
+          </Row>
+        </Collapsible>
 
-        <Divider sx={{ margin: "2rem 0" }} />
-
-        <Box
-          sx={{
-            display: "flex",
-            justifyContent: "space-between",
-            gap: "1rem",
-            flexDirection: { xs: "column", sm: "row" },
-            alignItems: { xs: "stretch", sm: "center" },
-          }}
-        >
-          <Button
-            variant="outlined"
-            onClick={handleBack}
-            disabled={activeStep === 0}
-            sx={{
-              color: themeColor,
-              borderColor: themeColor,
-              fontWeight: "bold",
-              borderRadius: "0.5rem",
-              minWidth: { xs: "100%", sm: "8rem" },
-              fontSize: "0.9rem",
-            }}
+        {constructedBy === "2" && (
+          <Collapsible
+            title={
+              <div className="d-flex align-items-center">
+                <FaUser className="me-2" style={{ color: "#2466BF" }} />
+                <span style={{ color: "#2466BF" }}>{t("Builder Details")}</span>
+              </div>
+            }
+            openStat={true}
           >
-            {t("Previous")}
-          </Button>
+            <Row className="gy-3" style={{ padding: "1rem" }}>
+              <Col md={4}>
+                <InputText
+                  label={t("vesselDetails.Builder Name")}
+                  required={true}
+                  name="builderName"
+                  placeholder={t("vesselDetails.Please enter Builder Name")}
+                  register={register("builderName", {
+                    required: t("vesselDetails.Builder Name is required"),
+                  })}
+                  errors={errors}
+                  disabled={
+                    viewMode ||
+                    (isBuilderDataLoaded && !!getValues("builderName"))
+                  }
+                />
+              </Col>
+              <Col md={4}>
+                <InputText
+                  label={t("vesselDetails.Builder Address")}
+                  required={true}
+                  name="builderAddress"
+                  placeholder={t("vesselDetails.Please enter Builder Address")}
+                  register={register("builderAddress", {
+                    required: t("vesselDetails.Builder Address is required"),
+                  })}
+                  errors={errors}
+                  disabled={
+                    viewMode ||
+                    (isBuilderDataLoaded && !!getValues("builderAddress"))
+                  }
+                />
+              </Col>
+              <Col md={4}>
+                <InputText
+                  label={t("vesselDetails.Builder Email Id")}
+                  required={true}
+                  name="builderEmail"
+                  type="email"
+                  placeholder={t("vesselDetails.Please enter Builder Email Id")}
+                  register={register("builderEmail", {
+                    required: t("vesselDetails.Builder Email is required"),
+                    pattern: {
+                      value: /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i,
+                      message: t("vesselDetails.Invalid email address"),
+                    },
+                  })}
+                  errors={errors}
+                  disabled={
+                    viewMode ||
+                    (isBuilderDataLoaded && !!getValues("builderEmail"))
+                  }
+                />
+              </Col>
+              <Col md={4}>
+                <InputText
+                  label={t("vesselDetails.Mobile")}
+                  required={true}
+                  name="builderMobile"
+                  placeholder={t("vesselDetails.Please enter Mobile")}
+                  register={register("builderMobile", {
+                    required: t("vesselDetails.Builder Mobile is required"),
+                    pattern: {
+                      value: /^[0-9]{10}$/,
+                      message: t("vesselDetails.Invalid mobile number"),
+                    },
+                  })}
+                  errors={errors}
+                  disabled={
+                    viewMode ||
+                    (isBuilderDataLoaded && !!getValues("builderMobile"))
+                  }
+                />
+              </Col>
+              <Col md={4}>
+                <InputText
+                  label={t("vesselDetails.Trade Licence")}
+                  required={true}
+                  name="builderTradeLicence"
+                  placeholder={t("vesselDetails.Please enter Trade Licence")}
+                  register={register("builderTradeLicence", {
+                    required: t(
+                      "vesselDetails.Builder Trade Licence is required"
+                    ),
+                  })}
+                  errors={errors}
+                  disabled={
+                    viewMode ||
+                    (isBuilderDataLoaded && !!getValues("builderTradeLicence"))
+                  }
+                />
+              </Col>
+              <Col md={4}>
+                <InputText
+                  label={t("vesselDetails.GST")}
+                  required={true}
+                  name="builderGST"
+                  placeholder={t("vesselDetails.Please enter GST")}
+                  register={register("builderGST", {
+                    required: t("vesselDetails.Builder GST is required"),
+                  })}
+                  errors={errors}
+                  disabled={
+                    viewMode ||
+                    (isBuilderDataLoaded && !!getValues("builderGST"))
+                  }
+                />
+              </Col>
+              <Col md={4}>
+                <InputSelect
+                  label={t("vesselDetails.Builder Authorization")}
+                  required={true}
+                  name="builderAuth"
+                  options={[
+                    { value: "auth", label: t("vesselDetails.Authorized") },
+                    { value: "rejected", label: t("vesselDetails.Rejected") },
+                  ]}
+                  register={register("builderAuth", {
+                    required: t(
+                      "vesselDetails.Builder Authorization is required"
+                    ),
+                  })}
+                  errors={errors}
+                  value={formData.builderAuth || watch("builderAuth") || ""}
+                  onChange={(value) =>
+                    !viewMode && handleInputChange("builderAuth", value)
+                  }
+                  disabled={viewMode}
+                />
+              </Col>
+              <Col md={6}>
+                {viewMode ? (
+                  watch("authLetter") && watch("authLetter").name ? (
+                    <div className="mb-3">
+                      <label
+                        className="form-label fw-bold"
+                        style={{ fontSize: "0.9rem" }}
+                      >
+                        {t("Authorization Letter")}
+                      </label>
+                      <div className="p-2 p-sm-3 border rounded bg-light">
+                        <div className="d-flex flex-column flex-sm-row justify-content-between align-items-start align-items-sm-center gap-2">
+                          <div className=" min-width-0">
+                            <div
+                              className="fw-semibold text-primary mb-1"
+                              style={{
+                                fontSize: "0.8rem",
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap",
+                              }}
+                            >
+                              {watch("authLetter").name}
+                            </div>
+                            <small
+                              className="text-muted"
+                              style={{ fontSize: "0.7rem" }}
+                            >
+                              {(
+                                (watch("authLetter").size || 0) /
+                                1024 /
+                                1024
+                              ).toFixed(1)}{" "}
+                              MB
+                            </small>
+                          </div>
+                          <button
+                            type="button"
+                            className="btn btn-outline-primary btn-sm d-flex align-items-center flex-shrink-0"
+                            style={{ fontSize: "0.75rem", padding: "4px 8px" }}
+                            onClick={() =>
+                              handleDownload(watch("authLetter").name)
+                            }
+                          >
+                            <BsDownload size={12} className="me-1" />
+                            <span>{t("Download")}</span>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="mb-3">
+                      <label
+                        className="form-label fw-bold"
+                        style={{ fontSize: "0.9rem" }}
+                      >
+                        {t("Authorization Letter")}
+                      </label>
+                      <div
+                        className="p-2 p-sm-3 border rounded bg-light text-muted text-center"
+                        style={{ fontSize: "0.8rem" }}
+                      >
+                        {t("No file uploaded")}
+                      </div>
+                    </div>
+                  )
+                ) : (
+                  <div className="mb-2">
+                    <InputFile
+                      label={t("Authorization Letter")}
+                      required={true}
+                      name="authLetter"
+                      register={register("authLetter", {
+                        required: t(
+                          "vesselDetails.Authorization Letter is required"
+                        ),
+                      })}
+                      errors={errors}
+                      onChange={(e) => {
+                        if (viewMode) return;
+                        if (e.target.files && e?.target?.files[0]) {
+                          handleFileChange("authLetter", e.target.files[0]);
+                        }
+                      }}
+                      disabled={viewMode}
+                      watch={watch}
+                      defaultValue={watch("authLetter")}
+                      clearErrors={clearErrors}
+                      accept=".pdf,.jpg,.jpeg,.png"
+                    />
+                  </div>
+                )}
+              </Col>
+            </Row>
+          </Collapsible>
+        )}
+      </form>
+    </>
+  );
+};
 
-          {renderActionButton()}
-        </Box>
-      </Box>
-    );
+export default VesselDetails;
+
+import React, { useState, useEffect, useRef, useCallback } from "react";
+import { useForm, useFieldArray } from "react-hook-form";
+import { Row, Col, Button } from "react-bootstrap";
+import InputText from "../../../../common/InputText.tsx";
+import InputSelect from "../../../../common/InputSelect.tsx";
+import InputFile from "../../../../common/InputFile.tsx";
+import Collapsible from "../../../../common/Collapsible.js";
+import { useTranslation } from "react-i18next";
+import { FaShip, FaCog, FaBroadcastTower, FaLeaf, FaUsers, FaFileUpload, FaPlus, FaTrash } from "react-icons/fa";
+// import { useMasterData } from "../../../context/MasterDataContext.js";
+
+const VesselSurveyForm = ({ formMethods, viewMode = false, editMode = false }) => {
+  const { t } = useTranslation();
+  // const { masterData } = useMasterData();
+
+  const defaultValues = {
+    // Basic Vessel Information
+    typeOfSurvey: "",
+    placeYardNo: "",
+    nameOfVessel: "",
+    officialNo: "",
+    portOfRegistry: "",
+    grossTonnage: "",
+    netTonnage: "",
+    typeOfVessel: "",
+    categoryOfVessel: "",
+    yearOfBuild: "",
+    nameOfOwner: "",
+    addressOfOwner: "",
+    ownerTelephone: "",
+    nameOfBuilder: "",
+    addressOfBuilder: "",
+    agentName: "",
+    agentAddress: "",
+    agentTelephone: "",
+    placeOfLastSurvey: "",
+    dateOfLastSurvey: "",
+    dateOfProposedVisit: "",
+
+    // Hull Particulars
+    hullLength: "",
+    hullBreadth: "",
+    hullDepth: "",
+    hullMaterial: "",
+    hullPlattingThickness: "",
+    keelLayingDate: "",
+
+    // Engine Details
+    typeOfEngine: "",
+    engineMake: "",
+    engineMakerAddress: "",
+    modelNo: "",
+    numberOfEngine: "",
+    yearOfMake: "",
+    horsepower: "",
+    speedRPM: "",
+    strokeEngine: "",
+    numberOfSetFitted: "",
+    setSrNo: "",
+    engineCylinderDiameter: "",
+    propellerType: "",
+    gearType: "",
+    noOfGear: "",
+    vesselSpeed: "",
+    revolutionMints: "",
+
+    // Radio and Navigation Equipment
+    magneticCompass: "",
+    vhfRadio: "",
+    classBAutoAIS: "",
+    gpsNavigator: "",
+    binocular: "",
+    aldisLamp: "",
+    rudderAngleIndicator: "",
+    othersNavigation: "",
+
+    // Pollution Control Devices
+    bilgeWaterSeparator: "",
+    bilgeCapacity: "",
+    bilgeMakeModel: "",
+    sewageTreatmentPlant: "",
+    sewageCapacity: "",
+    sewageMakeModel: "",
+    oilyWaterFilter: "",
+    oilyCapacity: "",
+    oilyMakeModel: "",
+    exhaustGasCleaning: "",
+    exhaustCapacity: "",
+    exhaustMakeModel: "",
+    othersPollution: "",
+    othersCapacity: "",
+    othersMakeModel: "",
+
+    // Crew Details
+    crewDetails: [
+      {
+        crewType: "",
+        name: "",
+        rank: "",
+        cocNo: "",
+        validity: "",
+        experience: ""
+      }
+    ],
+
+    // Enclosures
+    authorizationFile: null,
+    paymentChallan: null,
+    lastCertificateCopy: null,
+    registrationCertificateCopy: null
+  };
+
+  const internalFormMethods = useForm({
+    defaultValues,
+    mode: "onTouched",
+  });
+
+  const methods = formMethods || internalFormMethods;
+  const { register, watch, setValue, clearErrors, formState: { errors } } = methods;
+
+  const { fields, append, remove } = useFieldArray({
+    control: methods.control,
+    name: "crewDetails"
+  });
+useEffect(() => {
+  const currentCrewDetails = watch("crewDetails");
+  if (!currentCrewDetails || currentCrewDetails.length === 0) {
+    setValue("crewDetails", [{
+      crewType: "",
+      name: "",
+      rank: "",
+      cocNo: "",
+      validity: "",
+      experience: ""
+    }]);
   }
-);
+}, [setValue, watch]);
+  const handleFileChange = useCallback((name, file) => {
+    if (!file) return;
 
-export default Stepper;
+    const validTypes = ["application/pdf", "image/jpeg", "image/png", "image/jpg"];
+    if (!validTypes.includes(file.type)) {
+      methods.setError(name, {
+        type: "manual",
+        message: t("Only PDF, JPG or PNG files are allowed"),
+      });
+      setValue(name, null);
+      return;
+    }
+
+    if (file.size > 10 * 1024 * 1024) {
+      methods.setError(name, {
+        type: "manual",
+        message: t("File size should not exceed 10MB"),
+      });
+      setValue(name, null);
+      return;
+    }
+
+    clearErrors(name);
+    setValue(name, file, { shouldValidate: true });
+  }, [setValue, clearErrors, methods, t]);
+  
+
+  const surveyTypeOptions = [
+    { value: "", label: "-- Select --" },
+    { value: "INITIAL", label: "Initial Survey" },
+    { value: "ANNUAL", label: "Annual Survey" },
+    { value: "INTERMEDIATE", label: "Intermediate Survey" },
+    { value: "RENEWAL", label: "Renewal Survey" }
+  ];
+
+  const propellerTypeOptions = [
+    { value: "", label: "-- Select --" },
+    { value: "FIXED", label: "Fixed Pitch" },
+    { value: "VARIABLE", label: "Variable Pitch" },
+    { value: "CONTROLLABLE", label: "Controllable Pitch" }
+  ];
+
+  const crewTypeOptions = [
+    { value: "", label: "-- Select --" },
+    { value: "MASTER", label: "Master" },
+    { value: "CHIEF_ENGINEER", label: "Chief Engineer" },
+    { value: "DECK_OFFICER", label: "Deck Officer" },
+    { value: "ENGINE_OFFICER", label: "Engine Officer" },
+    { value: "CREW", label: "Crew Member" }
+  ];
+
+  return (
+    <form autoComplete="off">
+      {/* Basic Vessel Information */}
+      <Collapsible
+        title={
+          <>
+            <FaShip className="me-2" style={{ color: "#2466BF" }} />
+            <span>{t("Basic Vessel Information")}</span>
+          </>
+        }
+        openStat={true}
+      >
+        <Row className="gy-3" style={{ padding: "1rem" }}>
+          <Col md={4}>
+            <InputSelect
+              label={t("Type of Survey")}
+              required={true}
+              name="typeOfSurvey"
+              options={surveyTypeOptions}
+              register={register("typeOfSurvey", {
+                required: t("Type of Survey is required"),
+              })}
+              errors={errors}
+              value={watch("typeOfSurvey") || ""}
+              onChange={(value) => !viewMode && setValue("typeOfSurvey", value)}
+              disabled={viewMode}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("Place/Yard No.")}
+              required={true}
+              name="placeYardNo"
+              placeholder={t("Enter Place/Yard No.")}
+              register={register("placeYardNo", {
+                required: t("Place/Yard No. is required"),
+              })}
+              errors={errors}
+              disabled={viewMode}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("Name of Vessel")}
+              name="nameOfVessel"
+              placeholder={t("Auto Populated")}
+              register={register("nameOfVessel")}
+              errors={errors}
+              disabled={true}
+              style={{ backgroundColor: "#f8f9fa" }}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("Official No. of the Vessel")}
+              name="officialNo"
+              placeholder={t("Auto Populated")}
+              register={register("officialNo")}
+              errors={errors}
+              disabled={true}
+              style={{ backgroundColor: "#f8f9fa" }}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("Port of Registry of Vessel")}
+              name="portOfRegistry"
+              placeholder={t("Auto Populated")}
+              register={register("portOfRegistry")}
+              errors={errors}
+              disabled={true}
+              style={{ backgroundColor: "#f8f9fa" }}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("Gross Tonnage")}
+              name="grossTonnage"
+              placeholder={t("Auto Populated")}
+              register={register("grossTonnage")}
+              errors={errors}
+              disabled={true}
+              style={{ backgroundColor: "#f8f9fa" }}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("Net Tonnage")}
+              required={true}
+              name="netTonnage"
+              type="number"
+              placeholder={t("Enter Net Tonnage")}
+              register={register("netTonnage", {
+                required: t("Net Tonnage is required"),
+              })}
+              errors={errors}
+              disabled={viewMode}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("Type of Vessel")}
+              name="typeOfVessel"
+              placeholder={t("Auto Populated")}
+              register={register("typeOfVessel")}
+              errors={errors}
+              disabled={true}
+              style={{ backgroundColor: "#f8f9fa" }}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("Category of Vessel")}
+              name="categoryOfVessel"
+              placeholder={t("Auto Populated")}
+              register={register("categoryOfVessel")}
+              errors={errors}
+              disabled={true}
+              style={{ backgroundColor: "#f8f9fa" }}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("Year of Build")}
+              name="yearOfBuild"
+              placeholder={t("Auto Populated")}
+              register={register("yearOfBuild")}
+              errors={errors}
+              disabled={true}
+              style={{ backgroundColor: "#f8f9fa" }}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("Name of Owner")}
+              name="nameOfOwner"
+              placeholder={t("Auto Populated")}
+              register={register("nameOfOwner")}
+              errors={errors}
+              disabled={true}
+              style={{ backgroundColor: "#f8f9fa" }}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("Address of Owner")}
+              name="addressOfOwner"
+              placeholder={t("Auto Populated")}
+              register={register("addressOfOwner")}
+              errors={errors}
+              disabled={true}
+              style={{ backgroundColor: "#f8f9fa" }}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("Owner's Telephone No.")}
+              name="ownerTelephone"
+              placeholder={t("Auto Populated")}
+              register={register("ownerTelephone")}
+              errors={errors}
+              disabled={true}
+              style={{ backgroundColor: "#f8f9fa" }}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("Name of Builder")}
+              name="nameOfBuilder"
+              placeholder={t("Auto Populated")}
+              register={register("nameOfBuilder")}
+              errors={errors}
+              disabled={true}
+              style={{ backgroundColor: "#f8f9fa" }}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("Address of Builder")}
+              name="addressOfBuilder"
+              placeholder={t("Auto Populated")}
+              register={register("addressOfBuilder")}
+              errors={errors}
+              disabled={true}
+              style={{ backgroundColor: "#f8f9fa" }}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("Agent's Name")}
+              name="agentName"
+              placeholder={t("Enter Agent's Name")}
+              register={register("agentName")}
+              errors={errors}
+              disabled={viewMode}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("Agent's Address")}
+              name="agentAddress"
+              placeholder={t("Enter Agent's Address")}
+              register={register("agentAddress")}
+              errors={errors}
+              disabled={viewMode}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("Agent's Telephone No.")}
+              name="agentTelephone"
+              placeholder={t("Enter Agent's Telephone")}
+              register={register("agentTelephone")}
+              errors={errors}
+              disabled={viewMode}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("Place of Last Survey")}
+              name="placeOfLastSurvey"
+              placeholder={t("Enter Place of Last Survey")}
+              register={register("placeOfLastSurvey")}
+              errors={errors}
+              disabled={viewMode}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("Date of Last Survey")}
+              name="dateOfLastSurvey"
+              type="date"
+              register={register("dateOfLastSurvey")}
+              errors={errors}
+              disabled={viewMode}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("Date of Proposed Visit of Surveyor")}
+              name="dateOfProposedVisit"
+              type="date"
+              register={register("dateOfProposedVisit")}
+              errors={errors}
+              disabled={viewMode}
+            />
+          </Col>
+        </Row>
+      </Collapsible>
+
+      {/* Hull Particulars */}
+      <Collapsible
+        title={
+          <>
+            <FaShip className="me-2" style={{ color: "#2466BF" }} />
+            <span>{t("Hull Particulars")}</span>
+          </>
+        }
+        openStat={true}
+      >
+        <Row className="gy-3" style={{ padding: "1rem" }}>
+          <Col md={4}>
+            <InputText
+              label={t("Length of the Hull (Meter)")}
+              required={true}
+              name="hullLength"
+              type="number"
+              placeholder={t("Enter Hull Length")}
+              register={register("hullLength", {
+                required: t("Hull Length is required"),
+              })}
+              errors={errors}
+              disabled={viewMode}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("Breadth of the Hull (Meter)")}
+              required={true}
+              name="hullBreadth"
+              type="number"
+              placeholder={t("Enter Hull Breadth")}
+              register={register("hullBreadth", {
+                required: t("Hull Breadth is required"),
+              })}
+              errors={errors}
+              disabled={viewMode}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("Depth of the Hull (Meter)")}
+              required={true}
+              name="hullDepth"
+              type="number"
+              placeholder={t("Enter Hull Depth")}
+              register={register("hullDepth", {
+                required: t("Hull Depth is required"),
+              })}
+              errors={errors}
+              disabled={viewMode}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("Hull Material")}
+              name="hullMaterial"
+              placeholder={t("Enter Hull Material")}
+              register={register("hullMaterial")}
+              errors={errors}
+              disabled={viewMode}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("Hull Platting Thickness (mm)")}
+              name="hullPlattingThickness"
+              type="number"
+              placeholder={t("Enter Thickness")}
+              register={register("hullPlattingThickness")}
+              errors={errors}
+              disabled={viewMode}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("Keel Laying Date")}
+              name="keelLayingDate"
+              type="date"
+              register={register("keelLayingDate")}
+              errors={errors}
+              disabled={viewMode}
+            />
+          </Col>
+        </Row>
+      </Collapsible>
+
+      {/* Engine Details */}
+      <Collapsible
+        title={
+          <>
+            <FaCog className="me-2" style={{ color: "#2466BF" }} />
+            <span>{t("Details of Propulsion of Engine")}</span>
+          </>
+        }
+        openStat={true}
+      >
+        <Row className="gy-3" style={{ padding: "1rem" }}>
+          <Col md={4}>
+            <InputText
+              label={t("Type of Engine")}
+              name="typeOfEngine"
+              placeholder={t("Auto Populated")}
+              register={register("typeOfEngine")}
+              errors={errors}
+              disabled={true}
+              style={{ backgroundColor: "#f8f9fa" }}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("Engine Make")}
+              name="engineMake"
+              placeholder={t("Auto Populated")}
+              register={register("engineMake")}
+              errors={errors}
+              disabled={true}
+              style={{ backgroundColor: "#f8f9fa" }}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("Engine Maker Address")}
+              name="engineMakerAddress"
+              placeholder={t("Auto Populated")}
+              register={register("engineMakerAddress")}
+              errors={errors}
+              disabled={true}
+              style={{ backgroundColor: "#f8f9fa" }}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("Model No.")}
+              name="modelNo"
+              placeholder={t("Enter Model No.")}
+              register={register("modelNo")}
+              errors={errors}
+              disabled={viewMode}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("Number of Engine")}
+              name="numberOfEngine"
+              type="number"
+              placeholder={t("Enter Number of Engine")}
+              register={register("numberOfEngine")}
+              errors={errors}
+              disabled={viewMode}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("Year of Make")}
+              name="yearOfMake"
+              placeholder={t("Auto Populated")}
+              register={register("yearOfMake")}
+              errors={errors}
+              disabled={true}
+              style={{ backgroundColor: "#f8f9fa" }}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("Horsepower")}
+              name="horsepower"
+              placeholder={t("Auto Populated")}
+              register={register("horsepower")}
+              errors={errors}
+              disabled={true}
+              style={{ backgroundColor: "#f8f9fa" }}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("Speed/RPM")}
+              name="speedRPM"
+              placeholder={t("Auto Populated")}
+              register={register("speedRPM")}
+              errors={errors}
+              disabled={true}
+              style={{ backgroundColor: "#f8f9fa" }}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("Stroke (Engine)")}
+              name="strokeEngine"
+              placeholder={t("Enter Stroke")}
+              register={register("strokeEngine")}
+              errors={errors}
+              disabled={viewMode}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("Number of Set Fitted")}
+              name="numberOfSetFitted"
+              type="number"
+              placeholder={t("Enter Number of Set")}
+              register={register("numberOfSetFitted")}
+              errors={errors}
+              disabled={viewMode}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("Set Sr. No.")}
+              name="setSrNo"
+              placeholder={t("Enter Set Sr. No.")}
+              register={register("setSrNo")}
+              errors={errors}
+              disabled={viewMode}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("Engine Cylinder Diameter (mm)")}
+              name="engineCylinderDiameter"
+              type="number"
+              placeholder={t("Enter Diameter")}
+              register={register("engineCylinderDiameter")}
+              errors={errors}
+              disabled={viewMode}
+            />
+          </Col>
+          <Col md={4}>
+            <InputSelect
+              label={t("Propeller Type")}
+              name="propellerType"
+              options={propellerTypeOptions}
+              register={register("propellerType")}
+              errors={errors}
+              value={watch("propellerType") || ""}
+              onChange={(value) => !viewMode && setValue("propellerType", value)}
+              disabled={viewMode}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("Gear Type")}
+              name="gearType"
+              placeholder={t("Enter Gear Type")}
+              register={register("gearType")}
+              errors={errors}
+              disabled={viewMode}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("No. of Gear")}
+              name="noOfGear"
+              type="number"
+              placeholder={t("Enter No. of Gear")}
+              register={register("noOfGear")}
+              errors={errors}
+              disabled={viewMode}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("Vessel Speed")}
+              name="vesselSpeed"
+              placeholder={t("Enter Vessel Speed")}
+              register={register("vesselSpeed")}
+              errors={errors}
+              disabled={viewMode}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("Revolution/mints")}
+              name="revolutionMints"
+              type="number"
+              placeholder={t("Enter Revolution/mints")}
+              register={register("revolutionMints")}
+              errors={errors}
+              disabled={viewMode}
+            />
+          </Col>
+        </Row>
+      </Collapsible>
+
+      {/* Radio and Navigation Equipment */}
+      <Collapsible
+        title={
+          <>
+            <FaBroadcastTower className="me-2" style={{ color: "#2466BF" }} />
+            <span>{t("Radio and navigation equipment")}</span>
+          </>
+        }
+        openStat={true}
+      >
+        <Row className="gy-3" style={{ padding: "1rem" }}>
+          <Col md={4}>
+            <InputText
+              label={t("Magnetic Compass")}
+              name="magneticCompass"
+              type="number"
+              placeholder={t("Enter quantity")}
+              register={register("magneticCompass")}
+              errors={errors}
+              disabled={viewMode}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("Very High Frequency (VHF) radio")}
+              name="vhfRadio"
+              type="number"
+              placeholder={t("Enter quantity")}
+              register={register("vhfRadio")}
+              errors={errors}
+              disabled={viewMode}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("Class B Automatic Identification System (AIS) with display")}
+              name="classBAutoAIS"
+              type="number"
+              placeholder={t("Enter quantity")}
+              register={register("classBAutoAIS")}
+              errors={errors}
+              disabled={viewMode}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("Global Positioning System (GPS) Navigator")}
+              name="gpsNavigator"
+              type="number"
+              placeholder={t("Enter quantity")}
+              register={register("gpsNavigator")}
+              errors={errors}
+              disabled={viewMode}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("Binocular")}
+              name="binocular"
+              type="number"
+              placeholder={t("Enter quantity")}
+              register={register("binocular")}
+              errors={errors}
+              disabled={viewMode}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("Aldis lamp or search light")}
+              name="aldisLamp"
+              type="number"
+              placeholder={t("Enter quantity")}
+              register={register("aldisLamp")}
+              errors={errors}
+              disabled={viewMode}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("Rudder angle indicator")}
+              name="rudderAngleIndicator"
+              type="number"
+              placeholder={t("Enter quantity")}
+              register={register("rudderAngleIndicator")}
+              errors={errors}
+              disabled={viewMode}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("Others")}
+              name="othersNavigation"
+              type="number"
+              placeholder={t("Enter quantity")}
+              register={register("othersNavigation")}
+              errors={errors}
+              disabled={viewMode}
+            />
+          </Col>
+        </Row>
+      </Collapsible>
+
+      {/* Pollution Control Devices */}
+      <Collapsible
+        title={
+          <>
+            <FaLeaf className="me-2" style={{ color: "#2466BF" }} />
+            <span>{t("Pollution Control Devices")}</span>
+          </>
+        }
+        openStat={true}
+      >
+        <Row className="gy-3" style={{ padding: "1rem" }}>
+          <Col md={4}>
+            <InputText
+              label={t("Bilge Water Separator")}
+              name="bilgeWaterSeparator"
+              type="number"
+              placeholder={t("Enter quantity")}
+              register={register("bilgeWaterSeparator")}
+              errors={errors}
+              disabled={viewMode}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("Capacity (m3/hr)")}
+              name="bilgeCapacity"
+              placeholder={t("Enter capacity")}
+              register={register("bilgeCapacity")}
+              errors={errors}
+              disabled={viewMode}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("Make & Model")}
+              name="bilgeMakeModel"
+              placeholder={t("Enter make & model")}
+              register={register("bilgeMakeModel")}
+              errors={errors}
+              disabled={viewMode}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("Sewage Treatment Plant")}
+              name="sewageTreatmentPlant"
+              type="number"
+              placeholder={t("Enter quantity")}
+              register={register("sewageTreatmentPlant")}
+              errors={errors}
+              disabled={viewMode}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("Capacity (m3/hr)")}
+              name="sewageCapacity"
+              placeholder={t("Enter capacity")}
+              register={register("sewageCapacity")}
+              errors={errors}
+              disabled={viewMode}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("Make & Model")}
+              name="sewageMakeModel"
+              placeholder={t("Enter make & model")}
+              register={register("sewageMakeModel")}
+              errors={errors}
+              disabled={viewMode}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("Oily Water Filter")}
+              name="oilyWaterFilter"
+              type="number"
+              placeholder={t("Enter quantity")}
+              register={register("oilyWaterFilter")}
+              errors={errors}
+              disabled={viewMode}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("Capacity (m3/hr)")}
+              name="oilyCapacity"
+              placeholder={t("Enter capacity")}
+              register={register("oilyCapacity")}
+              errors={errors}
+              disabled={viewMode}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("Make & Model")}
+              name="oilyMakeModel"
+              placeholder={t("Enter make & model")}
+              register={register("oilyMakeModel")}
+              errors={errors}
+              disabled={viewMode}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("Exhaust Gas Cleaning System")}
+              name="exhaustGasCleaning"
+              type="number"
+              placeholder={t("Enter quantity")}
+              register={register("exhaustGasCleaning")}
+              errors={errors}
+              disabled={viewMode}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("Capacity (m3/hr)")}
+              name="exhaustCapacity"
+              placeholder={t("Enter capacity")}
+              register={register("exhaustCapacity")}
+              errors={errors}
+              disabled={viewMode}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("Make & Model")}
+              name="exhaustMakeModel"
+              placeholder={t("Enter make & model")}
+              register={register("exhaustMakeModel")}
+              errors={errors}
+              disabled={viewMode}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("Others")}
+              name="othersPollution"
+              type="number"
+              placeholder={t("Enter quantity")}
+              register={register("othersPollution")}
+              errors={errors}
+              disabled={viewMode}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("Capacity (m3/hr)")}
+              name="othersCapacity"
+              placeholder={t("Enter capacity")}
+              register={register("othersCapacity")}
+              errors={errors}
+              disabled={viewMode}
+            />
+          </Col>
+          <Col md={4}>
+            <InputText
+              label={t("Make & Model")}
+              name="othersMakeModel"
+              placeholder={t("Enter make & model")}
+              register={register("othersMakeModel")}
+              errors={errors}
+              disabled={viewMode}
+            />
+          </Col>
+        </Row>
+      </Collapsible>
+
+      {/* Crew Details */}
+      <Collapsible
+        title={
+          <>
+            <FaUsers className="me-2" style={{ color: "#2466BF" }} />
+            <span>{t("Crew Details")}</span>
+          </>
+        }
+        openStat={true}
+      >
+        <div style={{ padding: "1rem" }}>
+          {fields.map((field, index) => (
+            <Row key={field.id} className="gy-3 mb-3 border-bottom pb-3">
+              <Col md={2}>
+                <InputSelect
+                  label={t("Crew Type")}
+                  required={true}
+                  name={`crewDetails.${index}.crewType`}
+                  options={crewTypeOptions}
+                  register={register(`crewDetails.${index}.crewType`, {
+                    required: t("Crew Type is required"),
+                  })}
+                  errors={errors}
+                  value={watch(`crewDetails.${index}.crewType`) || ""}
+                  onChange={(value) => !viewMode && setValue(`crewDetails.${index}.crewType`, value)}
+                  disabled={viewMode}
+                />
+              </Col>
+              <Col md={2}>
+                <InputText
+                  label={t("Name")}
+                  required={true}
+                  name={`crewDetails.${index}.name`}
+                  placeholder={t("Enter Name")}
+                  register={register(`crewDetails.${index}.name`, {
+                    required: t("Name is required"),
+                  })}
+                  errors={errors}
+                  disabled={viewMode}
+                />
+              </Col>
+              <Col md={2}>
+                <InputText
+                  label={t("Rank")}
+                  name={`crewDetails.${index}.rank`}
+                  placeholder={t("Enter Rank")}
+                  register={register(`crewDetails.${index}.rank`)}
+                  errors={errors}
+                  disabled={viewMode}
+                />
+              </Col>
+              <Col md={2}>
+                <InputText
+                  label={t("COC No.")}
+                  name={`crewDetails.${index}.cocNo`}
+                  placeholder={t("Enter COC No.")}
+                  register={register(`crewDetails.${index}.cocNo`)}
+                  errors={errors}
+                  disabled={viewMode}
+                />
+              </Col>
+              <Col md={2}>
+                <InputText
+                  label={t("Validity")}
+                  name={`crewDetails.${index}.validity`}
+                  placeholder={t("Enter Validity")}
+                  register={register(`crewDetails.${index}.validity`)}
+                  errors={errors}
+                  disabled={viewMode}
+                />
+              </Col>
+              <Col md={2}>
+                <InputText
+                  label={t("Experience")}
+                  name={`crewDetails.${index}.experience`}
+                  placeholder={t("Enter Experience")}
+                  register={register(`crewDetails.${index}.experience`)}
+                  errors={errors}
+                  disabled={viewMode}
+                />
+              </Col>
+              {!viewMode && index > 0 && (
+                <Col md={12} className="text-end">
+                  <Button
+                    variant="danger"
+                    size="sm"
+                    onClick={() => remove(index)}
+                    className="mt-1"
+                  >
+                    <FaTrash /> Remove
+                  </Button>
+                </Col>
+              )}
+            </Row>
+          ))}
+          {!viewMode && (
+            <Button
+              variant="outline-primary"
+              onClick={() => append({
+                crewType: "",
+                name: "",
+                rank: "",
+                cocNo: "",
+                validity: "",
+                experience: ""
+              })}
+              className="mt-2"
+            >
+              <FaPlus className="me-2" /> Add Crew Member
+            </Button>
+          )}
+        </div>
+      </Collapsible>
+
+      {/* Enclosure */}
+      <Collapsible
+        title={
+          <>
+            <FaFileUpload className="me-2" style={{ color: "#2466BF" }} />
+            <span>{t("Enclosure")}</span>
+          </>
+        }
+        openStat={true}
+      >
+        <Row className="gy-3" style={{ padding: "1rem" }}>
+          <Col md={6}>
+            <InputFile
+              label={t("Authorization of Authorised Person")}
+              required={true}
+              name="authorizationFile"
+              register={register("authorizationFile", {
+                required: !editMode && t("Authorization file is required"),
+              })}
+              errors={errors}
+              onChange={(e) => {
+                if (viewMode) return;
+                if (e.target.files && e.target.files[0]) {
+                  handleFileChange("authorizationFile", e.target.files[0]);
+                }
+              }}
+              disabled={viewMode}
+              watch={watch}
+              defaultValue={watch("authorizationFile")}
+              clearErrors={clearErrors}
+              accept=".pdf,.jpg,.jpeg,.png"
+            />
+          </Col>
+          <Col md={6}>
+            <InputFile
+              label={t("Payment Challan/Acknowledgement")}
+              required={true}
+              name="paymentChallan"
+              register={register("paymentChallan", {
+                required: !editMode && t("Payment challan is required"),
+              })}
+              errors={errors}
+              onChange={(e) => {
+                if (viewMode) return;
+                if (e.target.files && e.target.files[0]) {
+                  handleFileChange("paymentChallan", e.target.files[0]);
+                }
+              }}
+              disabled={viewMode}
+              watch={watch}
+              defaultValue={watch("paymentChallan")}
+              clearErrors={clearErrors}
+              accept=".pdf,.jpg,.jpeg,.png"
+            />
+          </Col>
+          <Col md={6}>
+            <InputFile
+              label={t("Copy of last Certificate of Survey")}
+              required={true}
+              name="lastCertificateCopy"
+              register={register("lastCertificateCopy", {
+                required: !editMode && t("Last certificate copy is required"),
+              })}
+              errors={errors}
+              onChange={(e) => {
+                if (viewMode) return;
+                if (e.target.files && e.target.files[0]) {
+                  handleFileChange("lastCertificateCopy", e.target.files[0]);
+                }
+              }}
+              disabled={viewMode}
+              watch={watch}
+              defaultValue={watch("lastCertificateCopy")}
+              clearErrors={clearErrors}
+              accept=".pdf,.jpg,.jpeg,.png"
+            />
+          </Col>
+          <Col md={6}>
+            <InputFile
+              label={t("Copy of Certificate of Registration")}
+              required={true}
+              name="registrationCertificateCopy"
+              register={register("registrationCertificateCopy", {
+                required: !editMode && t("Registration certificate copy is required"),
+              })}
+              errors={errors}
+              onChange={(e) => {
+                if (viewMode) return;
+                if (e.target.files && e.target.files[0]) {
+                  handleFileChange("registrationCertificateCopy", e.target.files[0]);
+                }
+              }}
+              disabled={viewMode}
+              watch={watch}
+              defaultValue={watch("registrationCertificateCopy")}
+              clearErrors={clearErrors}
+              accept=".pdf,.jpg,.jpeg,.png"
+            />
+          </Col>
+        </Row>
+      </Collapsible>
+    </form>
+  );
+};
+
+export default VesselSurveyForm;
