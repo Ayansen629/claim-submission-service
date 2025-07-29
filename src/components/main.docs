@@ -1,238 +1,53 @@
-import React, { useState, useEffect } from "react";
-import { Row, Col, Button, Card } from "react-bootstrap";
-import Collapsible from "../../../common/Collapsible.js";
-import { useTranslation } from "react-i18next";
-import InputFile from "../../../common/InputFile.tsx";
-import InputText from "../../../common/InputText.tsx";
-import { renameFile } from "../../../../utils/constants.ts";
-import { BsDownload, BsFileEarmarkPdf, BsPlus, BsTrash } from "react-icons/bs";
+const validateDocuments = async () => {
+  if (isViewMode) return true;
 
-const Documents = ({ formMethods, viewMode = false, editMode = false }) => {
-  const { t } = useTranslation();
-  const [formData, setFormData] = useState({});
-  const [workOrderFiles, setWorkOrderFiles] = useState([{ id: 1 }]);
-  const [drawingsFiles, setDrawingsFiles] = useState([{ id: 1 }]);
-  const [grtModified, setGrtModified] = useState(false);
-  
-  const {
-    register,
-    watch,
-    setValue,
-    clearErrors,
-    getValues,
-    setError,
-    formState: { errors },
-  } = formMethods;
+  const requiredFields = [];
+  const termsAccepted = getValues("termsAccepted");
 
-  const constructedBy = watch("constructedBy");
-  const grt = watch("grt");
-  const tonnageBooklets = watch("tonnageBooklets");
-  const stabilityBooklets = watch("stabilityBooklets");
+  // In edit mode, only require files if GRT was modified
+  if (isEditMode) {
+    const initialGrt = location.state?.initialData?.grt || getValues("grt");
+    const currentGrt = getValues("grt");
+    const grtModified = currentGrt !== initialGrt;
 
-  // Track GRT changes in edit mode
-  useEffect(() => {
-    if (editMode) {
-      const initialGrt = getValues("grt");
-      const subscription = watch((value, { name }) => {
-        if (name === "grt" && value.grt !== initialGrt) {
-          setGrtModified(true);
-        }
-      });
-      return () => subscription.unsubscribe();
-    }
-  }, [editMode, watch, getValues]);
+    if (grtModified) {
+      const tonnageBooklets = getValues("tonnageBooklets");
+      const stabilityBooklets = getValues("stabilityBooklets");
 
-  // Validate files when GRT is modified in edit mode
-  useEffect(() => {
-    if (editMode && grtModified) {
       if (!tonnageBooklets || !tonnageBooklets.name) {
-        setError("tonnageBooklets", {
-          type: "manual",
-          message: t("Tonnage Booklets are required when GRT is modified")
-        });
+        requiredFields.push("tonnageBooklets");
       }
+
       if (!stabilityBooklets || !stabilityBooklets.name) {
-        setError("stabilityBooklets", {
-          type: "manual",
-          message: t("Stability Booklets are required when GRT is modified")
-        });
+        requiredFields.push("stabilityBooklets");
       }
     }
-  }, [editMode, grtModified, tonnageBooklets, stabilityBooklets, setError, t]);
+  }
+  // In normal mode, these files are not required
+  // else {
+  //   // No files required in normal mode
+  // }
 
-  useEffect(() => {
-    setTimeout(() => {
-      Object.keys(formData).forEach(key => {
-        if (formData[key] !== undefined) {
-          setValue(key, formData[key], { shouldValidate: false });
-        }
+  if (!termsAccepted) {
+    requiredFields.push("termsAccepted");
+  }
+
+  let hasErrors = false;
+
+  requiredFields.forEach((fieldName) => {
+    const fieldValue = getValues(fieldName);
+
+    if (
+      !fieldValue ||
+      (fieldValue instanceof FileList && fieldValue.length === 0)
+    ) {
+      setError(fieldName, {
+        type: "required",
+        message: `${fieldName} is required`,
       });
-    }, 0);
-  }, [setValue, formData]);
-
-  useEffect(() => {
-    if (viewMode || editMode) {
-      const workOrderIds = [];
-      const drawingIds = [];
-      
-      for (let i = 1; i <= 50; i++) {
-        const workOrderFile = getValues(`workOrder_file_${i}`);
-        const drawingFile = getValues(`drawings_file_${i}`);
-        
-        if (workOrderFile && workOrderFile.name) {
-          workOrderIds.push({ id: i });
-        }
-        if (drawingFile && drawingFile.name) {
-          drawingIds.push({ id: i });
-        }
-      }
-      
-      if (workOrderIds.length > 0) setWorkOrderFiles(workOrderIds);
-      if (drawingIds.length > 0) setDrawingsFiles(drawingIds);
+      hasErrors = true;
     }
-  }, [viewMode, editMode, getValues]);
+  });
 
-  // Rest of your existing component code remains the same until the FileSection components...
-
-  // Modify the tonnage and stability booklets sections in the return statement:
-
-  return (
-    <>
-      {/* ... existing JSX ... */}
-      
-      <Collapsible title={t("vesselDetails.Documents")} openStat={true}>
-        <div style={{ padding: "1rem", backgroundColor: "#f8f9fa" }}>
-          <Row className="g-3">
-            {/* ... other file sections ... */}
-            
-            <Col md={6}>
-              {viewMode ? (
-                <SingleFileSection
-                  title={t('vesselDetails.Tonnage Booklets')}
-                  fileName={tonnageBooklets?.name}
-                  fileSize={tonnageBooklets?.size}
-                  onDownload={handleDownload}
-                  icon={<BsFileEarmarkPdf className="text-warning" size={12} />}
-                />
-              ) : (
-                <Card className="h-100 shadow-sm border-0">
-                  <Card.Header className="bg-light border-0 py-2">
-                    <h6 className="mb-0 text-primary fw-bold d-flex align-items-center" style={{ fontSize: '0.75rem' }}>
-                      <BsFileEarmarkPdf className="text-warning me-2" size={12} />
-                      {t('vesselDetails.Tonnage Booklets')}
-                    </h6>
-                  </Card.Header>
-                  <Card.Body className="p-2">
-                    <div style={{ fontSize: "0.75rem" }}>
-                      <InputFile
-                        label={t('vesselDetails.Tonnage Booklets')}
-                        required={editMode && grtModified}
-                        name="tonnageBooklets"
-                        register={register("tonnageBooklets", {
-                          required: editMode && grtModified && t('Tonnage Booklets are required when GRT is modified')
-                        })}
-                        errors={errors}
-                        onChange={(e) => {
-                          if (e.target.files && e?.target?.files[0]) {
-                            const file = e.target.files[0];
-                            if (file.size > 10 * 1024 * 1024) {
-                              setError("tonnageBooklets", {
-                                type: 'manual',
-                                message: t('File size should not exceed 10MB')
-                              });
-                              return;
-                            }
-                            const extension = file?.name?.substring(file?.name?.lastIndexOf("."));
-                            const fileName = `Tonnage Booklets${extension}`;
-                            file.originalName = fileName;
-                            const renamedFile = renameFile(file, fileName);
-                            clearErrors("tonnageBooklets");
-                            setValue("tonnageBooklets", renamedFile, { shouldValidate: true });
-                            setFormData((prev) => ({
-                              ...prev,
-                              tonnageBooklets: renamedFile
-                            }));
-                          }
-                        }}
-                        watch={watch}
-                        accept=".pdf,.jpg,.jpeg,.png"
-                        defaultValue={tonnageBooklets}
-                        clearErrors={clearErrors}
-                        className="mobile-file-input"
-                      />
-                    </div>
-                  </Card.Body>
-                </Card>
-              )}
-            </Col>
-
-            <Col md={6}>
-              {viewMode ? (
-                <SingleFileSection
-                  title={t('vesselDetails.Stability Booklets')}
-                  fileName={stabilityBooklets?.name}
-                  fileSize={stabilityBooklets?.size}
-                  onDownload={handleDownload}
-                  icon={<BsFileEarmarkPdf className="text-info" size={12} />}
-                />
-              ) : (
-                <Card className="h-100 shadow-sm border-0">
-                  <Card.Header className="bg-light border-0 py-2">
-                    <h6 className="mb-0 text-primary fw-bold d-flex align-items-center" style={{ fontSize: '0.75rem' }}>
-                      <BsFileEarmarkPdf className="text-info me-2" size={12} />
-                      {t('vesselDetails.Stability Booklets')}
-                    </h6>
-                  </Card.Header>
-                  <Card.Body className="p-2">
-                    <div style={{ fontSize: "0.75rem" }}>
-                      <InputFile
-                        label={t('vesselDetails.Stability Booklets')}
-                        required={editMode && grtModified}
-                        name="stabilityBooklets"
-                        register={register("stabilityBooklets", {
-                          required: editMode && grtModified && t('Stability Booklets are required when GRT is modified')
-                        })}
-                        errors={errors}
-                        onChange={(e) => {
-                          if (e.target.files && e?.target?.files[0]) {
-                            const file = e.target.files[0];
-                            if (file.size > 10 * 1024 * 1024) {
-                              setError("stabilityBooklets", {
-                                type: 'manual',
-                                message: t('File size should not exceed 10MB')
-                              });
-                              return;
-                            }
-                            const extension = file?.name?.substring(file?.name?.lastIndexOf("."));
-                            const fileName = `Stability Booklets${extension}`;
-                            file.originalName = fileName;
-                            const renamedFile = renameFile(file, fileName);
-                            clearErrors("stabilityBooklets");
-                            setValue("stabilityBooklets", renamedFile, { shouldValidate: true });
-                            setFormData((prev) => ({
-                              ...prev,
-                              stabilityBooklets: renamedFile
-                            }));
-                          }
-                        }}
-                        watch={watch}
-                        accept=".pdf,.jpg,.jpeg,.png"
-                        defaultValue={stabilityBooklets}
-                        clearErrors={clearErrors}
-                        className="mobile-file-input"
-                      />
-                    </div>
-                  </Card.Body>
-                </Card>
-              )}
-            </Col>
-
-            {/* ... terms and conditions section ... */}
-          </Row>
-        </div>
-      </Collapsible>
-    </>
-  );
+  return !hasErrors;
 };
-
-export default Documents;
