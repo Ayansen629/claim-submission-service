@@ -1,1208 +1,255 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
-import { useForm, useFieldArray } from "react-hook-form";
-import { Row, Col, Button } from "react-bootstrap";
-import InputText from "../../../../common/InputText.tsx";
-import InputSelect from "../../../../common/InputSelect.tsx";
-import InputFile from "../../../../common/InputFile.tsx";
-import Collapsible from "../../../../common/Collapsible.js";
+import React, { useState, useEffect, useRef } from "react";
+import { Box, Typography, Stack } from "@mui/material";
+import { useParams, useLocation, useNavigate } from "react-router-dom";
+import Stepper from "../../../../common/Stepper.jsx";
+import VesselSurveyForm from "./VesselSurveyForm.js";
+import { useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
-import { FaShip, FaCog, FaBroadcastTower, FaLeaf, FaUsers, FaFileUpload, FaPlus, FaTrash } from "react-icons/fa";
+import { toast } from "react-toastify";
+import { Button } from "react-bootstrap";
+import { BsArrowLeft } from "react-icons/bs";
+import { postFORMdata } from "../../../../../services/http.service.ts";
+import { URLS_ENDPOINT } from "../../../../../utils/urlsConstants.ts";
+import VesselEquipmentForm from "./VesselEquipmentForm.js";
 
-const VesselSurveyForm = ({ formMethods, viewMode = false, editMode = false }) => {
+const VesselSurveyRegistration = () => {
   const { t } = useTranslation();
+  const { id } = useParams();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const isEditMode = !!id && location.pathname.includes("/edit/");
+  const isViewMode = !!id && location.pathname.includes("/view/");
+  const stepperRef = useRef();
 
-  const defaultValues = {
-    typeOfSurvey: "",
-    placeYardNo: "",
-    nameOfVessel: "",
-    officialNo: "",
-    portOfRegistry: "",
-    grossTonnage: "",
-    netTonnage: "",
-    typeOfVessel: "",
-    categoryOfVessel: "",
-    yearOfBuild: "",
-    nameOfOwner: "",
-    addressOfOwner: "",
-    ownerTelephone: "",
-    nameOfBuilder: "",
-    addressOfBuilder: "",
-    agentName: "",
-    agentAddress: "",
-    agentTelephone: "",
-    placeOfLastSurvey: "",
-    dateOfLastSurvey: "",
-    dateOfProposedVisit: "",
-    hullLength: "",
-    hullBreadth: "",
-    hullDepth: "",
-    hullMaterial: "",
-    hullPlattingThickness: "",
-    keelLayingDate: "",
-    typeOfEngine: "",
-    engineMake: "",
-    engineMakerAddress: "",
-    modelNo: "",
-    numberOfEngine: "",
-    yearOfMake: "",
-    horsepower: "",
-    speedRPM: "",
-    strokeEngine: "",
-    numberOfSetFitted: "",
-    setSrNo: "",
-    engineCylinderDiameter: "",
-    propellerType: "",
-    gearType: "",
-    noOfGear: "",
-    vesselSpeed: "",
-    revolutionMints: "",
-    magneticCompass: "",
-    vhfRadio: "",
-    classBAutoAIS: "",
-    gpsNavigator: "",
-    binocular: "",
-    aldisLamp: "",
-    rudderAngleIndicator: "",
-    othersNavigation: "",
-    bilgeWaterSeparator: "",
-    bilgeCapacity: "",
-    bilgeMakeModel: "",
-    sewageTreatmentPlant: "",
-    sewageCapacity: "",
-    sewageMakeModel: "",
-    oilyWaterFilter: "",
-    oilyCapacity: "",
-    oilyMakeModel: "",
-    exhaustGasCleaning: "",
-    exhaustCapacity: "",
-    exhaustMakeModel: "",
-    othersPollution: "",
-    othersCapacity: "",
-    othersMakeModel: "",
-    crewDetails: [
-      {
-        crewType: "",
-        name: "",
-        rank: "",
-        cocNo: "",
-        validity: "",
-        experience: ""
-      }
-    ],
-    authorizationFile: null,
-    paymentChallan: null,
-    lastCertificateCopy: null,
-    registrationCertificateCopy: null
+  const methods = useForm({ 
+    mode: "onChange",
+    reValidateMode: "onChange"
+  });
+  const { trigger, getValues, setError, setValue, reset, formState: { errors } } = methods;
+
+  const [isLoading, setIsLoading] = useState(false);
+
+  const validateSurveyForm = async () => {
+    if (isViewMode) return true;
+    
+    const requiredFields = [
+      "typeOfSurvey",
+      "placeYardNo", 
+      "netTonnage",
+      "hullLength",
+      "hullBreadth", 
+      "hullDepth"
+    ];
+
+    // Validate required fields
+    const isValid = await trigger(requiredFields);
+    
+    // Check crew details
+    const crewDetails = getValues("crewDetails") || [];
+    const hasValidCrew = crewDetails.some(crew => crew.crewType && crew.name);
+    
+    if (!hasValidCrew) {
+      setError("crewDetails.0.crewType", {
+        type: "required",
+        message: t("At least one crew member with type and name is required")
+      });
+      setError("crewDetails.0.name", {
+        type: "required", 
+        message: t("At least one crew member with type and name is required")
+      });
+    }
+
+    // Check file uploads - TRIGGER VALIDATION FOR FILES
+    const requiredFiles = ["authorizationFile", "paymentChallan", "lastCertificateCopy", "registrationCertificateCopy"];
+    let hasFileErrors = false;
+    
+    if (!isEditMode) {
+      requiredFiles.forEach(fieldName => {
+        const fieldValue = getValues(fieldName);
+        if (!fieldValue) {
+          setError(fieldName, {
+            type: "required",
+            message: t(`${fieldName} is required`)
+          });
+          hasFileErrors = true;
+        }
+      });
+      
+      // Trigger validation for file fields
+      await trigger(requiredFiles);
+    }
+
+    return isValid && hasValidCrew && !hasFileErrors;
   };
 
-  const internalFormMethods = useForm({
-    defaultValues,
-    mode: "onTouched",
-  });
+  const validateEquipmentForm = async () => {
+    if (isViewMode) return true;
+    return true;
+  };
 
-  const methods = formMethods || internalFormMethods;
-  const { register, watch, setValue, clearErrors, formState: { errors } } = methods;
+  const handleFormSubmit = async (stepInfo) => {
+    if (stepInfo.index === 0) {
+      const formValues = stepInfo?.getFormData?.() || {};
+      
+      const request = {
+        surveyDetails: {
+          typeOfSurvey: formValues.typeOfSurvey,
+          placeYardNo: formValues.placeYardNo,
+          netTonnage: formValues.netTonnage,
+          hullLength: formValues.hullLength,
+          hullBreadth: formValues.hullBreadth,
+          hullDepth: formValues.hullDepth,
+          hullMaterial: formValues.hullMaterial,
+          hullPlattingThickness: formValues.hullPlattingThickness,
+          keelLayingDate: formValues.keelLayingDate,
+          agentName: formValues.agentName,
+          agentAddress: formValues.agentAddress,
+          agentTelephone: formValues.agentTelephone,
+          placeOfLastSurvey: formValues.placeOfLastSurvey,
+          dateOfLastSurvey: formValues.dateOfLastSurvey,
+          dateOfProposedVisit: formValues.dateOfProposedVisit,
+          crewDetails: formValues.crewDetails?.filter(crew => crew.crewType && crew.name) || []
+        }
+      };
 
-  const { fields, append, remove } = useFieldArray({
-    control: methods.control,
-    name: "crewDetails"
-  });
+      const fd = new FormData();
+      fd.append("request", new Blob([JSON.stringify(request)], { type: "application/json" }));
 
-  useEffect(() => {
-    const currentCrewDetails = watch("crewDetails");
-    if (!currentCrewDetails || currentCrewDetails.length === 0) {
-      setValue("crewDetails", [{
-        crewType: "",
-        name: "",
-        rank: "",
-        cocNo: "",
-        validity: "",
-        experience: ""
-      }]);
+      try {
+        setIsLoading(true);
+        const URL = process.env.REACT_APP_IWT_URL + URLS_ENDPOINT.VESSEL_SERVICE.CREATE_SURVEY;
+        const response = await postFORMdata(URL, fd);
+        
+        if (response?.status === 200) {
+          toast.success("Survey details saved successfully.");
+          stepperRef.current?.goToNextStep();
+        } else {
+          toast.error("Something went wrong.");
+        }
+      } catch (err) {
+        console.error(err);
+        toast.error("Error saving survey details.");
+      } finally {
+        setIsLoading(false);
+      }
     }
-  }, [setValue, watch]);
+  };
 
-  const handleSelectChange = useCallback(
-    (name, value) => {
-      setValue(name, value, { shouldValidate: true });
-      clearErrors(name);
+  const handleSave = () => {
+    setIsLoading(true);
+    setTimeout(() => {
+      setIsLoading(false);
+      navigate("/vessel-survey/success", {
+        state: { surveyId: "VS2024001" }
+      });
+    }, 1500);
+  };
+
+  const steps = [
+    {
+      label: t("Survey Details"),
+      component: (
+        <VesselSurveyForm
+          formMethods={methods}
+          viewMode={isViewMode}
+          editMode={isEditMode}
+        />
+      ),
+      validate: validateSurveyForm,
+      getFormData: () => methods?.getValues(),
     },
-    [setValue, clearErrors]
-  );
-
-  const handleFileChange = useCallback((name, file) => {
-    if (!file) return;
-
-    const validTypes = ["application/pdf", "image/jpeg", "image/png", "image/jpg"];
-    if (!validTypes.includes(file.type)) {
-      methods.setError(name, {
-        type: "manual",
-        message: t("Only PDF, JPG or PNG files are allowed"),
-      });
-      setValue(name, null);
-      return;
+    {
+      label: t("Vessel Equipment"),
+      component: (
+        <VesselEquipmentForm
+          formMethods={methods}
+          viewMode={isViewMode}
+          editMode={isEditMode}
+        />
+      ),
+      validate: validateEquipmentForm,
+      getFormData: () => methods?.getValues(),
     }
-
-    if (file.size > 10 * 1024 * 1024) {
-      methods.setError(name, {
-        type: "manual",
-        message: t("File size should not exceed 10MB"),
-      });
-      setValue(name, null);
-      return;
-    }
-
-    clearErrors(name);
-    setValue(name, file, { shouldValidate: true });
-  }, [setValue, clearErrors, methods, t]);
-
-  const surveyTypeOptions = [
-    { value: "", label: "-- Select --" },
-    { value: "INITIAL", label: "Initial Survey" },
-    { value: "ANNUAL", label: "Annual Survey" },
-    { value: "INTERMEDIATE", label: "Intermediate Survey" },
-    { value: "RENEWAL", label: "Renewal Survey" }
-  ];
-
-  const propellerTypeOptions = [
-    { value: "", label: "-- Select --" },
-    { value: "FIXED", label: "Fixed Pitch" },
-    { value: "VARIABLE", label: "Variable Pitch" },
-    { value: "CONTROLLABLE", label: "Controllable Pitch" }
-  ];
-
-  const crewTypeOptions = [
-    { value: "", label: "-- Select --" },
-    { value: "MASTER", label: "Master" },
-    { value: "CHIEF_ENGINEER", label: "Chief Engineer" },
-    { value: "DECK_OFFICER", label: "Deck Officer" },
-    { value: "ENGINE_OFFICER", label: "Engine Officer" },
-    { value: "CREW", label: "Crew Member" }
   ];
 
   return (
-    <form autoComplete="off">
-      {/* Basic Vessel Information */}
-      <Collapsible
-        title={
-          <>
-            <FaShip className="me-2" style={{ color: "#2466BF" }} />
-            <span>{t("Basic Vessel Information")}</span>
-          </>
-        }
-        openStat={true}
-      >
-        <Row className="gy-3" style={{ padding: "1rem" }}>
-          <Col md={4}>
-            <InputSelect
-              label={t("Type of Survey")}
-              required={true}
-              name="typeOfSurvey"
-              options={surveyTypeOptions}
-              register={register("typeOfSurvey", {
-                required: t("Type of Survey is required"),
-              })}
-              errors={errors}
-              value={watch("typeOfSurvey") || ""}
-              onChange={(value) => !viewMode && handleSelectChange("typeOfSurvey", value)}
-              disabled={viewMode}
-            />
-          </Col>
-          <Col md={4}>
-            <InputText
-              label={t("Place/Yard No.")}
-              required={true}
-              name="placeYardNo"
-              placeholder={t("Enter Place/Yard No.")}
-              register={register("placeYardNo", {
-                required: t("Place/Yard No. is required"),
-              })}
-              errors={errors}
-              disabled={viewMode}
-            />
-          </Col>
-          <Col md={4}>
-            <InputText
-              label={t("Name of Vessel")}
-              name="nameOfVessel"
-              placeholder={t("Auto Populated")}
-              register={register("nameOfVessel")}
-              errors={errors}
-              disabled={true}
-              style={{ backgroundColor: "#f8f9fa" }}
-            />
-          </Col>
-          <Col md={4}>
-            <InputText
-              label={t("Official No. of the Vessel")}
-              name="officialNo"
-              placeholder={t("Auto Populated")}
-              register={register("officialNo")}
-              errors={errors}
-              disabled={true}
-              style={{ backgroundColor: "#f8f9fa" }}
-            />
-          </Col>
-          <Col md={4}>
-            <InputText
-              label={t("Port of Registry of Vessel")}
-              name="portOfRegistry"
-              placeholder={t("Auto Populated")}
-              register={register("portOfRegistry")}
-              errors={errors}
-              disabled={true}
-              style={{ backgroundColor: "#f8f9fa" }}
-            />
-          </Col>
-          <Col md={4}>
-            <InputText
-              label={t("Gross Tonnage")}
-              name="grossTonnage"
-              placeholder={t("Auto Populated")}
-              register={register("grossTonnage")}
-              errors={errors}
-              disabled={true}
-              style={{ backgroundColor: "#f8f9fa" }}
-            />
-          </Col>
-          <Col md={4}>
-            <InputText
-              label={t("Net Tonnage")}
-              required={true}
-              name="netTonnage"
-              type="number"
-              placeholder={t("Enter Net Tonnage")}
-              register={register("netTonnage", {
-                required: t("Net Tonnage is required"),
-              })}
-              errors={errors}
-              disabled={viewMode}
-            />
-          </Col>
-          <Col md={4}>
-            <InputText
-              label={t("Type of Vessel")}
-              name="typeOfVessel"
-              placeholder={t("Auto Populated")}
-              register={register("typeOfVessel")}
-              errors={errors}
-              disabled={true}
-              style={{ backgroundColor: "#f8f9fa" }}
-            />
-          </Col>
-          <Col md={4}>
-            <InputText
-              label={t("Category of Vessel")}
-              name="categoryOfVessel"
-              placeholder={t("Auto Populated")}
-              register={register("categoryOfVessel")}
-              errors={errors}
-              disabled={true}
-              style={{ backgroundColor: "#f8f9fa" }}
-            />
-          </Col>
-          <Col md={4}>
-            <InputText
-              label={t("Year of Build")}
-              name="yearOfBuild"
-              placeholder={t("Auto Populated")}
-              register={register("yearOfBuild")}
-              errors={errors}
-              disabled={true}
-              style={{ backgroundColor: "#f8f9fa" }}
-            />
-          </Col>
-          <Col md={4}>
-            <InputText
-              label={t("Name of Owner")}
-              name="nameOfOwner"
-              placeholder={t("Auto Populated")}
-              register={register("nameOfOwner")}
-              errors={errors}
-              disabled={true}
-              style={{ backgroundColor: "#f8f9fa" }}
-            />
-          </Col>
-          <Col md={4}>
-            <InputText
-              label={t("Address of Owner")}
-              name="addressOfOwner"
-              placeholder={t("Auto Populated")}
-              register={register("addressOfOwner")}
-              errors={errors}
-              disabled={true}
-              style={{ backgroundColor: "#f8f9fa" }}
-            />
-          </Col>
-          <Col md={4}>
-            <InputText
-              label={t("Owner's Telephone No.")}
-              name="ownerTelephone"
-              placeholder={t("Auto Populated")}
-              register={register("ownerTelephone")}
-              errors={errors}
-              disabled={true}
-              style={{ backgroundColor: "#f8f9fa" }}
-            />
-          </Col>
-          <Col md={4}>
-            <InputText
-              label={t("Name of Builder")}
-              name="nameOfBuilder"
-              placeholder={t("Auto Populated")}
-              register={register("nameOfBuilder")}
-              errors={errors}
-              disabled={true}
-              style={{ backgroundColor: "#f8f9fa" }}
-            />
-          </Col>
-          <Col md={4}>
-            <InputText
-              label={t("Address of Builder")}
-              name="addressOfBuilder"
-              placeholder={t("Auto Populated")}
-              register={register("addressOfBuilder")}
-              errors={errors}
-              disabled={true}
-              style={{ backgroundColor: "#f8f9fa" }}
-            />
-          </Col>
-          <Col md={4}>
-            <InputText
-              label={t("Agent's Name")}
-              name="agentName"
-              placeholder={t("Enter Agent's Name")}
-              register={register("agentName")}
-              errors={errors}
-              disabled={viewMode}
-            />
-          </Col>
-          <Col md={4}>
-            <InputText
-              label={t("Agent's Address")}
-              name="agentAddress"
-              placeholder={t("Enter Agent's Address")}
-              register={register("agentAddress")}
-              errors={errors}
-              disabled={viewMode}
-            />
-          </Col>
-          <Col md={4}>
-            <InputText
-              label={t("Agent's Telephone No.")}
-              name="agentTelephone"
-              placeholder={t("Enter Agent's Telephone")}
-              register={register("agentTelephone")}
-              errors={errors}
-              disabled={viewMode}
-            />
-          </Col>
-          <Col md={4}>
-            <InputText
-              label={t("Place of Last Survey")}
-              name="placeOfLastSurvey"
-              placeholder={t("Enter Place of Last Survey")}
-              register={register("placeOfLastSurvey")}
-              errors={errors}
-              disabled={viewMode}
-            />
-          </Col>
-          <Col md={4}>
-            <InputText
-              label={t("Date of Last Survey")}
-              name="dateOfLastSurvey"
-              type="date"
-              register={register("dateOfLastSurvey")}
-              errors={errors}
-              disabled={viewMode}
-            />
-          </Col>
-          <Col md={4}>
-            <InputText
-              label={t("Date of Proposed Visit of Surveyor")}
-              name="dateOfProposedVisit"
-              type="date"
-              register={register("dateOfProposedVisit")}
-              errors={errors}
-              disabled={viewMode}
-            />
-          </Col>
-        </Row>
-      </Collapsible>
-
-      {/* Hull Particulars */}
-      <Collapsible
-        title={
-          <>
-            <FaShip className="me-2" style={{ color: "#2466BF" }} />
-            <span>{t("Hull Particulars")}</span>
-          </>
-        }
-        openStat={true}
-      >
-        <Row className="gy-3" style={{ padding: "1rem" }}>
-          <Col md={4}>
-            <InputText
-              label={t("Length of the Hull (Meter)")}
-              required={true}
-              name="hullLength"
-              type="number"
-              placeholder={t("Enter Hull Length")}
-              register={register("hullLength", {
-                required: t("Hull Length is required"),
-              })}
-              errors={errors}
-              disabled={viewMode}
-            />
-          </Col>
-          <Col md={4}>
-            <InputText
-              label={t("Breadth of the Hull (Meter)")}
-              required={true}
-              name="hullBreadth"
-              type="number"
-              placeholder={t("Enter Hull Breadth")}
-              register={register("hullBreadth", {
-                required: t("Hull Breadth is required"),
-              })}
-              errors={errors}
-              disabled={viewMode}
-            />
-          </Col>
-          <Col md={4}>
-            <InputText
-              label={t("Depth of the Hull (Meter)")}
-              required={true}
-              name="hullDepth"
-              type="number"
-              placeholder={t("Enter Hull Depth")}
-              register={register("hullDepth", {
-                required: t("Hull Depth is required"),
-              })}
-              errors={errors}
-              disabled={viewMode}
-            />
-          </Col>
-          <Col md={4}>
-            <InputText
-              label={t("Hull Material")}
-              name="hullMaterial"
-              placeholder={t("Enter Hull Material")}
-              register={register("hullMaterial")}
-              errors={errors}
-              disabled={viewMode}
-            />
-          </Col>
-          <Col md={4}>
-            <InputText
-              label={t("Hull Platting Thickness (mm)")}
-              name="hullPlattingThickness"
-              type="number"
-              placeholder={t("Enter Thickness")}
-              register={register("hullPlattingThickness")}
-              errors={errors}
-              disabled={viewMode}
-            />
-          </Col>
-          <Col md={4}>
-            <InputText
-              label={t("Keel Laying Date")}
-              name="keelLayingDate"
-              type="date"
-              register={register("keelLayingDate")}
-              errors={errors}
-              disabled={viewMode}
-            />
-          </Col>
-        </Row>
-      </Collapsible>
-
-      {/* Engine Details */}
-      <Collapsible
-        title={
-          <>
-            <FaCog className="me-2" style={{ color: "#2466BF" }} />
-            <span>{t("Details of Propulsion of Engine")}</span>
-          </>
-        }
-        openStat={true}
-      >
-        <Row className="gy-3" style={{ padding: "1rem" }}>
-          <Col md={4}>
-            <InputText
-              label={t("Type of Engine")}
-              name="typeOfEngine"
-              placeholder={t("Auto Populated")}
-              register={register("typeOfEngine")}
-              errors={errors}
-              disabled={true}
-              style={{ backgroundColor: "#f8f9fa" }}
-            />
-          </Col>
-          <Col md={4}>
-            <InputText
-              label={t("Engine Make")}
-              name="engineMake"
-              placeholder={t("Auto Populated")}
-              register={register("engineMake")}
-              errors={errors}
-              disabled={true}
-              style={{ backgroundColor: "#f8f9fa" }}
-            />
-          </Col>
-          <Col md={4}>
-            <InputText
-              label={t("Engine Maker Address")}
-              name="engineMakerAddress"
-              placeholder={t("Auto Populated")}
-              register={register("engineMakerAddress")}
-              errors={errors}
-              disabled={true}
-              style={{ backgroundColor: "#f8f9fa" }}
-            />
-          </Col>
-          <Col md={4}>
-            <InputText
-              label={t("Model No.")}
-              name="modelNo"
-              placeholder={t("Enter Model No.")}
-              register={register("modelNo")}
-              errors={errors}
-              disabled={viewMode}
-            />
-          </Col>
-          <Col md={4}>
-            <InputText
-              label={t("Number of Engine")}
-              name="numberOfEngine"
-              type="number"
-              placeholder={t("Enter Number of Engine")}
-              register={register("numberOfEngine")}
-              errors={errors}
-              disabled={viewMode}
-            />
-          </Col>
-          <Col md={4}>
-            <InputText
-              label={t("Year of Make")}
-              name="yearOfMake"
-              placeholder={t("Auto Populated")}
-              register={register("yearOfMake")}
-              errors={errors}
-              disabled={true}
-              style={{ backgroundColor: "#f8f9fa" }}
-            />
-          </Col>
-          <Col md={4}>
-            <InputText
-              label={t("Horsepower")}
-              name="horsepower"
-              placeholder={t("Auto Populated")}
-              register={register("horsepower")}
-              errors={errors}
-              disabled={true}
-              style={{ backgroundColor: "#f8f9fa" }}
-            />
-          </Col>
-          <Col md={4}>
-            <InputText
-              label={t("Speed/RPM")}
-              name="speedRPM"
-              placeholder={t("Auto Populated")}
-              register={register("speedRPM")}
-              errors={errors}
-              disabled={true}
-              style={{ backgroundColor: "#f8f9fa" }}
-            />
-          </Col>
-          <Col md={4}>
-            <InputText
-              label={t("Stroke (Engine)")}
-              name="strokeEngine"
-              placeholder={t("Enter Stroke")}
-              register={register("strokeEngine")}
-              errors={errors}
-              disabled={viewMode}
-            />
-          </Col>
-          <Col md={4}>
-            <InputText
-              label={t("Number of Set Fitted")}
-              name="numberOfSetFitted"
-              type="number"
-              placeholder={t("Enter Number of Set")}
-              register={register("numberOfSetFitted")}
-              errors={errors}
-              disabled={viewMode}
-            />
-          </Col>
-          <Col md={4}>
-            <InputText
-              label={t("Set Sr. No.")}
-              name="setSrNo"
-              placeholder={t("Enter Set Sr. No.")}
-              register={register("setSrNo")}
-              errors={errors}
-              disabled={viewMode}
-            />
-          </Col>
-          <Col md={4}>
-            <InputText
-              label={t("Engine Cylinder Diameter (mm)")}
-              name="engineCylinderDiameter"
-              type="number"
-              placeholder={t("Enter Diameter")}
-              register={register("engineCylinderDiameter")}
-              errors={errors}
-              disabled={viewMode}
-            />
-          </Col>
-          <Col md={4}>
-            <InputSelect
-              label={t("Propeller Type")}
-              name="propellerType"
-              options={propellerTypeOptions}
-              register={register("propellerType")}
-              errors={errors}
-              value={watch("propellerType") || ""}
-              onChange={(value) => !viewMode && handleSelectChange("propellerType", value)}
-              disabled={viewMode}
-            />
-          </Col>
-          <Col md={4}>
-            <InputText
-              label={t("Gear Type")}
-              name="gearType"
-              placeholder={t("Enter Gear Type")}
-              register={register("gearType")}
-              errors={errors}
-              disabled={viewMode}
-            />
-          </Col>
-          <Col md={4}>
-            <InputText
-              label={t("No. of Gear")}
-              name="noOfGear"
-              type="number"
-              placeholder={t("Enter No. of Gear")}
-              register={register("noOfGear")}
-              errors={errors}
-              disabled={viewMode}
-            />
-          </Col>
-          <Col md={4}>
-            <InputText
-              label={t("Vessel Speed")}
-              name="vesselSpeed"
-              placeholder={t("Enter Vessel Speed")}
-              register={register("vesselSpeed")}
-              errors={errors}
-              disabled={viewMode}
-            />
-          </Col>
-          <Col md={4}>
-            <InputText
-              label={t("Revolution/mints")}
-              name="revolutionMints"
-              type="number"
-              placeholder={t("Enter Revolution/mints")}
-              register={register("revolutionMints")}
-              errors={errors}
-              disabled={viewMode}
-            />
-          </Col>
-        </Row>
-      </Collapsible>
-
-      {/* Radio and Navigation Equipment */}
-      <Collapsible
-        title={
-          <>
-            <FaBroadcastTower className="me-2" style={{ color: "#2466BF" }} />
-            <span>{t("Radio and navigation equipment")}</span>
-          </>
-        }
-        openStat={true}
-      >
-        <Row className="gy-3" style={{ padding: "1rem" }}>
-          <Col md={4}>
-            <InputText
-              label={t("Magnetic Compass")}
-              name="magneticCompass"
-              type="number"
-              placeholder={t("Enter quantity")}
-              register={register("magneticCompass")}
-              errors={errors}
-              disabled={viewMode}
-            />
-          </Col>
-          <Col md={4}>
-            <InputText
-              label={t("Very High Frequency (VHF) radio")}
-              name="vhfRadio"
-              type="number"
-              placeholder={t("Enter quantity")}
-              register={register("vhfRadio")}
-              errors={errors}
-              disabled={viewMode}
-            />
-          </Col>
-          <Col md={4}>
-            <InputText
-              label={t("Class B Automatic Identification System (AIS) with display")}
-              name="classBAutoAIS"
-              type="number"
-              placeholder={t("Enter quantity")}
-              register={register("classBAutoAIS")}
-              errors={errors}
-              disabled={viewMode}
-            />
-          </Col>
-          <Col md={4}>
-            <InputText
-              label={t("Global Positioning System (GPS) Navigator")}
-              name="gpsNavigator"
-              type="number"
-              placeholder={t("Enter quantity")}
-              register={register("gpsNavigator")}
-              errors={errors}
-              disabled={viewMode}
-            />
-          </Col>
-          <Col md={4}>
-            <InputText
-              label={t("Binocular")}
-              name="binocular"
-              type="number"
-              placeholder={t("Enter quantity")}
-              register={register("binocular")}
-              errors={errors}
-              disabled={viewMode}
-            />
-          </Col>
-          <Col md={4}>
-            <InputText
-              label={t("Aldis lamp or search light")}
-              name="aldisLamp"
-              type="number"
-              placeholder={t("Enter quantity")}
-              register={register("aldisLamp")}
-              errors={errors}
-              disabled={viewMode}
-            />
-          </Col>
-          <Col md={4}>
-            <InputText
-              label={t("Rudder angle indicator")}
-              name="rudderAngleIndicator"
-              type="number"
-              placeholder={t("Enter quantity")}
-              register={register("rudderAngleIndicator")}
-              errors={errors}
-              disabled={viewMode}
-            />
-          </Col>
-          <Col md={4}>
-            <InputText
-              label={t("Others")}
-              name="othersNavigation"
-              type="number"
-              placeholder={t("Enter quantity")}
-              register={register("othersNavigation")}
-              errors={errors}
-              disabled={viewMode}
-            />
-          </Col>
-        </Row>
-      </Collapsible>
-
-      {/* Pollution Control Devices */}
-      <Collapsible
-        title={
-          <>
-            <FaLeaf className="me-2" style={{ color: "#2466BF" }} />
-            <span>{t("Pollution Control Devices")}</span>
-          </>
-        }
-        openStat={true}
-      >
-        <Row className="gy-3" style={{ padding: "1rem" }}>
-          <Col md={4}>
-            <InputText
-              label={t("Bilge Water Separator")}
-              name="bilgeWaterSeparator"
-              type="number"
-              placeholder={t("Enter quantity")}
-              register={register("bilgeWaterSeparator")}
-              errors={errors}
-              disabled={viewMode}
-            />
-          </Col>
-          <Col md={4}>
-            <InputText
-              label={t("Capacity (m3/hr)")}
-              name="bilgeCapacity"
-              placeholder={t("Enter capacity")}
-              register={register("bilgeCapacity")}
-              errors={errors}
-              disabled={viewMode}
-            />
-          </Col>
-          <Col md={4}>
-            <InputText
-              label={t("Make & Model")}
-              name="bilgeMakeModel"
-              placeholder={t("Enter make & model")}
-              register={register("bilgeMakeModel")}
-              errors={errors}
-              disabled={viewMode}
-            />
-          </Col>
-          <Col md={4}>
-            <InputText
-              label={t("Sewage Treatment Plant")}
-              name="sewageTreatmentPlant"
-              type="number"
-              placeholder={t("Enter quantity")}
-              register={register("sewageTreatmentPlant")}
-              errors={errors}
-              disabled={viewMode}
-            />
-          </Col>
-          <Col md={4}>
-            <InputText
-              label={t("Capacity (m3/hr)")}
-              name="sewageCapacity"
-              placeholder={t("Enter capacity")}
-              register={register("sewageCapacity")}
-              errors={errors}
-              disabled={viewMode}
-            />
-          </Col>
-          <Col md={4}>
-            <InputText
-              label={t("Make & Model")}
-              name="sewageMakeModel"
-              placeholder={t("Enter make & model")}
-              register={register("sewageMakeModel")}
-              errors={errors}
-              disabled={viewMode}
-            />
-          </Col>
-          <Col md={4}>
-            <InputText
-              label={t("Oily Water Filter")}
-              name="oilyWaterFilter"
-              type="number"
-              placeholder={t("Enter quantity")}
-              register={register("oilyWaterFilter")}
-              errors={errors}
-              disabled={viewMode}
-            />
-          </Col>
-          <Col md={4}>
-            <InputText
-              label={t("Capacity (m3/hr)")}
-              name="oilyCapacity"
-              placeholder={t("Enter capacity")}
-              register={register("oilyCapacity")}
-              errors={errors}
-              disabled={viewMode}
-            />
-          </Col>
-          <Col md={4}>
-            <InputText
-              label={t("Make & Model")}
-              name="oilyMakeModel"
-              placeholder={t("Enter make & model")}
-              register={register("oilyMakeModel")}
-              errors={errors}
-              disabled={viewMode}
-            />
-          </Col>
-          <Col md={4}>
-            <InputText
-              label={t("Exhaust Gas Cleaning System")}
-              name="exhaustGasCleaning"
-              type="number"
-              placeholder={t("Enter quantity")}
-              register={register("exhaustGasCleaning")}
-              errors={errors}
-              disabled={viewMode}
-            />
-          </Col>
-          <Col md={4}>
-            <InputText
-              label={t("Capacity (m3/hr)")}
-              name="exhaustCapacity"
-              placeholder={t("Enter capacity")}
-              register={register("exhaustCapacity")}
-              errors={errors}
-              disabled={viewMode}
-            />
-          </Col>
-          <Col md={4}>
-            <InputText
-              label={t("Make & Model")}
-              name="exhaustMakeModel"
-              placeholder={t("Enter make & model")}
-              register={register("exhaustMakeModel")}
-              errors={errors}
-              disabled={viewMode}
-            />
-          </Col>
-          <Col md={4}>
-            <InputText
-              label={t("Others")}
-              name="othersPollution"
-              type="number"
-              placeholder={t("Enter quantity")}
-              register={register("othersPollution")}
-              errors={errors}
-              disabled={viewMode}
-            />
-          </Col>
-          <Col md={4}>
-            <InputText
-              label={t("Capacity (m3/hr)")}
-              name="othersCapacity"
-              placeholder={t("Enter capacity")}
-              register={register("othersCapacity")}
-              errors={errors}
-              disabled={viewMode}
-            />
-          </Col>
-          <Col md={4}>
-            <InputText
-              label={t("Make & Model")}
-              name="othersMakeModel"
-              placeholder={t("Enter make & model")}
-              register={register("othersMakeModel")}
-              errors={errors}
-              disabled={viewMode}
-            />
-          </Col>
-        </Row>
-      </Collapsible>
-
-      {/* Crew Details */}
-      <Collapsible
-        title={
-          <>
-            <FaUsers className="me-2" style={{ color: "#2466BF" }} />
-            <span>{t("Crew Details")}</span>
-          </>
-        }
-        openStat={true}
-      >
-        <div style={{ padding: "1rem" }}>
-          {fields.map((field, index) => (
-            <Row key={field.id} className="gy-3 mb-3 border-bottom pb-3">
-              <Col md={2}>
-                <InputSelect
-                  label={t("Crew Type")}
-                  required={true}
-                  name={`crewDetails.${index}.crewType`}
-                  options={crewTypeOptions}
-                  register={register(`crewDetails.${index}.crewType`, {
-                    required: t("Crew Type is required"),
-                  })}
-                  errors={errors}
-                  value={watch(`crewDetails.${index}.crewType`) || ""}
-                  onChange={(value) => !viewMode && handleSelectChange(`crewDetails.${index}.crewType`, value)}
-                  disabled={viewMode}
-                />
-              </Col>
-              <Col md={2}>
-                <InputText
-                  label={t("Name")}
-                  required={true}
-                  name={`crewDetails.${index}.name`}
-                  placeholder={t("Enter Name")}
-                  register={register(`crewDetails.${index}.name`, {
-                    required: t("Name is required"),
-                  })}
-                  errors={errors}
-                  disabled={viewMode}
-                />
-              </Col>
-              <Col md={2}>
-                <InputText
-                  label={t("Rank")}
-                  name={`crewDetails.${index}.rank`}
-                  placeholder={t("Enter Rank")}
-                  register={register(`crewDetails.${index}.rank`)}
-                  errors={errors}
-                  disabled={viewMode}
-                />
-              </Col>
-              <Col md={2}>
-                <InputText
-                  label={t("COC No.")}
-                  name={`crewDetails.${index}.cocNo`}
-                  placeholder={t("Enter COC No.")}
-                  register={register(`crewDetails.${index}.cocNo`)}
-                  errors={errors}
-                  disabled={viewMode}
-                />
-              </Col>
-              <Col md={2}>
-                <InputText
-                  label={t("Validity")}
-                  name={`crewDetails.${index}.validity`}
-                  placeholder={t("Enter Validity")}
-                  register={register(`crewDetails.${index}.validity`)}
-                  errors={errors}
-                  disabled={viewMode}
-                />
-              </Col>
-              <Col md={2}>
-                <InputText
-                  label={t("Experience")}
-                  name={`crewDetails.${index}.experience`}
-                  placeholder={t("Enter Experience")}
-                  register={register(`crewDetails.${index}.experience`)}
-                  errors={errors}
-                  disabled={viewMode}
-                />
-              </Col>
-              {!viewMode && index > 0 && (
-                <Col md={12} className="text-end">
-                                    <Button
-                    variant="danger"
-                    size="sm"
-                    onClick={() => remove(index)}
-                    className="mt-1"
-                  >
-                    <FaTrash /> Remove
-                  </Button>
-                </Col>
-              )}
-            </Row>
-          ))}
-          {!viewMode && (
-            <Button
-              variant="outline-primary"
-              onClick={() => append({
-                crewType: "",
-                name: "",
-                rank: "",
-                cocNo: "",
-                validity: "",
-                experience: ""
-              })}
-              className="mt-2"
-            >
-              <FaPlus className="me-2" /> Add Crew Member
-            </Button>
-          )}
+    <Box sx={{ padding: "1rem 0.5rem 0 0.5rem", backgroundColor: "#f5f6fa", minHeight: "100vh" }}>
+      {isLoading ? (
+        <div className="d-flex justify-content-center align-items-center" style={{ height: "80vh" }}>
+          <div className="text-center">
+            <div className="spinner-border text-primary" role="status" style={{ width: "3rem", height: "3rem" }}>
+              <span className="visually-hidden">Loading...</span>
+            </div>
+            <p className="mt-3">Processing your request...</p>
+          </div>
         </div>
-      </Collapsible>
+      ) : (
+        <>
+          <div className="d-flex flex-column flex-md-row justify-content-between align-items-start align-items-md-center mb-3 gap-2">
+            <div className="d-flex align-items-center flex-grow-1" style={{ gap: '20px' }}>
+              <Button
+                variant="outline-primary"
+                size="sm"
+                onClick={() => navigate("/dashboard")}
+                className="d-flex align-items-center shadow-sm"
+                style={{
+                  borderRadius: "8px",
+                  fontSize: "0.6rem",
+                  fontWeight: "200",
+                  border: "2px solid #2E57A7",
+                  color: "#2E57A7",
+                  backgroundColor: "#fff",
+                  transition: "all 0.3s ease",
+                  minWidth: "auto",
+                  whiteSpace: "nowrap"
+                }}
+              >
+                <BsArrowLeft className="me-2" size={10} />
+                Back
+              </Button>
+              <Stack spacing={0.5} className="flex-grow-1">
+                <Typography
+                  sx={{
+                    fontWeight: 550,
+                    color: "#2E57A7",
+                    fontSize: { xs: "1rem", sm: "1.1rem", md: "1.2rem" },
+                    lineHeight: 1.2,
+                  }}
+                >
+                  {isViewMode
+                    ? t("View Vessel Survey") + ` - ${id}`
+                    : isEditMode
+                    ? t("Edit Vessel Survey") + ` - ${id}`
+                    : t("New Vessel Survey")}
+                </Typography>
+                <Typography
+                  sx={{
+                    color: "#666",
+                    fontSize: { xs: "0.6rem", sm: "0.65rem" },
+                    lineHeight: 1.3,
+                  }}
+                >
+                  {isViewMode
+                    ? t("(View vessel survey details)")
+                    : isEditMode
+                    ? t("(Update vessel survey details)")
+                    : t("(Fill in the survey details to complete registration)")}
+                </Typography>
+              </Stack>
+            </div>
+          </div>
 
-      {/* Enclosure */}
-      <Collapsible
-        title={
-          <>
-            <FaFileUpload className="me-2" style={{ color: "#2466BF" }} />
-            <span>{t("Enclosure")}</span>
-          </>
-        }
-        openStat={true}
-      >
-        <Row className="gy-3" style={{ padding: "1rem" }}>
-          <Col md={6}>
-            <InputFile
-              label={t("Authorization of Authorised Person")}
-              required={true}
-              name="authorizationFile"
-              register={register("authorizationFile", {
-                required: !editMode && t("Authorization file is required"),
-              })}
-              errors={errors}
-              onChange={(e) => {
-                if (viewMode) return;
-                if (e.target.files && e.target.files[0]) {
-                  handleFileChange("authorizationFile", e.target.files[0]);
-                }
-              }}
-              disabled={viewMode}
-              watch={watch}
-              defaultValue={watch("authorizationFile")}
-              clearErrors={clearErrors}
-              accept=".pdf,.jpg,.jpeg,.png"
-            />
-          </Col>
-          <Col md={6}>
-            <InputFile
-              label={t("Payment Challan/Acknowledgement")}
-              required={true}
-              name="paymentChallan"
-              register={register("paymentChallan", {
-                required: !editMode && t("Payment challan is required"),
-              })}
-              errors={errors}
-              onChange={(e) => {
-                if (viewMode) return;
-                if (e.target.files && e.target.files[0]) {
-                  handleFileChange("paymentChallan", e.target.files[0]);
-                }
-              }}
-              disabled={viewMode}
-              watch={watch}
-              defaultValue={watch("paymentChallan")}
-              clearErrors={clearErrors}
-              accept=".pdf,.jpg,.jpeg,.png"
-            />
-          </Col>
-          <Col md={6}>
-            <InputFile
-              label={t("Copy of last Certificate of Survey")}
-              required={true}
-              name="lastCertificateCopy"
-              register={register("lastCertificateCopy", {
-                required: !editMode && t("Last certificate copy is required"),
-              })}
-              errors={errors}
-              onChange={(e) => {
-                if (viewMode) return;
-                if (e.target.files && e.target.files[0]) {
-                  handleFileChange("lastCertificateCopy", e.target.files[0]);
-                }
-              }}
-              disabled={viewMode}
-              watch={watch}
-              defaultValue={watch("lastCertificateCopy")}
-              clearErrors={clearErrors}
-              accept=".pdf,.jpg,.jpeg,.png"
-            />
-          </Col>
-          <Col md={6}>
-            <InputFile
-              label={t("Copy of Certificate of Registration")}
-              required={true}
-              name="registrationCertificateCopy"
-              register={register("registrationCertificateCopy", {
-                required: !editMode && t("Registration certificate copy is required"),
-              })}
-              errors={errors}
-              onChange={(e) => {
-                if (viewMode) return;
-                if (e.target.files && e.target.files[0]) {
-                  handleFileChange("registrationCertificateCopy", e.target.files[0]);
-                }
-              }}
-              disabled={viewMode}
-              watch={watch}
-              defaultValue={watch("registrationCertificateCopy")}
-              clearErrors={clearErrors}
-              accept=".pdf,.jpg,.jpeg,.png"
-            />
-          </Col>
-        </Row>
-      </Collapsible>
-    </form>
+          <Stepper
+            ref={stepperRef}
+            steps={steps}
+            onSave={handleSave}
+            viewMode={isViewMode}
+            onSyncData={handleFormSubmit}
+          />
+        </>
+      )}
+    </Box>
   );
 };
 
-export default VesselSurveyForm;
-
+export default VesselSurveyRegistration;
