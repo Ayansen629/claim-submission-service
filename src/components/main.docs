@@ -704,3 +704,673 @@ const Documents = ({ formMethods, viewMode = false, editMode = false }) => {
 };
 
 export default Documents;
+import React, { useState, useEffect, useRef } from "react";
+import { Box, Typography, Stack } from "@mui/material";
+import { useParams, useLocation, useNavigate } from "react-router-dom";
+import Stepper from "../../../common/Stepper.jsx";
+import VesselDetails from "./VesselDetails.js";
+import Documents from "./Documents.js";
+import NoteSheet from "./NoteSheet.js";
+import { useForm } from "react-hook-form";
+import Invoicing from "../../../common/Invoicing.js";
+import PaymentModal from "../../../common/PaymentModal.js";
+import ActionDropdown from "../../../common/ActionDropdown";
+import ApprovalModal from "../../../common/ApprovalModal";
+import NewVesselRegistrationSuccess from "./newVesselRegistrationSuccess.js";
+import { useTranslation } from "react-i18next";
+import { useLanguageContext } from "../../../common/LanguageContext.js";
+import { toast } from "react-toastify";
+import { Button } from "react-bootstrap";
+import { BsSticky, BsArrowLeft } from "react-icons/bs";
+import PaymentDetailsView from "./paymentDetailsView.js";
+import { getFromLocalStorage } from "../../../../utils/localStorageUtils.js";
+import { handleErrorMessage } from "../../../../utils/errorMessageHandler.js";
+import { postFORMdata } from "../../../../services/http.service.ts";
+import {
+  SERVICE_BASE,
+  URLS_ENDPOINT,
+} from "../../../../utils/urlsConstants.ts";
+// import VesselRegistrationPreview from "./VesselRegistrationPreview.js";
+
+const NewVesselRegistration = () => {
+  const { t } = useTranslation();
+  const { changeLanguage } = useLanguageContext();
+  const { id } = useParams();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const ownerDetails = getFromLocalStorage("ownerDetails")
+    ? JSON.parse(getFromLocalStorage("ownerDetails"))
+    : "";
+  const isEditMode = !!id && location.pathname.includes("/edit/");
+  const isViewMode = !!id && location.pathname.includes("/view/");
+  const isNormalMode = !isEditMode && !isViewMode;
+  const stepperRef = useRef();
+
+  const methods = useForm({ mode: "onTouched" });
+  const { trigger, getValues, setError, setValue, reset } = methods;
+
+  const [showModal, setShowModal] = useState(false);
+  const [paymentMode, setPaymentMode] = useState("offline");
+  const [challanFile, setChallanFile] = useState(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [showApprovalModal, setShowApprovalModal] = useState(false);
+  const [selectedAction, setSelectedAction] = useState("");
+  const [showNoteSheet, setShowNoteSheet] = useState(false);
+
+  const actionsFromAPI = ["Approve", "Reject", "Request Changes"];
+
+  const initialNotes = [
+    {
+      id: 1,
+      title: "Initial Review",
+      content:
+        "Document verification completed successfully. All required documents are present and properly formatted.",
+      date: "2024-01-15",
+      author: "John Doe",
+    },
+    {
+      id: 2,
+      title: "Technical Assessment",
+      content:
+        "All technical drawings have been reviewed and approved by the engineering team.",
+      date: "2024-01-16",
+      author: "Jane Smith",
+    },
+  ];
+
+  const staticData = {
+    ownerName: "John Doe",
+    ownerAddress: "123 Main Street, Harbor City, State 12345",
+    mobile: "9876543210",
+    email: "john.doe@example.com",
+    pan: "ABCDE1234F",
+    aadhar: "123456789012",
+    tradeLicence: "TL123456789",
+    gst: "GST123456789012",
+    grt: "500",
+    workOrderValue: "1000000",
+    vesselType: "new",
+    category: "A",
+    zone: "1",
+    supervisionAuthority: "classificationSociety",
+    purchaseType: "new",
+    classificationSociety: "Lloyd's Register Classification Society",
+    constructedBy: "2",
+    builder: "builder1",
+    builderName: "ABC Marine Shipyard Pvt Ltd",
+    builderAddress: "456 Port Road, Shipyard Complex, Harbor City 54321",
+    builderEmail: "contact@abcshipyard.com",
+    builderMobile: "9876543211",
+    builderTradeLicence: "BTL789012345",
+    builderGST: "BGST987654321098",
+    builderAuth: "auth",
+    termsAccepted: true,
+
+    // Work Order Files (50 files)
+    ...Array.from({ length: 50 }, (_, i) => ({
+      [`workOrder_file_${i + 1}`]: {
+        name: `WorkOrder_${String(i + 1).padStart(2, "0")}.pdf`,
+        size: Math.floor(Math.random() * 2000000) + 500000,
+      },
+      [`workOrder_desc_${i + 1}`]: `Work order document ${i + 1} - ${
+        [
+          "Main contract document",
+          "Amendment and modifications",
+          "Technical specifications",
+          "Timeline and milestones",
+          "Budget breakdown",
+          "Quality requirements",
+          "Safety protocols",
+          "Environmental compliance",
+          "Material specifications",
+          "Equipment details",
+        ][i % 10]
+      }`,
+    })).reduce((acc, curr) => ({ ...acc, ...curr }), {}),
+
+    // Drawing Files (50 files)
+    ...Array.from({ length: 50 }, (_, i) => ({
+      [`drawings_file_${i + 1}`]: {
+        name: `Drawing_${String(i + 1).padStart(2, "0")}.pdf`,
+        size: Math.floor(Math.random() * 3000000) + 800000,
+      },
+      [`drawings_desc_${i + 1}`]: `Technical drawing ${i + 1} - ${
+        [
+          "General arrangement plan",
+          "Hull structure details",
+          "Machinery layout",
+          "Electrical schematic",
+          "Piping diagram",
+          "Safety equipment layout",
+          "Navigation equipment",
+          "Interior arrangement",
+          "Deck plan",
+          "Cross-section view",
+        ][i % 10]
+      }`,
+    })).reduce((acc, curr) => ({ ...acc, ...curr }), {}),
+
+    tonnageBooklets: { name: "Tonnage_Booklets.pdf", size: 512000 },
+    stabilityBooklets: { name: "Stability_Booklets.pdf", size: 768000 },
+    authLetter: { name: "Authorization_Letter.pdf", size: 256000 },
+  };
+
+  useEffect(() => {
+    if (isNormalMode) {
+      reset();
+    } else if (isEditMode || isViewMode) {
+      setTimeout(() => {
+        Object.keys(staticData).forEach((key) => {
+          setValue(key, staticData[key]);
+        });
+      }, 100);
+    }
+  }, [isEditMode, isViewMode, isNormalMode, setValue, reset]);
+
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      if (!ownerDetails || !isNormalMode) return;
+
+      const userInfoFields = {
+        ownerName: ownerDetails.ownerCompanyName || "",
+        ownerAddress: [ownerDetails.addressLine1, ownerDetails.addressLine2]
+          .filter(Boolean)
+          .join(" , "),
+        mobile: ownerDetails.phoneNumber || "",
+        email: ownerDetails.emailId || "",
+        pan: ownerDetails.panNo || "",
+        gst: ownerDetails.gstNo || "",
+        category: ownerDetails.categoryOfOwner || "",
+        aadhar: ownerDetails.aadharNumber || "",
+        tradeLicence: ownerDetails.tradeLicenseNumber || "",
+      };
+
+      Object.entries(userInfoFields).forEach(([key, value]) => {
+        setValue(key, value, { shouldDirty: false, shouldTouch: false });
+      });
+    });
+
+    return () => clearTimeout(timeoutId);
+  }, []);
+
+  const handleActionClick = (action) => {
+    setSelectedAction(action);
+    setShowApprovalModal(true);
+  };
+
+  const handleActionSubmit = (formData) => {
+    const payload = {
+      action: selectedAction,
+      comments: formData.comments,
+    };
+
+    console.log("Action submitted:", payload);
+    toast.success(`${selectedAction} action submitted successfully`);
+
+    setShowApprovalModal(false);
+    setSelectedAction("");
+  };
+
+  const handleCloseModal = () => {
+    setShowApprovalModal(false);
+    setSelectedAction("");
+  };
+
+  const handleChallanUpload = (e) => {
+    setChallanFile(e.target.files?.[0] || null);
+  };
+
+  const handleOnlinePay = () => {
+    setIsLoading(true);
+    setShowModal(false);
+
+    setTimeout(() => {
+      setIsLoading(false);
+      navigate("/new-vessel/registration-success", {
+        state: { registrationId: "VR2024001" },
+      });
+    }, 1500);
+  };
+
+  const handleOfflineSubmit = () => {
+    setShowModal(false);
+    setIsLoading(true);
+
+    setTimeout(() => {
+      setIsLoading(false);
+      navigate("/new-vessel/registration-success", {
+        state: { registrationId: "VR2024001" },
+      });
+    }, 1500);
+  };
+
+  const handlePayNow = () => {
+    setShowModal(true);
+  };
+
+  // Validation functions
+  const validateVesselDetails = async () => {
+    if (isViewMode) return true;
+    const basicFields = [
+      "ownerName",
+      "ownerAddress",
+      "mobile",
+      "email",
+      "pan",
+      "aadhar",
+      "tradeLicence",
+      "gst",
+      "grt",
+      "workOrderValue",
+      "vesselType",
+      "category",
+      "purchaseType",
+      "constructedBy",
+    ];
+
+    const constructedBy = getValues("constructedBy");
+    if (constructedBy === "2") {
+      basicFields.push(
+        "builderName",
+        "builderAddress",
+        "builderEmail",
+        "builderMobile",
+        "builderTradeLicence",
+        "builderGST",
+        "builderAuth"
+      );
+
+      const authLetter = getValues("authLetter");
+      if (!authLetter && !isEditMode) {
+        basicFields.push("authLetter");
+      }
+    }
+
+    const valid = await trigger(basicFields);
+    return valid;
+  };
+
+  const validateDocuments = async () => {
+    if (isViewMode) return true;
+
+    const requiredFields = [];
+
+    const tonnageBooklets = getValues("tonnageBooklets");
+    const stabilityBooklets = getValues("stabilityBooklets");
+    const termsAccepted = getValues("termsAccepted");
+
+    if (!tonnageBooklets && !isEditMode) {
+      requiredFields.push("tonnageBooklets");
+    }
+
+    if (!stabilityBooklets && !isEditMode) {
+      requiredFields.push("stabilityBooklets");
+    }
+
+    if (!termsAccepted) {
+      requiredFields.push("termsAccepted");
+    }
+
+    let hasErrors = false;
+
+    requiredFields.forEach((fieldName) => {
+      const fieldValue = getValues(fieldName);
+
+      if (
+        !fieldValue ||
+        (fieldValue instanceof FileList && fieldValue.length === 0)
+      ) {
+        setError(fieldName, {
+          type: "required",
+          message: `${fieldName} is required`,
+        });
+        hasErrors = true;
+      }
+    });
+
+    return !hasErrors;
+  };
+
+  const supervisionAuthority = methods.watch("supervisionAuthority");
+
+  const steps = isViewMode
+    ? [
+        {
+          label: t("Vessel Details"),
+          component: (
+            <VesselDetails
+              formMethods={methods}
+              viewMode={isViewMode}
+              editMode={isEditMode}
+            />
+          ),
+          validate: validateVesselDetails,
+        
+        },
+        {
+          label: t("Documents"),
+          component: (
+            <Documents
+              formMethods={methods}
+              viewMode={isViewMode}
+              editMode={isEditMode}
+            />
+          ),
+          validate: validateDocuments,
+        
+        },
+        {
+          label: t("Payment Details"),
+          component: (
+            <PaymentDetailsView
+              supervisionAuthority={supervisionAuthority}
+              formData={methods.getValues()}
+            />
+          ),
+          validate: () => true,
+        
+        },
+      ]
+    : [
+        {
+          label: t("vesselDetails.Vessel Details"),
+          component: (
+            <VesselDetails
+              formMethods={methods}
+              viewMode={isViewMode}
+              editMode={isEditMode}
+            />
+          ),
+          validate: validateVesselDetails,
+          getFormData: () => methods?.getValues(),
+        },
+        {
+          label: t("vesselDetails.Documents"),
+          component: (
+            <Documents
+              formMethods={methods}
+              viewMode={isViewMode}
+              editMode={isEditMode}
+            />
+          ),
+          validate: validateDocuments,
+          getFormData: () => methods?.getValues(),
+          goToNextStepNoValidtion : true
+        },
+        //  {
+        //   label : t("Preview"),
+        //   component: <VesselRegistrationPreview formData={methods.getValues()} isPreview={true}
+        // />
+        // },
+        {
+          label: t("vesselDetails.Invoicing"),
+          component: (
+            <Invoicing
+              supervisionAuthority={supervisionAuthority}
+              onPayNow={handlePayNow}
+            />
+          ),
+          validate: () => true,
+        
+        },
+      ];
+
+  //--- SAVE API CALLS ------------
+  const handleFormSubmit = async (stepInfo) => {
+    console.log("Current Step Info from Stepper:", stepInfo);
+
+    //-- First Step 
+    if (stepInfo.index === 0) {
+      const formValues = stepInfo?.getFormData?.() || {};
+
+      const request = {
+        regBasicDetails: {
+          registrationAppNo: "",
+          iwtVOwnerId: ownerDetails?.id,
+          iwtVBuilderId: formValues?.builder,
+          workOrderVal: formValues?.workOrderValue,
+          category: formValues?.category,
+          purchaseType: formValues?.purchaseType,
+          supervisionAuthority: formValues?.supervisionAuthority,
+          classificationSociety: formValues?.classificationSociety,
+          zone: formValues?.zone,
+        },
+      };
+
+      const fd = new FormData();
+      fd.append(
+        "request",
+        new Blob([JSON.stringify(request)], { type: "application/json" })
+      );
+      fd.append("files", formValues?.authLetter);
+
+      try {
+        const URL =
+          SERVICE_BASE.IWT_REGISTRATION +
+          URLS_ENDPOINT.VESSEL_SERVICE.CREATE_OR_UPDATE_VESSEL;
+        const response = await postFORMdata(URL, fd);
+        setIsLoading(true);
+        const apiRes = { ...response?.data };
+        if (
+          response?.status === 200 &&
+          apiRes?.responseStatus?.status === "200"
+        ) {
+          setIsLoading(false);
+          toast.success(
+            apiRes?.responseStatus?.message ||
+              "Vessel details saved successfully.",
+            { position: "top-right" }
+          );
+          
+        } else {
+          setIsLoading(false);
+          toast.info(
+            apiRes?.responseStatus?.message || "Something went wrong..",
+            { position: "top-right" }
+          );
+        }
+      } catch (err) {
+        setIsLoading(false);
+        console.log(err);
+        handleErrorMessage(err?.response?.data);
+      }
+
+    }
+  };
+
+  const handleSave = () => {
+    setIsLoading(true);
+    setTimeout(() => {
+      setIsLoading(false);
+      navigate("/new-vessel/registration-success", {
+        state: { registrationId: "VR2024001" },
+      });
+    }, 1500);
+  };
+
+  const actionDropdown = isViewMode ? (
+    <ActionDropdown
+      actions={actionsFromAPI}
+      onActionClick={handleActionClick}
+      variant="contained"
+      sx={{
+        backgroundColor: "#2E57A7",
+        fontWeight: "bold",
+        borderRadius: "0.5rem",
+        minWidth: "8rem",
+        fontSize: "0.9rem",
+        color: "#fff",
+        "&:hover": {
+          backgroundColor: "#1f4ea0",
+        },
+      }}
+    />
+  ) : null;
+
+  return (
+    <>
+      
+      <Box
+        sx={{
+          padding: "1rem 0.5rem 0 0.5rem",
+          backgroundColor: "#f5f6fa",
+          minHeight: "100vh",
+        }}
+      >
+        {isLoading ? (
+          <div
+            className="d-flex justify-content-center align-items-center"
+            style={{ height: "80vh" }}
+          >
+            <div className="text-center">
+              <div
+                className="spinner-border text-primary"
+                role="status"
+                style={{ width: "3rem", height: "3rem" }}
+              >
+                <span className="visually-hidden">Loading...</span>
+              </div>
+              <p className="mt-3">Processing your request...</p>
+            </div>
+          </div>
+        ) : (
+          <>
+            <div className="d-flex flex-column flex-md-row justify-content-between align-items-start align-items-md-center mb-3 gap-2">
+              <div className="d-flex align-items-center flex-grow-1" style={{ gap: '20px' }}>
+                <Button
+                  variant="outline-primary"
+                  size="sm"
+                  onClick={() => navigate("/dashboard")}
+                  className="d-flex align-items-center shadow-sm"
+                  style={{
+                    borderRadius: "8px",
+                    // padding: "10px 18px",
+                    fontSize: "0.6rem",
+                    fontWeight: "200",
+                    border: "2px solid #2E57A7",
+                    color: "#2E57A7",
+                    backgroundColor: "#fff",
+                    transition: "all 0.3s ease",
+                    minWidth: "auto",
+                    whiteSpace: "nowrap"
+                  }}
+                  onMouseEnter={(e) => {
+                    e.target.style.backgroundColor = "#2E57A7";
+                    e.target.style.color = "#fff";
+                    e.target.style.transform = "translateY(-1px)";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.target.style.backgroundColor = "#fff";
+                    e.target.style.color = "#2E57A7";
+                    e.target.style.transform = "translateY(0)";
+                  }}
+                >
+                  <BsArrowLeft className="me-2" size={10} />
+                  Back
+                
+                </Button>
+                <Stack spacing={0.5} className="flex-grow-1">
+                <Typography
+                  sx={{
+                    fontWeight: 550,
+                    color: "#2E57A7",
+                    fontSize: { xs: "1rem", sm: "1.1rem", md: "1.2rem" },
+                    lineHeight: 1.2,
+                  }}
+                >
+                  {isViewMode
+                    ? t("View Vessel Registration") + ` - ${id}`
+                    : isEditMode
+                    ? t("Edit Vessel Registration") + ` - ${id}`
+                    : t("vesselDetails.New Vessel Registration")}
+                </Typography>
+                <Typography
+                  sx={{
+                    color: "#666",
+                    fontSize: { xs: "0.6rem", sm: "0.65rem" },
+                    lineHeight: 1.3,
+                  }}
+                >
+                  {isViewMode
+                    ? t("(View vessel registration details)")
+                    : isEditMode
+                    ? t("(Update vessel registration details)")
+                    : t(
+                        "vesselDetails.(Fill in the vessel details to complete registration)"
+                      )}
+                </Typography>
+                </Stack>
+              </div>
+
+              {/* Note Sheet Button - Only for View Mode */}
+              {/* {isViewMode && (
+                <Button
+                  variant="primary"
+                  className="d-flex align-items-center shadow-sm flex-shrink-0"
+                  style={{
+                    background:
+                      "linear-gradient(135deg, #2466bf 0%, #1a4fa0 100%)",
+                    border: "none",
+                    borderRadius: "8px",
+                    padding: "6px 12px",
+                    fontSize: "0.8rem",
+                    fontWeight: "600",
+                    minWidth: "auto",
+                    whiteSpace: "nowrap",
+                  }}
+                  onClick={() => setShowNoteSheet(true)}
+                >
+                  <BsSticky className="me-1 me-sm-2" size={14} />
+                  <span className="d-none d-sm-inline">{t("Note Sheet")}</span>
+                  <span className="d-sm-none">{t("Notes")}</span>
+                </Button>
+              )} */}
+            </div>
+
+            <Stepper
+              ref={stepperRef}
+              steps={steps}
+              onSave={handleSave}
+              viewMode={isViewMode}
+              actionComponent={actionDropdown}
+              onPayNow={handlePayNow}
+              onSyncData={handleFormSubmit}
+            />
+
+            {/* <NoteSheet
+              show={showNoteSheet}
+              onHide={() => setShowNoteSheet(false)}
+              initialNotes={initialNotes}
+            /> */}
+
+            {!isViewMode && (
+              <PaymentModal
+                show={showModal}
+                onHide={() => setShowModal(false)}
+                paymentMode={paymentMode}
+                setPaymentMode={setPaymentMode}
+                challanFile={challanFile}
+                onChallanUpload={handleChallanUpload}
+                onOnlinePay={handleOnlinePay}
+                onOfflineSubmit={handleOfflineSubmit}
+                isLoading={isLoading}
+                formMethods={methods}
+              />
+            )}
+
+            {isViewMode && (
+              <ApprovalModal
+                show={showApprovalModal}
+                handleClose={handleCloseModal}
+                handleSubmitData={handleActionSubmit}
+                selectedAction={selectedAction}
+              />
+            )}
+          </>
+        )}
+      </Box>
+    </>
+  );
+};
+
+export default NewVesselRegistration;
