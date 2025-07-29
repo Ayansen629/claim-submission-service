@@ -7,7 +7,7 @@ import InputText from "../../../common/InputText.tsx";
 import { renameFile } from "../../../../utils/constants.ts";
 import { BsDownload, BsFileEarmarkPdf, BsPlus, BsTrash } from "react-icons/bs";
 
-const Documents = ({ formMethods, viewMode = false, editMode = false }) => {
+const Documents = ({ formMethods, viewMode = false, editMode = false, id }) => {
   const { t } = useTranslation();
   const [formData, setFormData] = useState({});
   const [workOrderFiles, setWorkOrderFiles] = useState([{ id: 1 }]);
@@ -24,6 +24,80 @@ const Documents = ({ formMethods, viewMode = false, editMode = false }) => {
   } = formMethods;
 
   const constructedBy = watch("constructedBy");
+  const grossTonnage = watch("grt");
+
+  // Track if GRT value has been changed from original
+  const [originalGrt, setOriginalGrt] = useState("");
+  const [grtChanged, setGrtChanged] = useState(false);
+
+  // Set original GRT value when component mounts in edit mode
+  useEffect(() => {
+    if (editMode && grossTonnage && !originalGrt) {
+      setOriginalGrt(grossTonnage);
+    }
+  }, [editMode, grossTonnage, originalGrt]);
+
+  // Track GRT changes
+  useEffect(() => {
+    if (editMode && originalGrt) {
+      if (grossTonnage !== originalGrt) {
+        setGrtChanged(true);
+      } else {
+        setGrtChanged(false);
+      }
+    }
+  }, [editMode, grossTonnage, originalGrt]);
+
+  // Check if tonnage and stability booklets are required
+  const isTonnageRequired = () => {
+    if (editMode) {
+      const existingTonnageFile = getValues("tonnageBooklets");
+      const hasFileId = existingTonnageFile?.id;
+      
+      // Required if: has file ID OR GRT value was actually changed
+      return !!(hasFileId || grtChanged);
+    }
+    return false;
+  };
+
+  const isStabilityRequired = () => {
+    if (editMode) {
+      const existingStabilityFile = getValues("stabilityBooklets");
+      const hasFileId = existingStabilityFile?.id;
+      
+      // Required if: has file ID OR GRT value was actually changed
+      return !!(hasFileId || grtChanged);
+    }
+    return false;
+  };
+
+ 
+// Force validation trigger when requirement changes
+useEffect(() => {
+  if (editMode) {
+    setTimeout(() => {
+      if (isTonnageRequired()) {
+        const tonnageFile = getValues("tonnageBooklets");
+        if (!tonnageFile || !tonnageFile.name) {
+          setError("tonnageBooklets", {
+            type: "required",
+            message: t('Tonnage Booklets is required')
+          });
+        }
+      }
+      
+      if (isStabilityRequired()) {
+        const stabilityFile = getValues("stabilityBooklets");
+        if (!stabilityFile || !stabilityFile.name) {
+          setError("stabilityBooklets", {
+            type: "required", 
+            message: t('Stability Booklets is required')
+          });
+        }
+      }
+    }, 50);
+  }
+}, [isTonnageRequired(), isStabilityRequired(), editMode, getValues, setError, t]);
 
   useEffect(() => {
     setTimeout(() => {
@@ -147,52 +221,6 @@ const Documents = ({ formMethods, viewMode = false, editMode = false }) => {
       </Card>
     );
   };
-  //  const DocumentCard = ({ fileName, description, onDownload, fileSize, onRemove, showRemove = false }) => (
-  //   <Card className="mb-2 border-0 shadow-sm">
-  //     <Card.Body className="p-3">
-  //       <div className="d-flex justify-content-between align-items-center">
-  //         <div className="d-flex align-items-center flex-grow-1">
-  //           <div className="bg-danger bg-opacity-10 rounded-circle p-2 me-3">
-  //             <BsFileEarmarkPdf className="text-danger" size={20} />
-  //           </div>
-  //           <div className="flex-grow-1">
-  //             <h6 className="mb-1 text-primary fw-semibold" style={{ fontSize: "0.9rem" }}>
-  //               {fileName}
-  //             </h6>
-  //             <p className="mb-0 text-muted small">
-  //               {description}
-  //               {fileSize && (
-  //                 <span className="ms-2 badge bg-light text-dark">
-  //                   {(fileSize / 1024 / 1024).toFixed(1)} MB
-  //                 </span>
-  //               )}
-  //             </p>
-  //           </div>
-  //         </div>
-  //         <div className="d-flex gap-2">
-  //           <Button
-  //             variant="outline-primary"
-  //             size="sm"
-  //             onClick={() => onDownload(fileName)}
-  //             className="rounded-pill"
-  //           >
-  //             <BsDownload size={14} />
-  //           </Button>
-  //           {showRemove && (
-  //             <Button
-  //               variant="outline-danger"
-  //               size="sm"
-  //               onClick={onRemove}
-  //               className="rounded-pill"
-  //             >
-  //               <BsTrash size={14} />
-  //             </Button>
-  //           )}
-  //         </div>
-  //       </div>
-  //     </Card.Body>
-  //   </Card>
-  // );
 
   const FileUploadCard = ({ label, name, onRemove, showRemove = false, fileIndex }) => (
     <Card className="mb-2 border-2 border-dashed border-primary border-opacity-25">
@@ -211,7 +239,7 @@ const Documents = ({ formMethods, viewMode = false, editMode = false }) => {
                   if (file.size > 10 * 1024 * 1024) {
                     setError(name, {
                       type: 'manual',
-                      message: t('vesselDetails..File size should not exceed 10MB')
+                      message: t('File size should not exceed 10MB')
                     });
                     return;
                   }
@@ -242,7 +270,7 @@ const Documents = ({ formMethods, viewMode = false, editMode = false }) => {
           <div style={{ fontSize: "0.75rem" }}>
             <InputText
               label={t("vesselDetails.Description")}
-              name={name?.replace('_file_', '_desc_')}
+              name={name.replace('_file_', '_desc_')}
               placeholder={t("vesselDetails.Enter file description")}
               register={register(name.replace('_file_', '_desc_'))}
               errors={errors}
@@ -359,85 +387,6 @@ const Documents = ({ formMethods, viewMode = false, editMode = false }) => {
       </Card>
     );
   };
-   // const FileSection = ({ title, files, type, icon }) => {
-  //   const filesWithData = files.filter(file => {
-  //     const fileData = watch(`${type}_file_${file.id}`);
-  //     return fileData && fileData.name;
-  //   });
-
-  //   return (
-  //     <Card className="h-100 shadow-sm border-0">
-  //       <Card.Header className="bg-light border-0 py-3">
-  //         <div className="d-flex justify-content-between align-items-center">
-  //           <h5 className="mb-0 text-primary fw-bold d-flex align-items-center">
-  //             {icon}
-  //             <span className="ms-2">{title}</span>
-  //           </h5>
-  //           <span className="badge bg-primary rounded-pill">
-  //             {viewMode ? filesWithData.length : files.length} files
-  //           </span>
-  //         </div>
-  //       </Card.Header>
-
-  //       <Card.Body className="p-0">
-  //         <div style={{ maxHeight: "500px", overflowY: "auto" }} className="p-3">
-  //           {viewMode ? (
-  //             filesWithData.length > 0 ? (
-  //               filesWithData.map((fileInput) => {
-  //                 const fileData = watch(`${type}_file_${fileInput.id}`);
-  //                 const descData = watch(`${type}_desc_${fileInput.id}`);
-                  
-  //                 return (
-  //                   <DocumentCard
-  //                     key={fileInput.id}
-  //                     fileName={fileData.name}
-  //                     description={descData || `${title} document ${fileInput.id}`}
-  //                     fileSize={fileData.size}
-  //                     onDownload={() => handleDownload(fileData.name)}
-  //                   />
-  //                 );
-  //               })
-  //             ) : (
-  //               <div className="text-center py-5 text-muted">
-  //                 <div className="bg-light rounded-circle p-4 d-inline-flex mb-3">
-  //                   <BsFileEarmarkPdf size={48} className="opacity-50" />
-  //                 </div>
-  //                 <p className="mb-0">No files uploaded</p>
-  //               </div>
-  //             )
-  //           ) : (
-  //             <>
-  //               {files.map((fileInput, idx) => (
-  //                 <FileUploadCard
-  //                   key={fileInput.id}
-  //                   label={`${t(type === 'workOrder' ? 'Work Order' : 'Drawing')} ${fileInput.id}`}
-  //                   // label={type === 'workOrder' ? `WorkOrder_${fileInput.id}` : `Drawing_${fileInput.id}`}
-  //                   name={`${type}_file_${fileInput.id}`}
-  //                   onRemove={() => removeFileInput(type, fileInput.id)}
-  //                   showRemove={files.length > 1}
-  //                 />
-  //               ))}
-  //             </>
-  //           )}
-  //         </div>
-  //       </Card.Body>
-
-  //       {!viewMode && (
-  //         <Card.Footer className="bg-light border-0 text-center py-3">
-  //           <Button
-  //             variant="primary"
-  //             size="sm"
-  //             onClick={() => addFileInput(type)}
-  //             className="rounded-pill px-4"
-  //           >
-  //             <BsPlus className="me-1" size={18} />
-  //             Add {title}
-  //           </Button>
-  //         </Card.Footer>
-  //       )}
-  //     </Card>
-  //   );
-  // };
 
   const SingleFileSection = ({ title, fileName, onDownload, fileSize, icon }) => (
     <Card className="h-100 shadow-sm border-0">
@@ -565,15 +514,18 @@ const Documents = ({ formMethods, viewMode = false, editMode = false }) => {
                       <h6 className="mb-0 text-primary fw-bold d-flex align-items-center" style={{ fontSize: '0.75rem' }}>
                         <BsFileEarmarkPdf className="text-warning me-2" size={12} />
                         {t('vesselDetails.Tonnage Booklets')}
+                        {isTonnageRequired() && <span className="text-danger ms-1">*</span>}
                       </h6>
                     </Card.Header>
                     <Card.Body className="p-2">
                       <div style={{ fontSize: "0.75rem" }}>
                         <InputFile
                           label={t('vesselDetails.Tonnage Booklets')}
-                          required={true}
+                          required={isTonnageRequired()}
                           name="tonnageBooklets"
-                          register={register("tonnageBooklets")}
+                          register={register("tonnageBooklets", {
+                            required: isTonnageRequired() ? t('Tonnage Booklets is required') : false
+                          })}
                           errors={errors}
                           onChange={(e) => {
                             if (e.target.files && e?.target?.files[0]) {
@@ -598,6 +550,7 @@ const Documents = ({ formMethods, viewMode = false, editMode = false }) => {
                           defaultValue={watch("tonnageBooklets")}
                           clearErrors={clearErrors}
                           className="mobile-file-input"
+                          key={`tonnage-${isTonnageRequired()}`}
                         />
                       </div>
                     </Card.Body>
@@ -620,15 +573,18 @@ const Documents = ({ formMethods, viewMode = false, editMode = false }) => {
                       <h6 className="mb-0 text-primary fw-bold d-flex align-items-center" style={{ fontSize: '0.75rem' }}>
                         <BsFileEarmarkPdf className="text-info me-2" size={12} />
                         {t('vesselDetails.Stability Booklets')}
+                        {isStabilityRequired() && <span className="text-danger ms-1">*</span>}
                       </h6>
                     </Card.Header>
                     <Card.Body className="p-2">
                       <div style={{ fontSize: "0.75rem" }}>
                         <InputFile
                           label={t('vesselDetails.Stability Booklets')}
-                          required={true}
+                          required={isStabilityRequired()}
                           name="stabilityBooklets"
-                          register={register("stabilityBooklets")}
+                          register={register("stabilityBooklets", {
+                            required: isStabilityRequired() ? t('Stability Booklets is required') : false
+                          })}
                           errors={errors}
                           onChange={(e) => {
                             if (e.target.files && e?.target?.files[0]) {
@@ -653,6 +609,7 @@ const Documents = ({ formMethods, viewMode = false, editMode = false }) => {
                           defaultValue={watch("stabilityBooklets")}
                           clearErrors={clearErrors}
                           className="mobile-file-input"
+                          key={`stability-${isStabilityRequired()}`}
                         />
                       </div>
                     </Card.Body>
