@@ -1,4 +1,778 @@
 import React, { useState, useEffect, useRef } from "react";
+import { Box, Typography, Stack } from "@mui/material";
+import { useParams, useLocation, useNavigate } from "react-router-dom";
+import Stepper from "../../../common/Stepper.jsx";
+import VesselDetails from "./VesselDetails.js";
+import Documents from "./Documents.js";
+import NoteSheet from "./NoteSheet.js";
+import { useForm } from "react-hook-form";
+import Invoicing from "../../../common/Invoicing.js";
+import PaymentModal from "../../../common/PaymentModal.js";
+import ActionDropdown from "../../../common/ActionDropdown";
+import ApprovalModal from "../../../common/ApprovalModal";
+import NewVesselRegistrationSuccess from "./newVesselRegistrationSuccess.js";
+import { useTranslation } from "react-i18next";
+import { useLanguageContext } from "../../../common/LanguageContext.js";
+import { toast } from "react-toastify";
+import { Button } from "react-bootstrap";
+import { BsSticky, BsArrowLeft } from "react-icons/bs";
+import PaymentDetailsView from "./paymentDetailsView.js";
+import { getFromLocalStorage } from "../../../../utils/localStorageUtils.js";
+import { handleErrorMessage } from "../../../../utils/errorMessageHandler.js";
+import { postData, postFORMdata } from "../../../../services/http.service.ts";
+import {
+  SERVICE_BASE,
+  URLS_ENDPOINT,
+} from "../../../../utils/urlsConstants.ts";
+import NewLoader from "../../../common/NewLoader.js";
+// import VesselRegistrationPreview from "./VesselRegistrationPreview.js";
+
+const NewVesselRegistration = () => {
+  const { t } = useTranslation();
+  const { id } = useParams();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const ownerDetails = getFromLocalStorage("ownerDetails")
+    ? JSON.parse(getFromLocalStorage("ownerDetails"))
+    : "";
+  const isEditMode = !!id && location.pathname.includes("/edit/");
+  const isViewMode = !!id && location.pathname.includes("/view/");
+  const isNormalMode = !isEditMode && !isViewMode;
+  const stepperRef = useRef();
+
+  const methods = useForm({ mode: "onTouched" });
+  const { trigger, getValues, setError, setValue, reset } = methods;
+
+  const [showModal, setShowModal] = useState(false);
+  const [paymentMode, setPaymentMode] = useState("offline");
+  const [challanFile, setChallanFile] = useState(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [showApprovalModal, setShowApprovalModal] = useState(false);
+  const [selectedAction, setSelectedAction] = useState("");
+  const [showNoteSheet, setShowNoteSheet] = useState(false);
+
+  const loaderRef = useRef();
+
+  const [vesselRegisData, setVesselRegisData] = useState({});
+
+  const actionsFromAPI = ["Approve", "Reject", "Request Changes"];
+
+  const [originalGRT, setOriginalGRT] = useState(null);
+
+  const initialNotes = [
+    {
+      id: 1,
+      title: "Initial Review",
+      content:
+        "Document verification completed successfully. All required documents are present and properly formatted.",
+      date: "2024-01-15",
+      author: "John Doe",
+    },
+    {
+      id: 2,
+      title: "Technical Assessment",
+      content:
+        "All technical drawings have been reviewed and approved by the engineering team.",
+      date: "2024-01-16",
+      author: "Jane Smith",
+    },
+  ];
+
+  const staticData = {
+    ownerName: "John Doe",
+    ownerAddress: "123 Main Street, Harbor City, State 12345",
+    mobile: "9876543210",
+    email: "john.doe@example.com",
+    pan: "ABCDE1234F",
+    aadhar: "123456789012",
+    tradeLicence: "TL123456789",
+    gst: "GST123456789012",
+    grt: "500",
+    workOrderValue: "1000000",
+    vesselType: "new",
+    category: "A",
+    zone: "1",
+    supervisionAuthority: "classificationSociety",
+    purchaseType: "new",
+    classificationSociety: "Lloyd's Register Classification Society",
+    constructedBy: "2",
+    builder: "builder1",
+    builderName: "ABC Marine Shipyard Pvt Ltd",
+    builderAddress: "456 Port Road, Shipyard Complex, Harbor City 54321",
+    builderEmail: "contact@abcshipyard.com",
+    builderMobile: "9876543211",
+    builderTradeLicence: "BTL789012345",
+    builderGST: "BGST987654321098",
+    builderAuth: "auth",
+    termsAccepted: true,
+    // ...workOrder and drawings files...
+    ...Array.from({ length: 50 }, (_, i) => ({
+      [`workOrder_file_${i + 1}`]: {
+        name: `WorkOrder_${String(i + 1).padStart(2, "0")}.pdf`,
+        size: Math.floor(Math.random() * 2000000) + 500000,
+      },
+      [`workOrder_desc_${i + 1}`]: `Work order document ${i + 1} - ${[
+          "Main contract document",
+          "Amendment and modifications",
+          "Technical specifications",
+          "Timeline and milestones",
+          "Budget breakdown",
+          "Quality requirements",
+          "Safety protocols",
+          "Environmental compliance",
+          "Material specifications",
+          "Equipment details",
+        ][i % 10]
+        }`,
+    })).reduce((acc, curr) => ({ ...acc, ...curr }), {}),
+    ...Array.from({ length: 50 }, (_, i) => ({
+      [`drawings_file_${i + 1}`]: {
+        name: `Drawing_${String(i + 1).padStart(2, "0")}.pdf`,
+        size: Math.floor(Math.random() * 3000000) + 800000,
+      },
+      [`drawings_desc_${i + 1}`]: `Technical drawing ${i + 1} - ${[
+          "General arrangement plan",
+          "Hull structure details",
+          "Machinery layout",
+          "Electrical schematic",
+          "Piping diagram",
+          "Safety equipment layout",
+          "Navigation equipment",
+          "Interior arrangement",
+          "Deck plan",
+          "Cross-section view",
+        ][i % 10]
+        }`,
+    })).reduce((acc, curr) => ({ ...acc, ...curr }), {}),
+    // tonnageBooklets: { name: "Tonnage_Booklets.pdf", size: 512000 },
+    // stabilityBooklets: { name: "Stability_Booklets.pdf", size: 768000 },
+    authLetter: { name: "Authorization_Letter.pdf", size: 256000 },
+  };
+
+  useEffect(() => {
+    if (isNormalMode) {
+      reset();
+    } else if (isEditMode || isViewMode) {
+      setTimeout(() => {
+        Object.keys(staticData).forEach((key) => {
+          setValue(key, staticData[key]);
+        });
+        if (isEditMode) {
+          setOriginalGRT(staticData.grt);
+        }
+      }, 100);
+    }
+  }, [isEditMode, isViewMode, isNormalMode, setValue, reset]);
+
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      if (!ownerDetails || !isNormalMode) return;
+
+      const userInfoFields = {
+        ownerName: ownerDetails.ownerCompanyName || "",
+        ownerAddress: [ownerDetails.addressLine1, ownerDetails.addressLine2]
+          .filter(Boolean)
+          .join(" , "),
+        mobile: ownerDetails.phoneNumber || "",
+        email: ownerDetails.emailId || "",
+        pan: ownerDetails.panNo || "",
+        gst: ownerDetails.gstNo || "",
+        category: ownerDetails.categoryOfOwner || "",
+        aadhar: ownerDetails.aadharNumber || "",
+        tradeLicence: ownerDetails.tradeLicenseNumber || "",
+      };
+
+      Object.entries(userInfoFields).forEach(([key, value]) => {
+        setValue(key, value, { shouldDirty: false, shouldTouch: false });
+      });
+    });
+
+    return () => clearTimeout(timeoutId);
+  }, []);
+
+  const validateDocuments = async () => {
+    if (isViewMode) return true;
+    if (isNormalMode) return true;
+
+    const requiredFields = [];
+    const tonnageBooklets = getValues("tonnageBooklets");
+    const stabilityBooklets = getValues("stabilityBooklets");
+    const termsAccepted = getValues("termsAccepted");
+    const currentGRT = getValues("grt");
+
+    const isFilePresent = (fileObj) =>
+      !!fileObj && (fileObj.name || fileObj.filestoreId);
+
+    if (
+      isEditMode &&
+      originalGRT !== null &&
+      currentGRT !== undefined &&
+      String(currentGRT) !== String(originalGRT)
+    ) {
+      if (!isFilePresent(tonnageBooklets)) {
+        requiredFields.push("tonnageBooklets");
+      }
+      if (!isFilePresent(stabilityBooklets)) {
+        requiredFields.push("stabilityBooklets");
+      }
+    }
+
+    if (!termsAccepted) {
+      requiredFields.push("termsAccepted");
+    }
+
+    let hasErrors = false;
+    requiredFields.forEach((fieldName) => {
+      const fieldValue = getValues(fieldName);
+      if (
+        !fieldValue ||
+        (fieldValue instanceof FileList && fieldValue.length === 0)
+      ) {
+        setError(fieldName, {
+          type: "required",
+          message: `${fieldName} is required`,
+        });
+        hasErrors = true;
+      }
+    });
+
+    return !hasErrors;
+  };
+
+  const handleActionClick = (action) => {
+    setSelectedAction(action);
+    setShowApprovalModal(true);
+  };
+
+  const handleActionSubmit = (formData) => {
+    const payload = {
+      action: selectedAction,
+      comments: formData.comments,
+    };
+
+    console.log("Action submitted:", payload);
+    toast.success(`${selectedAction} action submitted successfully`);
+
+    setShowApprovalModal(false);
+    setSelectedAction("");
+  };
+
+  const handleCloseModal = () => {
+    setShowApprovalModal(false);
+    setSelectedAction("");
+  };
+
+  const handleChallanUpload = (e) => {
+    setChallanFile(e.target.files?.[0] || null);
+  };
+
+  const handleOnlinePay = () => {
+    setIsLoading(true);
+    setShowModal(false);
+
+    setTimeout(() => {
+      setIsLoading(false);
+      navigate("/new-vessel/registration-success", {
+        state: { registrationId: "VR2024001" },
+      });
+    }, 1500);
+  };
+
+  const handleOfflineSubmit = () => {
+    setShowModal(false);
+    setIsLoading(true);
+
+    setTimeout(() => {
+      setIsLoading(false);
+      navigate("/new-vessel/registration-success", {
+        state: { registrationId: "VR2024001" },
+      });
+    }, 1500);
+  };
+
+  const handlePayNow = () => {
+    setShowModal(true);
+  };
+
+  // Validation functions
+  const validateVesselDetails = async () => {
+    if (isViewMode) return true;
+    const basicFields = [
+      "ownerName",
+      "ownerAddress",
+      "mobile",
+      "email",
+      "pan",
+      "aadhar",
+      "tradeLicence",
+      "gst",
+      "grt",
+      "workOrderValue",
+      "vesselType",
+      "category",
+      "purchaseType",
+      "constructedBy",
+    ];
+
+    const constructedBy = getValues("constructedBy");
+    if (constructedBy === "2") {
+      basicFields.push(
+        "builderName",
+        "builderAddress",
+        "builderEmail",
+        "builderMobile",
+        "builderTradeLicence",
+        "builderGST",
+        "builderAuth"
+      );
+
+      const authLetter = getValues("authLetter");
+      if (!authLetter && !isEditMode) {
+        basicFields.push("authLetter");
+      }
+    }
+
+    const valid = await trigger(basicFields);
+    return valid;
+  };
+  const tonnageRequired =
+    isEditMode &&
+    originalGRT !== null &&
+    getValues("grt") !== undefined &&
+    String(getValues("grt")) !== String(originalGRT) &&
+    !getValues("tonnageBooklets");
+
+  const stabilityRequired =
+    isEditMode &&
+    originalGRT !== null &&
+    getValues("grt") !== undefined &&
+    String(getValues("grt")) !== String(originalGRT) &&
+    !getValues("stabilityBooklets");
+  const supervisionAuthority = methods.watch("supervisionAuthority");
+
+  const steps = isViewMode
+    ? [
+      {
+        label: t("Vessel Details"),
+        component: (
+          <VesselDetails
+            formMethods={methods}
+            viewMode={isViewMode}
+            editMode={isEditMode}
+          />
+        ),
+        validate: validateVesselDetails,
+      },
+      {
+        label: t("Documents"),
+        component: (
+          <Documents
+            formMethods={methods}
+            viewMode={isViewMode}
+            editMode={isEditMode}
+            vesselRegisData={vesselRegisData}
+          />
+        ),
+        validate: validateDocuments,
+      },
+      {
+        label: t("Payment Details"),
+        component: (
+          <PaymentDetailsView
+            supervisionAuthority={supervisionAuthority}
+            formData={methods.getValues()}
+            vesselRegisData={vesselRegisData}
+          />
+        ),
+        validate: () => true,
+      },
+    ]
+    : [
+      {
+        label: t("vesselDetails.Vessel Details"),
+        component: (
+          <VesselDetails
+            formMethods={methods}
+            viewMode={isViewMode}
+            editMode={isEditMode}
+          />
+        ),
+        validate: validateVesselDetails,
+        getFormData: () => methods?.getValues(),
+      },
+      {
+        label: t("vesselDetails.Documents"),
+        component: (
+          <Documents
+            formMethods={methods}
+            viewMode={isViewMode}
+            editMode={isEditMode}
+            vesselRegisData={vesselRegisData}
+            tonnageRequired={tonnageRequired}
+            stabilityRequired={stabilityRequired}
+          />
+        ),
+        validate: validateDocuments,
+        getFormData: () => methods?.getValues(),
+      },
+      //  {
+      //   label : t("Preview"),
+      //   component: <VesselRegistrationPreview formData={methods.getValues()} isPreview={true}
+      // />
+      // },
+      {
+        label: t("vesselDetails.Invoicing"),
+        component: (
+          <Invoicing
+            supervisionAuthority={supervisionAuthority}
+            onPayNow={handlePayNow}
+            vesselRegisData={vesselRegisData}
+          />
+        ),
+        validate: () => true,
+      },
+    ];
+
+  const extractDocuments = (formData, isEdit) => {
+    const documents = [];
+
+    // Static documents
+    const staticDocs = [
+      {
+        key: "TONNAGE_BOOKLETS",
+        name: "Tonnage Booklet",
+        description: "Tonnage document",
+      },
+      {
+        key: "STABILITY_BOOKLETS",
+        name: "Stability Booklet",
+        description: "Stability document",
+      },
+    ];
+
+    staticDocs.forEach(({ key, name, description }) => {
+      const fileStoreId = formData?.[`${key}_fileStoreId`];
+      const fileObj = formData?.[`${key}`];
+      if (fileStoreId) {
+        documents.push({
+          id: "", //--- UPDATE
+          fileStoreId,
+          documentName: fileObj.name,
+          documentType: key,
+          documentSource: key,
+          description,
+        });
+      }
+    });
+
+    const dynamicTypes = ["WORK_ORDER", "DRAWINGS"];
+    dynamicTypes.forEach((type) => {
+      Object.keys(formData)
+        .filter((key) => key.startsWith(`${type}_fileStoreId_`))
+        .forEach((storeKey) => {
+          const index = storeKey.split("_").pop();
+          const fileStoreId = formData[storeKey];
+          const description = formData[`${type}_desc_${index}`] || "";
+          const fileObj = formData?.[`${type}_file_${index}`];
+
+          if (fileStoreId) {
+            documents.push({
+              id: "", /// --- UPDATE API CALL
+              fileStoreId,
+              documentName: fileObj.name,
+              documentType: type,
+              documentSource: type,
+              description,
+            });
+          }
+        });
+    });
+
+    return documents;
+  };
+
+  //--- SAVE / UPDATE  API CALLS ------------
+  const onVesselRegisFormSubmit = async (stepInfo) => {
+    const formValues = stepInfo?.getFormData?.() || {};
+    console.log("formValues ", formValues);
+
+    // In edit adding this condition --->for testing --AS
+    if (isEditMode) {
+      stepperRef?.current?.goToNextStep();
+      return;
+    }
+
+    //-- First Step or Second Step
+    if (stepInfo.index === 0 || stepInfo.index === 1) {
+      let request = {
+        id: vesselRegisData?.basicDetails?.id || "", //--- UPDATE
+        applicationNumber: vesselRegisData?.applicationNumber, //--- UPDATE
+        basicDetails: {
+          id: vesselRegisData?.basicDetails?.id || "", //--- UPDATE
+          applicationNumber: vesselRegisData?.applicationNumber || "", //--- UPDATE
+          status: "", //--- UPDATE
+          constructedBy: formValues?.constructedBy,
+          ownerDetails: {
+            id: ownerDetails?.id,
+          },
+          builderDetails: {
+            id: formValues?.builder,
+          },
+          builderAuthorization: formValues?.builderAuth,
+          authorizationLetter: {
+            id: vesselRegisData?.basicDetails?.authorizationLetter?.id || "", //--- UPDATE
+            fileStoreId: formValues?.authLetterFileStoreId,
+            documentName: "Authorization_Letter.pdf",
+            documentType: "AUTHORIZATION_LETTER",
+            documentSource: "AUTHORIZATION_LETTER",
+            descriptions: "",
+          },
+        },
+        vesselDetails: {
+          id: vesselRegisData?.vesselDetails?.id || "", //--- UPDATE
+          typeOfVessel: formValues?.vesselType,
+          categoryOfVessel: formValues?.category,
+          zone: formValues?.zone,
+          grossTonnage: formValues?.grt,
+          workOrderValue: formValues?.workOrderValue,
+          purchaseType: formValues?.purchaseType,
+          supervisionAuthority: formValues?.supervisionAuthority,
+          nameOfMaster: "",
+          certficateNumber: "",
+          nameOfRegistry: "",
+          registrationNumber: "",
+          vesselName: "",
+          kindOfVessel: "",
+          mortgage: "",
+          placeOfBuild: "",
+          insuranceDetails: "",
+          yearOfBuild: null,
+          pniClubNo: "",
+          pniClubName: "",
+          applicationNo: "",
+          nameOfClassificationSociety: formValues?.classificationSociety,
+          iwtVesselBasicDetailsTFk: "",
+          insuranceValidDate: "",
+        },
+      };
+
+      if (stepInfo.index === 1) {
+        request = { ...request, documents: extractDocuments(formValues) };
+      }
+
+      try {
+        loaderRef?.current?.show();
+        const URL =
+          SERVICE_BASE.IWT_REGISTRATION + URLS_ENDPOINT.VESSEL_SERVICE.CREATE;
+
+        const response = await postData(URL, request);
+        const apiRes = { ...response?.data };
+        if (response?.status === 200 && apiRes?.responseStatus) {
+          loaderRef?.current?.hide();
+          setVesselRegisData(apiRes?.data ? { ...apiRes?.data } : "");
+          toast.success(
+            apiRes?.responseStatus?.message ||
+            "Vessel details saved successfully.",
+            { position: "top-right" }
+          );
+
+          setTimeout(() => {
+            stepperRef?.current?.goToNextStep();
+            window.scrollTo(0, 0);
+          }, 1000);
+        } else {
+          loaderRef?.current?.hide();
+          toast.warning(
+            apiRes?.responseStatus?.message || "Something went wrong..",
+            { position: "top-right" }
+          );
+        }
+      } catch (err) {
+        loaderRef?.current?.hide();
+        handleErrorMessage(err?.response?.data);
+      }
+    }
+  };
+
+  const handleSave = () => {
+    setIsLoading(true);
+    setTimeout(() => {
+      setIsLoading(false);
+      navigate("/new-vessel/registration-success", {
+        state: { registrationId: "VR2024001" },
+      });
+    }, 1500);
+  };
+
+  const actionDropdown = isViewMode ? (
+    <ActionDropdown
+      actions={actionsFromAPI}
+      onActionClick={handleActionClick}
+      variant="contained"
+      sx={{
+        backgroundColor: "#2E57A7",
+        fontWeight: "bold",
+        borderRadius: "0.5rem",
+        minWidth: "8rem",
+        fontSize: "0.9rem",
+        color: "#fff",
+        "&:hover": {
+          backgroundColor: "#1f4ea0",
+        },
+      }}
+    />
+  ) : null;
+
+  return (
+    <>
+      <NewLoader ref={loaderRef} />
+
+      <Box
+        sx={{
+          padding: "1rem 0.5rem 0 0.5rem",
+          backgroundColor: "#f5f6fa",
+          minHeight: "100vh",
+        }}
+      >
+        <div className="d-flex flex-column flex-md-row justify-content-between align-items-start align-items-md-center mb-3 gap-2">
+          <div
+            className="d-flex align-items-center flex-grow-1"
+            style={{ gap: "20px" }}
+          >
+            <Button
+              variant="outline-primary"
+              size="sm"
+              onClick={() => navigate("/dashboard")}
+              className="d-flex align-items-center shadow-sm"
+              style={{
+                borderRadius: "8px",
+                // padding: "10px 18px",
+                fontSize: "0.6rem",
+                fontWeight: "200",
+                border: "2px solid #2E57A7",
+                color: "#2E57A7",
+                backgroundColor: "#fff",
+                transition: "all 0.3s ease",
+                minWidth: "auto",
+                whiteSpace: "nowrap",
+              }}
+              onMouseEnter={(e) => {
+                e.target.style.backgroundColor = "#2E57A7";
+                e.target.style.color = "#fff";
+                e.target.style.transform = "translateY(-1px)";
+              }}
+              onMouseLeave={(e) => {
+                e.target.style.backgroundColor = "#fff";
+                e.target.style.color = "#2E57A7";
+                e.target.style.transform = "translateY(0)";
+              }}
+            >
+              <BsArrowLeft className="me-2" size={10} />
+              Back
+            </Button>
+            <Stack spacing={0.5} className="flex-grow-1">
+              <Typography
+                sx={{
+                  fontWeight: 550,
+                  color: "#2E57A7",
+                  fontSize: { xs: "1rem", sm: "1.1rem", md: "1.2rem" },
+                  lineHeight: 1.2,
+                }}
+              >
+                {isViewMode
+                  ? t("View Vessel Registration") + ` - ${id}`
+                  : isEditMode
+                    ? t("Edit Vessel Registration") + ` - ${id}`
+                    : t("vesselDetails.New Vessel Registration")}
+              </Typography>
+              <Typography
+                sx={{
+                  color: "#666",
+                  fontSize: { xs: "0.6rem", sm: "0.65rem" },
+                  lineHeight: 1.3,
+                }}
+              >
+                {isViewMode
+                  ? t("(View vessel registration details)")
+                  : isEditMode
+                    ? t("(Update vessel registration details)")
+                    : t(
+                      "vesselDetails.(Fill in the vessel details to complete registration)"
+                    )}
+              </Typography>
+            </Stack>
+          </div>
+          {/* Note Sheet Button - Only for View Mode */}
+          {/* {isViewMode && (
+                <Button
+                  variant="primary"
+                  className="d-flex align-items-center shadow-sm flex-shrink-0"
+                  style={{
+                    background:
+                      "linear-gradient(135deg, #2466bf 0%, #1a4fa0 100%)",
+                    border: "none",
+                    borderRadius: "8px",
+                    padding: "6px 12px",
+                    fontSize: "0.8rem",
+                    fontWeight: "600",
+                    minWidth: "auto",
+                    whiteSpace: "nowrap",
+                  }}
+                  onClick={() => setShowNoteSheet(true)}
+                >
+                  <BsSticky className="me-1 me-sm-2" size={14} />
+                  <span className="d-none d-sm-inline">{t("Note Sheet")}</span>
+                  <span className="d-sm-none">{t("Notes")}</span>
+                </Button>
+              )} */}
+        </div>
+
+        <Stepper
+          ref={stepperRef}
+          steps={steps}
+          onSave={handleSave}
+          viewMode={isViewMode}
+          actionComponent={actionDropdown}
+          onPayNow={handlePayNow}
+          onSyncData={onVesselRegisFormSubmit}
+        />
+        {/* <NoteSheet
+              show={showNoteSheet}
+              onHide={() => setShowNoteSheet(false)}
+              initialNotes={initialNotes}
+            /> */}
+
+        {!isViewMode && (
+          <PaymentModal
+            show={showModal}
+            onHide={() => setShowModal(false)}
+            paymentMode={paymentMode}
+            setPaymentMode={setPaymentMode}
+            challanFile={challanFile}
+            onChallanUpload={handleChallanUpload}
+            onOnlinePay={handleOnlinePay}
+            onOfflineSubmit={handleOfflineSubmit}
+            isLoading={isLoading}
+            formMethods={methods}
+          />
+        )}
+
+        {isViewMode && (
+          <ApprovalModal
+            show={showApprovalModal}
+            handleClose={handleCloseModal}
+            handleSubmitData={handleActionSubmit}
+            selectedAction={selectedAction}
+          />
+        )}
+      </Box>
+    </>
+  );
+};
+
+export default NewVesselRegistration;
+
+import React, { useState, useEffect, useRef } from "react";
 import { Row, Col, Button, Card } from "react-bootstrap";
 import Collapsible from "../../../common/Collapsible.js";
 import { useTranslation } from "react-i18next";
@@ -48,99 +822,70 @@ const Documents = ({
     }, 0);
   }, [setValue, formData]);
 
-  // Initialize files based on mode and existing form data
+  
   useEffect(() => {
     const initializeFiles = () => {
       const workOrderIds = [];
       const drawingIds = [];
 
-      if (viewMode || editMode) {
-        // For view/edit mode, check existing files in form data
-        for (let i = 1; i <= 50; i++) {
-          const workOrderFile = getValues(`WORK_ORDER_file_${i}`);
-          const drawingFile = getValues(`DRAWINGS_file_${i}`);
+   
+      for (let i = 1; i <= 50; i++) {
+        const workOrderFile = getValues(`WORK_ORDER_file_${i}`);
+        const drawingFile = getValues(`DRAWINGS_file_${i}`);
 
-          if (workOrderFile && (workOrderFile.name || workOrderFile.size)) {
-            workOrderIds.push({ id: i });
-          }
-          if (drawingFile && (drawingFile.name || drawingFile.size)) {
-            drawingIds.push({ id: i });
-          }
+        if (workOrderFile && (workOrderFile.name || workOrderFile.size)) {
+          workOrderIds.push({ id: i });
         }
+        if (drawingFile && (drawingFile.name || drawingFile.size)) {
+          drawingIds.push({ id: i });
+        }
+      }
 
-        // Set the file arrays based on existing data
-        if (workOrderIds.length > 0) {
-          setWorkOrderFiles(workOrderIds);
-        } else if (editMode) {
-          // In edit mode, if no files exist, show empty slots for adding
-          setWorkOrderFiles([{ id: 1 }]);
-        }
-
-        if (drawingIds.length > 0) {
-          setDrawingsFiles(drawingIds);
-        } else if (editMode) {
-          // In edit mode, if no files exist, show empty slots for adding
-          setDrawingsFiles([{ id: 1 }]);
-        }
-      } else {
-        // Normal mode - check for any existing files from navigation
-        for (let i = 1; i <= 50; i++) {
-          const workOrderFile = getValues(`WORK_ORDER_file_${i}`);
-          const drawingFile = getValues(`DRAWINGS_file_${i}`);
-
-          if (workOrderFile && (workOrderFile.name || workOrderFile.size)) {
-            workOrderIds.push({ id: i });
-          }
-          if (drawingFile && (drawingFile.name || drawingFile.size)) {
-            drawingIds.push({ id: i });
-          }
-        }
-
-        if (workOrderIds.length > 0) {
-          setWorkOrderFiles(workOrderIds);
-        }
-        if (drawingIds.length > 0) {
-          setDrawingsFiles(drawingIds);
-        }
+  
+      if (workOrderIds.length > 0) {
+        setWorkOrderFiles(workOrderIds);
+      }
+      if (drawingIds.length > 0) {
+        setDrawingsFiles(drawingIds);
       }
     };
 
+    
     initializeFiles();
-  }, [viewMode, editMode, getValues]);
+  }, [getValues]);
 
-  // Watch for changes in form values to maintain file state (only in normal mode)
+  
   useEffect(() => {
-    if (!viewMode && !editMode) {
-      const subscription = watch((value, { name, type }) => {
-        if (name && name.includes('_file_')) {
-          const fileType = name.includes('WORK_ORDER') ? 'WORK_ORDER' : 'DRAWINGS';
-          const fileId = parseInt(name.split('_').pop());
-          
-          if (type === 'change' && value[name]) {
-            if (fileType === 'WORK_ORDER') {
-              setWorkOrderFiles(prev => {
-                const exists = prev.some(f => f.id === fileId);
-                if (!exists) {
-                  return [...prev, { id: fileId }].sort((a, b) => a.id - b.id);
-                }
-                return prev;
-              });
-            } else if (fileType === 'DRAWINGS') {
-              setDrawingsFiles(prev => {
-                const exists = prev.some(f => f.id === fileId);
-                if (!exists) {
-                  return [...prev, { id: fileId }].sort((a, b) => a.id - b.id);
-                }
-                return prev;
-              });
-            }
+    const subscription = watch((value, { name, type }) => {
+      if (name && name.includes('_file_')) {
+        const fileType = name.includes('WORK_ORDER') ? 'WORK_ORDER' : 'DRAWINGS';
+        const fileId = parseInt(name.split('_').pop());
+        
+        if (type === 'change' && value[name]) {
+         
+          if (fileType === 'WORK_ORDER') {
+            setWorkOrderFiles(prev => {
+              const exists = prev.some(f => f.id === fileId);
+              if (!exists) {
+                return [...prev, { id: fileId }].sort((a, b) => a.id - b.id);
+              }
+              return prev;
+            });
+          } else if (fileType === 'DRAWINGS') {
+            setDrawingsFiles(prev => {
+              const exists = prev.some(f => f.id === fileId);
+              if (!exists) {
+                return [...prev, { id: fileId }].sort((a, b) => a.id - b.id);
+              }
+              return prev;
+            });
           }
         }
-      });
+      }
+    });
 
-      return () => subscription.unsubscribe();
-    }
-  }, [watch, viewMode, editMode]);
+    return () => subscription.unsubscribe();
+  }, [watch]);
 
   const DocumentCard = ({
     fileName,
@@ -397,35 +1142,16 @@ const Documents = ({
                 </div>
               )
             ) : (
-              files.map((fileInput, idx) => {
-                const fileData = watch(`${type}_file_${fileInput.id}`);
-                const hasFile = fileData && (fileData.name || fileData.size);
-                
-                return (
-                  <div key={fileInput.id}>
-                    {editMode && hasFile ? (
-                      // Show existing file in edit mode
-                      <DocumentCard
-                        fileName={fileData.name}
-                        description={watch(`${type}_desc_${fileInput.id}`) || `${title} document ${fileInput.id}`}
-                        fileSize={fileData.size}
-                        onDownload={() => handleDownload(fileData.name)}
-                        onRemove={() => removeFileInput(type, fileInput.id)}
-                        showRemove={true}
-                      />
-                    ) : (
-                      // Show upload card for new files or empty slots
-                      <FileUploadCard
-                        label={`${t("vesselDetails.Choose File")} ${fileInput.id}`}
-                        name={`${type}_file_${fileInput.id}`}
-                        fileIndex={fileInput.id}
-                        onRemove={() => removeFileInput(type, fileInput.id)}
-                        showRemove={files.length > 1}
-                      />
-                    )}
-                  </div>
-                );
-              })
+              files.map((fileInput, idx) => (
+                <FileUploadCard
+                  key={fileInput.id}
+                  label={`${t("vesselDetails.Choose File")} ${fileInput.id}`}
+                  name={`${type}_file_${fileInput.id}`}
+                  fileIndex={fileInput.id}
+                  onRemove={() => removeFileInput(type, fileInput.id)}
+                  showRemove={files.length > 1}
+                />
+              ))
             )}
           </div>
         </Card.Body>
@@ -515,13 +1241,13 @@ const Documents = ({
       setDrawingsFiles(prev => prev.filter((file) => file.id !== id));
     }
 
-    // Clean up form values
+    
     unregister(`${type}_file_${id}`);
     unregister(`${type}_desc_${id}`);
     unregister(`${type}_fileStoreId_${id}`);
     clearErrors([`${type}_file_${id}`, `${type}_desc_${id}`]);
     
-    // Clear values
+   
     setValue(`${type}_file_${id}`, null);
     setValue(`${type}_desc_${id}`, "");
     setValue(`${type}_fileStoreId_${id}`, null);
@@ -677,6 +1403,10 @@ const Documents = ({
                             file.originalName = fileName;
                             const renamedFile = renameFile(file, fileName);
                             uploadFile(file, "TONNAGE_BOOKLETS", renamedFile, 'TONNAGE_BOOKLETS');
+                              // clearErrors("TONNAGE_BOOKLETS");
+                            // setValue("TONNAGE_BOOKLETS", renamedFile, {
+                            //   shouldValidate: true,
+                            // });
                           }
                         }}
                         watch={watch}
@@ -754,6 +1484,10 @@ const Documents = ({
                             const fileName = `Stability Booklets${extension}`;
                             file.originalName = fileName;
                             const renamedFile = renameFile(file, fileName);
+                            // clearErrors("STABILITY_BOOKLETS");
+                            // setValue("STABILITY_BOOKLETS", renamedFile, {
+                            //   shouldValidate: true,
+                            // });
                             uploadFile(file, "STABILITY_BOOKLETS", renamedFile, 'STABILITY_BOOKLETS');
                           }
                         }}
@@ -834,3 +1568,5 @@ const Documents = ({
 };
 
 export default Documents;
+
+
