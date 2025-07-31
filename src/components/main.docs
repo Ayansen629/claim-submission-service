@@ -1,181 +1,1884 @@
-import React, { useState, useEffect } from "react";
-import { Button, Card } from "react-bootstrap";
-import { BsPlus } from "react-icons/bs";
+import React, { useState, useEffect, useRef } from "react";
+import { Box, Typography, Stack } from "@mui/material";
+import { useParams, useLocation, useNavigate } from "react-router-dom";
+import Stepper from "../../../../common/Stepper.jsx";
+import { useForm } from "react-hook-form";
+import Invoicing from "../../../../common/Invoicing.js";
+import PaymentModal from "../../../../common/PaymentModal.js";
+import ActionDropdown from "../../../../common/ActionDropdown";
+import ApprovalModal from "../../../../common/ApprovalModal";
 import { useTranslation } from "react-i18next";
+import { useLanguageContext } from "../../../../common/LanguageContext.js";
 import { toast } from "react-toastify";
-import ActionTable from "../../../../../common/ActionTable.tsx";
-import FileReportsUploadModal from "../../../../../common/FileReportsUploadModal.jsx";
-import Collapsible from "../../../../../common/Collapsible.js";
-import { postData } from "../../services/http.service.ts";
-import { SERVICE_BASE, URLS_ENDPOINT } from "../../utils/urlsConstants.ts";
+import PaymentDetailsView from "../paymentDetailsView";
+import { getFromLocalStorage } from "../../../../../utils/localStorageUtils.js";
+import { handleErrorMessage } from "../../../../../utils/errorMessageHandler.js";
+import { postFORMdata } from "../../../../../services/http.service.ts";
+import {
+  SERVICE_BASE,
+  URLS_ENDPOINT,
+} from "../../../../../utils/urlsConstants.ts";
+import VesselBasicDetailsView from "./VesselBasicDetailsView.js";
+import ReportsDashboard from "./reports/reportsDashboard.js";
+// import VesselRegistrationPreview from "./VesselRegistrationPreview.js";
 
-const ReportsDashboard = () => {
+const VesselReportsAndDocs = () => {
   const { t } = useTranslation();
-  const [showFileModal, setShowFileModal] = useState(false);
-  const [currentReportType, setCurrentReportType] = useState("");
-  const [reports, setReports] = useState({
-    materialTest: [],
-    radiography: [],
-    inspection: [],
-    other: [],
-  });
-  const [loading, setLoading] = useState(false);
+  const { changeLanguage } = useLanguageContext();
+  const { id } = useParams();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const ownerDetails = getFromLocalStorage("ownerDetails")
+    ? JSON.parse(getFromLocalStorage("ownerDetails"))
+    : "";
+  const isEditMode = !!id && location.pathname.includes("/edit/");
+  const isViewMode = !!id && location.pathname.includes("/view/");
+  const isNormalMode = !isEditMode && !isViewMode;
+  const stepperRef = useRef();
 
-  const REPORT_COLUMNS = [
+  const methods = useForm({ mode: "onTouched" });
+  const { trigger, getValues, setError, setValue, reset } = methods;
+
+  const [showModal, setShowModal] = useState(false);
+  const [paymentMode, setPaymentMode] = useState("offline");
+  const [challanFile, setChallanFile] = useState(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [showApprovalModal, setShowApprovalModal] = useState(false);
+  const [selectedAction, setSelectedAction] = useState("");
+  const [showNoteSheet, setShowNoteSheet] = useState(false);
+
+  const actionsFromAPI = ["Approve", "Reject", "Request Changes"];
+
+  const staticData = {
+    ownerName: "John Doe",
+    ownerAddress: "123 Main Street, Harbor City, State 12345",
+    mobile: "9876543210",
+    email: "john.doe@example.com",
+    pan: "ABCDE1234F",
+    aadhar: "123456789012",
+    tradeLicence: "TL123456789",
+    gst: "GST123456789012",
+    grt: "500",
+    workOrderValue: "1000000",
+    vesselType: "new",
+    category: "A",
+    zone: "1",
+    supervisionAuthority: "classificationSociety",
+    purchaseType: "new",
+    classificationSociety: "Lloyd's Register Classification Society",
+    constructedBy: "2",
+    builder: "builder1",
+    builderName: "ABC Marine Shipyard Pvt Ltd",
+    builderAddress: "456 Port Road, Shipyard Complex, Harbor City 54321",
+    builderEmail: "contact@abcshipyard.com",
+    builderMobile: "9876543211",
+    builderTradeLicence: "BTL789012345",
+    builderGST: "BGST987654321098",
+    builderAuth: "auth",
+    termsAccepted: true,
+
+    // Work Order Files (50 files)
+    ...Array.from({ length: 50 }, (_, i) => ({
+      [`workOrder_file_${i + 1}`]: {
+        name: `WorkOrder_${String(i + 1).padStart(2, "0")}.pdf`,
+        size: Math.floor(Math.random() * 2000000) + 500000,
+      },
+      [`workOrder_desc_${i + 1}`]: `Work order document ${i + 1} - ${
+        [
+          "Main contract document",
+          "Amendment and modifications",
+          "Technical specifications",
+          "Timeline and milestones",
+          "Budget breakdown",
+          "Quality requirements",
+          "Safety protocols",
+          "Environmental compliance",
+          "Material specifications",
+          "Equipment details",
+        ][i % 10]
+      }`,
+    })).reduce((acc, curr) => ({ ...acc, ...curr }), {}),
+
+    // Drawing Files (50 files)
+    ...Array.from({ length: 50 }, (_, i) => ({
+      [`drawings_file_${i + 1}`]: {
+        name: `Drawing_${String(i + 1).padStart(2, "0")}.pdf`,
+        size: Math.floor(Math.random() * 3000000) + 800000,
+      },
+      [`drawings_desc_${i + 1}`]: `Technical drawing ${i + 1} - ${
+        [
+          "General arrangement plan",
+          "Hull structure details",
+          "Machinery layout",
+          "Electrical schematic",
+          "Piping diagram",
+          "Safety equipment layout",
+          "Navigation equipment",
+          "Interior arrangement",
+          "Deck plan",
+          "Cross-section view",
+        ][i % 10]
+      }`,
+    })).reduce((acc, curr) => ({ ...acc, ...curr }), {}),
+
+    tonnageBooklets: { name: "Tonnage_Booklets.pdf", size: 512000 },
+    stabilityBooklets: { name: "Stability_Booklets.pdf", size: 768000 },
+    authLetter: { name: "Authorization_Letter.pdf", size: 256000 },
+  };
+
+  const handleActionClick = (action) => {
+    setSelectedAction(action);
+    setShowApprovalModal(true);
+  };
+
+  const handleActionSubmit = (formData) => {
+    const payload = {
+      action: selectedAction,
+      comments: formData.comments,
+    };
+
+    console.log("Action submitted:", payload);
+    toast.success(`${selectedAction} action submitted successfully`);
+
+    setShowApprovalModal(false);
+    setSelectedAction("");
+  };
+
+  const handleCloseModal = () => {
+    setShowApprovalModal(false);
+    setSelectedAction("");
+  };
+
+  const handleChallanUpload = (e) => {
+    setChallanFile(e.target.files?.[0] || null);
+  };
+
+  const handleOnlinePay = () => {
+    setIsLoading(true);
+    setShowModal(false);
+
+    setTimeout(() => {
+      setIsLoading(false);
+      navigate("/new-vessel/registration-success", {
+        state: { registrationId: "VR2024001" },
+      });
+    }, 1500);
+  };
+
+  const handleOfflineSubmit = () => {
+    setShowModal(false);
+    setIsLoading(true);
+
+    setTimeout(() => {
+      setIsLoading(false);
+      navigate("/new-vessel/registration-success", {
+        state: { registrationId: "VR2024001" },
+      });
+    }, 1500);
+  };
+
+  const handlePayNow = () => {
+    setShowModal(true);
+  };
+
+  // Validation functions
+  const validateVesselDetails = async () => {
+    if (isViewMode) return true;
+    const basicFields = [
+      "ownerName",
+      "ownerAddress",
+      "mobile",
+      "email",
+      "pan",
+      "aadhar",
+      "tradeLicence",
+      "gst",
+      "grt",
+      "workOrderValue",
+      "vesselType",
+      "category",
+      "purchaseType",
+      "constructedBy",
+    ];
+
+    const constructedBy = getValues("constructedBy");
+    if (constructedBy === "2") {
+      basicFields.push(
+        "builderName",
+        "builderAddress",
+        "builderEmail",
+        "builderMobile",
+        "builderTradeLicence",
+        "builderGST",
+        "builderAuth"
+      );
+
+      const authLetter = getValues("authLetter");
+      if (!authLetter && !isEditMode) {
+        basicFields.push("authLetter");
+      }
+    }
+
+    const valid = await trigger(basicFields);
+    return valid;
+  };
+
+  const steps = [
     {
-      colName: t("Add Attachment"),
-      fieldName: "fileName",
-      clsName: "column-text-start",
+      label: "Basic Details",
+      component: (
+        <VesselBasicDetailsView formMethods={methods} isPreview={true} />
+      ),
+      getFormData: () => methods?.getValues(),
+      goToNextStepNoValidtion: true,
     },
     {
-      colName: t("Description"),
-      fieldName: "description",
-      clsName: "column-text-start",
-    },
-    {
-      colName: t("Action"),
-      fieldName: "action",
-      actions: [ 'delete', 'download'],
-      clsName: "col-sm-2 column-text-start actions-column",
+      label: "Reports & Documents",
+      component: (
+        <ReportsDashboard
+          formMethods={methods}
+          viewMode={isViewMode}
+          editMode={isEditMode}
+        />
+      ),
+      getFormData: () => methods?.getValues(),
+      goToNextStepNoValidtion: true,
     },
   ];
 
-  const fetchReports = async () => {
-    setLoading(true);
-    try {
-      const payload = {};
-      
-      const searchApiUrl = SERVICE_BASE.IWT_REGISTRATION + URLS_ENDPOINT.USER_SERVICE.REPORT_SEARCH;
-      const response = await postData(searchApiUrl, payload);
-      
-      if (response?.status === 200 && response?.data?.responseStatus?.status === "Document(s) fetched successfully.") {
-        const fetchedReports = response.data.data || [];
-        
-        const categorizedReports = {
-          materialTest: [],
-          radiography: [],
-          inspection: [],
-          other: [],
-        };
-        
-        fetchedReports.forEach(report => {
-          const reportData = {
-            id: report.id,
-            fileName: report.documentName,
-            description: report.description || t("No description"),
-            remarks: t("Active"),
-          };
-          
-          switch (report.documentType) {
-            case "MATERIAL_TEST_REPORT":
-              categorizedReports.materialTest.push(reportData);
-              break;
-            case "RADIOGRAPHY_REPORT":
-              categorizedReports.radiography.push(reportData);
-              break;
-            case "INSPECTION_REPORT":
-              categorizedReports.inspection.push(reportData);
-              break;
-            case "OTHER_REPORT":
-              categorizedReports.other.push(reportData);
-              break;
-          }
-        });
-        
-        setReports(categorizedReports);
-      }
-    } catch (err) {
-      console.error("Failed to fetch reports:", err);
-      toast.error("Failed to fetch reports");
-    } finally {
-      setLoading(false);
-    }
+  //--- SAVE API CALLS ------------
+  const handleFormSubmit = async (stepInfo) => {
+    console.log("Current Step Info from Stepper:", stepInfo);
   };
 
-  useEffect(() => {
-    fetchReports();
-  }, []);
-
-  const handleAddReport = (reportType) => {
-    setCurrentReportType(reportType);
-    setShowFileModal(true);
-  };
-
-  const handleFileUpload = (uploadedReport) => {
-    if (uploadedReport) {
-      fetchReports();
-    }
-  };
-
-  const handleViewReport = (rowData, reportType) => {
-    console.log("View report:", rowData, reportType);
-    alert(t("Viewing report") + `: ${rowData.fileName}`);
-  };
-
-  const handleDeleteReport = (rowData, reportType) => {
-    if (window.confirm(t("Are you sure you want to delete this report?"))) {
-      setReports(prev => ({
-        ...prev,
-        [reportType]: prev[reportType].filter(report => report.id !== rowData.id)
-      }));
-    }
-  };
-
-  const handleDownloadReport = (rowData, reportType) => {
-    console.log("Download report:", rowData, reportType);
-    alert(t("Downloading report") + `: ${rowData.fileName}`);
-  };
-
-  const renderReportTable = (reportType, reportData, title) => {
-    return (
-      <Collapsible title={title} openStat={true}>
-        <div style={{ padding: "1rem" }}>
-          <div className="d-flex justify-content-end mb-3">
-            <Button
-              variant="primary"
-              size="sm"
-              onClick={() => handleAddReport(reportType)}
-            >
-              <BsPlus size={20} /> {t("Add")}
-            </Button>
-          </div>
-
-          <ActionTable
-            columns={REPORT_COLUMNS}
-            rowData={reportData}
-            tableHeader={null}
-            hideExportBtn={true}
-            hideSearchBar={true}
-            pagination={false}
-            onViewRow={(rowData) => handleViewReport(rowData, reportType)}
-            onDeleteRow={(rowData) => handleDeleteReport(rowData, reportType)}
-            download={(rowData) => handleDownloadReport(rowData, reportType)}
-            noDataText={t("No reports available")}
-          />
-        </div>
-      </Collapsible>
-    );
-  };
+  const actionDropdown = isViewMode ? (
+    <ActionDropdown
+      actions={actionsFromAPI}
+      onActionClick={handleActionClick}
+      variant="contained"
+      sx={{
+        backgroundColor: "#2E57A7",
+        fontWeight: "bold",
+        borderRadius: "0.5rem",
+        minWidth: "8rem",
+        fontSize: "0.9rem",
+        color: "#fff",
+        "&:hover": {
+          backgroundColor: "#1f4ea0",
+        },
+      }}
+    />
+  ) : null;
 
   return (
-    <Card className="mt-4">
-      <Card.Body style={{ padding: 0 }}>
-        <div className="reports-section">
-          {renderReportTable("materialTest", reports.materialTest, t("Material Test Report"))}
-          {renderReportTable("radiography", reports.radiography, t("Radiography Report"))}
-          {renderReportTable("inspection", reports.inspection, t("Inspection Report"))}
-          {renderReportTable("other", reports.other, t("Other Report"))}
-        </div>
-      </Card.Body>
+    <>
+      <Box
+        sx={{
+          padding: "1rem 0.5rem 0 0.5rem",
+          backgroundColor: "#f5f6fa",
+          minHeight: "100vh",
+        }}
+      >
+        {isLoading ? (
+          <div
+            className="d-flex justify-content-center align-items-center"
+            style={{ height: "80vh" }}
+          >
+            <div className="text-center">
+              <div
+                className="spinner-border text-primary"
+                role="status"
+                style={{ width: "3rem", height: "3rem" }}
+              >
+                <span className="visually-hidden">Loading...</span>
+              </div>
+              <p className="mt-3">Processing your request...</p>
+            </div>
+          </div>
+        ) : (
+          <>
+            <Stepper
+              ref={stepperRef}
+              steps={steps}
+              viewMode={true}
+              actionComponent={actionDropdown}
+              onPayNow={handlePayNow}
+              onSyncData={handleFormSubmit}
+            />
 
-      <FileReportsUploadModal
-        show={showFileModal}
-        onHide={() => setShowFileModal(false)}
-        reportType={currentReportType}
-        onSubmit={handleFileUpload}
-      />
-    </Card>
+            {isViewMode && (
+              <ApprovalModal
+                show={showApprovalModal}
+                handleClose={handleCloseModal}
+                handleSubmitData={handleActionSubmit}
+                selectedAction={selectedAction}
+              />
+            )}
+          </>
+        )}
+      </Box>
+    </>
   );
 };
 
-export default ReportsDashboard;
+export default VesselReportsAndDocs;
+import React from "react";
+import { Box, Typography, Stack } from "@mui/material";
+import { useTranslation } from "react-i18next";
+import { BsFileEarmarkPdf, BsDownload } from "react-icons/bs";
+import { Card, Row, Col, Table, Button } from "react-bootstrap";
+import Collapsible from "../../../../common/Collapsible.js";
+
+const VesselBasicDetailsView = ({ formData, isPreview = true }) => {
+  const { t } = useTranslation();
+
+  const previewData = {
+    ownerDetails: {
+      ownerName: formData?.ownerName || "John Doe",
+      ownerAddress:
+        formData?.ownerAddress || "123 Main Street, Harbor City, State 12345",
+      mobile: formData?.mobile || "9876543210",
+      email: formData?.email || "john.doe@example.com",
+      pan: formData?.pan || "ABCDE1234F",
+      aadhar: formData?.aadhar || "123456789012",
+      tradeLicence: formData?.tradeLicence || "TL123456789",
+      gst: formData?.gst || "GST123456789012",
+    },
+    vesselDetails: {
+      grt: formData?.grt || "500",
+      workOrderValue: formData?.workOrderValue || "1000000",
+      vesselType:
+        formData?.vesselType === "new" ? t("New Vessel") : t("Old Vessel"),
+      category: formData?.category
+        ? `${t("Category")} ${formData.category}`
+        : t("Category A"),
+      zone: formData?.zone ? `${t("Zone")} ${formData.zone}` : t("Zone 1"),
+      supervisionAuthority:
+        formData?.supervisionAuthority === "iwt"
+          ? t("IWT")
+          : t("Classification Society"),
+      purchaseType: formData?.purchaseType === "new" ? t("New") : t("Used"),
+      classificationSociety:
+        formData?.classificationSociety ||
+        "Lloyd's Register Classification Society",
+      constructedBy: formData?.constructedBy === "1" ? t("Self") : t("Builder"),
+    },
+    builderDetails: {
+      builderName: formData?.builderName || "ABC Marine Shipyard Pvt Ltd",
+      builderAddress:
+        formData?.builderAddress ||
+        "456 Port Road, Shipyard Complex, Harbor City 54321",
+      builderEmail: formData?.builderEmail || "contact@abcshipyard.com",
+      builderMobile: formData?.builderMobile || "9876543211",
+      builderTradeLicence: formData?.builderTradeLicence || "BTL789012345",
+      builderGST: formData?.builderGST || "BGST987654321098",
+      builderAuth:
+        formData?.builderAuth === "auth" ? t("Authorized") : t("Rejected"),
+    },
+    documents: {
+      workOrderFiles: getWorkOrderFiles(formData),
+      drawingFiles: getDrawingFiles(formData),
+      tonnageBooklets: formData?.tonnageBooklets
+        ? {
+            name: formData.tonnageBooklets.name,
+            size: `${(formData.tonnageBooklets.size / 1024 / 1024).toFixed(
+              1
+            )} MB`,
+          }
+        : { name: "Tonnage_Booklets.pdf", size: "0.5 MB" },
+      stabilityBooklets: formData?.stabilityBooklets
+        ? {
+            name: formData.stabilityBooklets.name,
+            size: `${(formData.stabilityBooklets.size / 1024 / 1024).toFixed(
+              1
+            )} MB`,
+          }
+        : { name: "Stability_Booklets.pdf", size: "0.7 MB" },
+      authLetter: formData?.authLetter
+        ? {
+            name: formData.authLetter.name,
+            size: `${(formData.authLetter.size / 1024 / 1024).toFixed(1)} MB`,
+          }
+        : { name: "Authorization_Letter.pdf", size: "0.3 MB" },
+    },
+    paymentDetails: {
+      supervisionAuthority:
+        formData?.supervisionAuthority === "iwt"
+          ? t("IWT")
+          : t("Classification Society"),
+      paymentMode: t("Offline"),
+      challanFile: "Payment_Challan.pdf",
+      amount: "Rs. 590/-",
+      status: t("Pending"),
+    },
+  };
+
+  function getWorkOrderFiles(formData) {
+    const files = [];
+    for (let i = 1; i <= 50; i++) {
+      const file = formData?.[`workOrder_file_${i}`];
+      const desc = formData?.[`workOrder_desc_${i}`];
+      if (file && file.name) {
+        files.push({
+          name: file.name,
+          description: desc || `Work order document ${i}`,
+          size: `${(file.size / 1024 / 1024).toFixed(1)} MB`,
+        });
+      }
+    }
+    return files.length > 0
+      ? files
+      : [
+          {
+            name: "Work_Order_Document_01.pdf",
+            description: "Main contract document",
+            size: "1.2 MB",
+          },
+          {
+            name: "Work_Order_Document_02.pdf",
+            description: "Amendment and modifications",
+            size: "0.8 MB",
+          },
+        ];
+  }
+
+  function getDrawingFiles(formData) {
+    const files = [];
+    for (let i = 1; i <= 50; i++) {
+      const file = formData?.[`drawings_file_${i}`];
+      const desc = formData?.[`drawings_desc_${i}`];
+      if (file && file.name) {
+        files.push({
+          name: file.name,
+          description: desc || `Drawing document ${i}`,
+          size: `${(file.size / 1024 / 1024).toFixed(1)} MB`,
+        });
+      }
+    }
+    return files.length > 0
+      ? files
+      : [
+          {
+            name: "Technical_Drawing_01.pdf",
+            description: "General arrangement plan",
+            size: "2.1 MB",
+          },
+          {
+            name: "Technical_Drawing_02.pdf",
+            description: "Hull structure details",
+            size: "1.5 MB",
+          },
+        ];
+  }
+
+  const handleDownload = (fileName) => {
+    const link = document.createElement("a");
+    link.href = "#";
+    link.download = fileName;
+    link.click();
+  };
+
+  const DocumentCard = ({ fileName, description, fileSize }) => (
+    <Card className="mb-2 border-0 shadow-sm">
+      <Card.Body className="p-3">
+        <div className="d-flex justify-content-between align-items-center">
+          <div className="d-flex align-items-center flex-grow-1">
+            <div className="bg-danger bg-opacity-10 rounded-circle p-2 me-3">
+              <BsFileEarmarkPdf className="text-danger" size={16} />
+            </div>
+            <div className="flex-grow-1">
+              <h6
+                className="mb-1 text-primary fw-semibold"
+                style={{ fontSize: "0.75rem" }}
+              >
+                {fileName}
+              </h6>
+              <p className="mb-0 text-muted" style={{ fontSize: "0.7rem" }}>
+                {description}
+                <span
+                  className="ms-2 badge bg-light text-dark"
+                  style={{ fontSize: "0.65rem" }}
+                >
+                  {fileSize}
+                </span>
+              </p>
+            </div>
+          </div>
+          <Button
+            variant="outline-primary"
+            size="sm"
+            onClick={() => handleDownload(fileName)}
+            className="rounded-pill"
+            style={{ padding: "4px 8px" }}
+          >
+            <BsDownload size={12} />
+          </Button>
+        </div>
+      </Card.Body>
+    </Card>
+  );
+
+  return (
+    // <Box sx={{ padding: "1rem 0 0 0.75rem", backgroundColor: "#f5f6fa", minHeight: "100vh" }}>
+    //   <Stack spacing={0.5}>
+    //     <Typography
+    //       sx={{
+    //         fontWeight: 550,
+    //         color: "#2E57A7",
+    //         fontSize: "1.2rem",
+    //       }}
+    //     >
+    //       {t("Vessel Registration Preview")}
+    //       &nbsp;
+    //       <span style={{ color: "#666", fontSize: "0.65rem" }}>
+    //         {t("(Review all vessel registration details before submission)")}
+    //       </span>
+    //     </Typography>
+    //   </Stack>
+
+    // <div className="container py-4">
+    <>
+      {/* Owner Details Section */}
+      <Collapsible title={t("Owner Details")} openStat={true}>
+        <div style={{ padding: "1rem" }}>
+          <Row>
+            <Col md={4}>
+              <div className="mb-3">
+                <label className="form-label fw-semibold">
+                  {t("Name of Owner")}
+                </label>
+                <div className="form-control bg-light">
+                  {previewData.ownerDetails.ownerName}
+                </div>
+              </div>
+            </Col>
+            <Col md={4}>
+              <div className="mb-3">
+                <label className="form-label fw-semibold">
+                  {t("Address of Owner")}
+                </label>
+                <div className="form-control bg-light">
+                  {previewData.ownerDetails.ownerAddress}
+                </div>
+              </div>
+            </Col>
+            <Col md={4}>
+              <div className="mb-3">
+                <label className="form-label fw-semibold">{t("Mobile")}</label>
+                <div className="form-control bg-light">
+                  {previewData.ownerDetails.mobile}
+                </div>
+              </div>
+            </Col>
+            <Col md={4}>
+              <div className="mb-3">
+                <label className="form-label fw-semibold">
+                  {t("Email Id")}
+                </label>
+                <div className="form-control bg-light">
+                  {previewData.ownerDetails.email}
+                </div>
+              </div>
+            </Col>
+            <Col md={4}>
+              <div className="mb-3">
+                <label className="form-label fw-semibold">{t("PAN")}</label>
+                <div className="form-control bg-light">
+                  {previewData.ownerDetails.pan}
+                </div>
+              </div>
+            </Col>
+            <Col md={4}>
+              <div className="mb-3">
+                <label className="form-label fw-semibold">{t("Aadhar")}</label>
+                <div className="form-control bg-light">
+                  {previewData.ownerDetails.aadhar}
+                </div>
+              </div>
+            </Col>
+            <Col md={4}>
+              <div className="mb-3">
+                <label className="form-label fw-semibold">
+                  {t("Trade Licence")}
+                </label>
+                <div className="form-control bg-light">
+                  {previewData.ownerDetails.tradeLicence}
+                </div>
+              </div>
+            </Col>
+            <Col md={4}>
+              <div className="mb-3">
+                <label className="form-label fw-semibold">{t("GST")}</label>
+                <div className="form-control bg-light">
+                  {previewData.ownerDetails.gst}
+                </div>
+              </div>
+            </Col>
+          </Row>
+        </div>
+      </Collapsible>
+
+      {/* Vessel Details Section */}
+      <Collapsible title={t("Vessel Details")} openStat={true}>
+        <div style={{ padding: "1rem" }}>
+          <Row>
+            <Col md={4}>
+              <div className="mb-3">
+                <label className="form-label fw-semibold">
+                  {t("Gross Tonnage (GRT)")}
+                </label>
+                <div className="form-control bg-light">
+                  {previewData.vesselDetails.grt}
+                </div>
+              </div>
+            </Col>
+            <Col md={4}>
+              <div className="mb-3">
+                <label className="form-label fw-semibold">
+                  {t("Work Order Value")}
+                </label>
+                <div className="form-control bg-light">
+                  Rs. {previewData.vesselDetails.workOrderValue}/-
+                </div>
+              </div>
+            </Col>
+            <Col md={4}>
+              <div className="mb-3">
+                <label className="form-label fw-semibold">
+                  {t("Type of Vessel")}
+                </label>
+                <div className="form-control bg-light">
+                  {previewData.vesselDetails.vesselType}
+                </div>
+              </div>
+            </Col>
+            <Col md={4}>
+              <div className="mb-3">
+                <label className="form-label fw-semibold">
+                  {t("Category")}
+                </label>
+                <div className="form-control bg-light">
+                  {previewData.vesselDetails.category}
+                </div>
+              </div>
+            </Col>
+            <Col md={4}>
+              <div className="mb-3">
+                <label className="form-label fw-semibold">{t("Zone")}</label>
+                <div className="form-control bg-light">
+                  {previewData.vesselDetails.zone}
+                </div>
+              </div>
+            </Col>
+            <Col md={4}>
+              <div className="mb-3">
+                <label className="form-label fw-semibold">
+                  {t("Supervision Authority")}
+                </label>
+                <div className="form-control bg-light">
+                  {previewData.vesselDetails.supervisionAuthority}
+                </div>
+              </div>
+            </Col>
+            <Col md={4}>
+              <div className="mb-3">
+                <label className="form-label fw-semibold">
+                  {t("Purchase Type")}
+                </label>
+                <div className="form-control bg-light">
+                  {previewData.vesselDetails.purchaseType}
+                </div>
+              </div>
+            </Col>
+            <Col md={8}>
+              <div className="mb-3">
+                <label className="form-label fw-semibold">
+                  {t("Name of the Classification Society")}
+                </label>
+                <div className="form-control bg-light">
+                  {previewData.vesselDetails.classificationSociety}
+                </div>
+              </div>
+            </Col>
+            <Col md={4}>
+              <div className="mb-3">
+                <label className="form-label fw-semibold">
+                  {t("Constructed By")}
+                </label>
+                <div className="form-control bg-light">
+                  {previewData.vesselDetails.constructedBy}
+                </div>
+              </div>
+            </Col>
+          </Row>
+        </div>
+      </Collapsible>
+
+      {/* Builder Details Section */}
+      {(formData?.constructedBy === "2" || !formData) && (
+        <Collapsible title={t("Builder Details")} openStat={true}>
+          <div style={{ padding: "1rem" }}>
+            <Row>
+              <Col md={4}>
+                <div className="mb-3">
+                  <label className="form-label fw-semibold">
+                    {t("Builder Name")}
+                  </label>
+                  <div className="form-control bg-light">
+                    {previewData.builderDetails.builderName}
+                  </div>
+                </div>
+              </Col>
+              <Col md={4}>
+                <div className="mb-3">
+                  <label className="form-label fw-semibold">
+                    {t("Builder Address")}
+                  </label>
+                  <div className="form-control bg-light">
+                    {previewData.builderDetails.builderAddress}
+                  </div>
+                </div>
+              </Col>
+              <Col md={4}>
+                <div className="mb-3">
+                  <label className="form-label fw-semibold">
+                    {t("Builder Email Id")}
+                  </label>
+                  <div className="form-control bg-light">
+                    {previewData.builderDetails.builderEmail}
+                  </div>
+                </div>
+              </Col>
+              <Col md={4}>
+                <div className="mb-3">
+                  <label className="form-label fw-semibold">
+                    {t("Mobile")}
+                  </label>
+                  <div className="form-control bg-light">
+                    {previewData.builderDetails.builderMobile}
+                  </div>
+                </div>
+              </Col>
+              <Col md={4}>
+                <div className="mb-3">
+                  <label className="form-label fw-semibold">
+                    {t("Trade Licence")}
+                  </label>
+                  <div className="form-control bg-light">
+                    {previewData.builderDetails.builderTradeLicence}
+                  </div>
+                </div>
+              </Col>
+              <Col md={4}>
+                <div className="mb-3">
+                  <label className="form-label fw-semibold">{t("GST")}</label>
+                  <div className="form-control bg-light">
+                    {previewData.builderDetails.builderGST}
+                  </div>
+                </div>
+              </Col>
+              <Col md={4}>
+                <div className="mb-3">
+                  <label className="form-label fw-semibold">
+                    {t("Builder Authorization")}
+                  </label>
+                  <div className="form-control bg-light">
+                    {previewData.builderDetails.builderAuth}
+                  </div>
+                </div>
+              </Col>
+              <Col md={8}>
+                <div className="mb-3">
+                  <label className="form-label fw-semibold">
+                    {t("Authorization Letter")}
+                  </label>
+                  <DocumentCard
+                    fileName={previewData.documents.authLetter.name}
+                    description="Builder authorization document"
+                    fileSize={previewData.documents.authLetter.size}
+                  />
+                </div>
+              </Col>
+            </Row>
+          </div>
+        </Collapsible>
+      )}
+
+      {/* Documents Section */}
+      <Collapsible
+        title={t("Documents")}
+        openStat={true}
+        titleStyle={{ fontSize: "1.4rem", fontWeight: "700" }}
+      >
+        <div style={{ padding: "1rem" }}>
+          <Row className="g-4">
+            <Col lg={6} md={12}>
+              <Card className="h-100 shadow-sm border-0">
+                <Card.Header className="bg-light border-0 py-3">
+                  <h5
+                    className="mb-0 text-primary fw-bold d-flex align-items-center"
+                    style={{ fontSize: "0.8rem" }}
+                  >
+                    <BsFileEarmarkPdf className="text-primary me-2" size={16} />
+                    {t("Work Order")} (
+                    {previewData.documents.workOrderFiles.length})
+                  </h5>
+                </Card.Header>
+                <Card.Body
+                  className="p-3"
+                  style={{ maxHeight: "400px", overflowY: "auto" }}
+                >
+                  {previewData.documents.workOrderFiles.map((file, index) => (
+                    <DocumentCard
+                      key={index}
+                      fileName={file.name}
+                      description={file.description}
+                      fileSize={file.size}
+                    />
+                  ))}
+                </Card.Body>
+              </Card>
+            </Col>
+
+            <Col lg={6} md={12}>
+              <Card className="h-100 shadow-sm border-0">
+                <Card.Header className="bg-light border-0 py-3">
+                  <h5
+                    className="mb-0 text-primary fw-bold d-flex align-items-center"
+                    style={{ fontSize: "0.8rem" }}
+                  >
+                    <BsFileEarmarkPdf className="text-success me-2" size={16} />
+                    {t("Drawings")} ({previewData.documents.drawingFiles.length}
+                    )
+                  </h5>
+                </Card.Header>
+                <Card.Body
+                  className="p-3"
+                  style={{ maxHeight: "400px", overflowY: "auto" }}
+                >
+                  {previewData.documents.drawingFiles.map((file, index) => (
+                    <DocumentCard
+                      key={index}
+                      fileName={file.name}
+                      description={file.description}
+                      fileSize={file.size}
+                    />
+                  ))}
+                </Card.Body>
+              </Card>
+            </Col>
+
+            <Col md={6}>
+              <Card className="h-100 shadow-sm border-0">
+                <Card.Header className="bg-light border-0 py-3">
+                  <h5
+                    className="mb-0 text-primary fw-bold d-flex align-items-center"
+                    style={{ fontSize: "0.8rem" }}
+                  >
+                    <BsFileEarmarkPdf className="text-warning me-2" size={16} />
+                    {t("Tonnage Booklets")}
+                  </h5>
+                </Card.Header>
+                <Card.Body className="p-3">
+                  <DocumentCard
+                    fileName={previewData.documents.tonnageBooklets.name}
+                    description="Tonnage certification document"
+                    fileSize={previewData.documents.tonnageBooklets.size}
+                  />
+                </Card.Body>
+              </Card>
+            </Col>
+
+            <Col md={6}>
+              <Card className="h-100 shadow-sm border-0">
+                <Card.Header className="bg-light border-0 py-3">
+                  <h5
+                    className="mb-0 text-primary fw-bold d-flex align-items-center"
+                    style={{ fontSize: "0.8rem" }}
+                  >
+                    <BsFileEarmarkPdf className="text-info me-2" size={16} />
+                    {t("Stability Booklets2")}
+                  </h5>
+                </Card.Header>
+                <Card.Body className="p-3">
+                  <DocumentCard
+                    fileName={previewData.documents.stabilityBooklets.name}
+                    description="Stability certification document"
+                    fileSize={previewData.documents.stabilityBooklets.size}
+                  />
+                </Card.Body>
+              </Card>
+            </Col>
+          </Row>
+        </div>
+      </Collapsible>
+
+      {/* Payment Details Section */}
+      <Collapsible title={t("Payment Summary")} openStat={true}>
+        <div style={{ padding: "1rem" }}>
+          <Row>
+            <Col md={6}>
+              <div className="mb-3">
+                <label className="form-label fw-semibold">
+                  {t("Supervision Authority")}
+                </label>
+                <div className="form-control bg-light">
+                  {previewData.paymentDetails.supervisionAuthority}
+                </div>
+              </div>
+            </Col>
+            <Col md={6}>
+              <div className="mb-3">
+                <label className="form-label fw-semibold">
+                  {t("Total Amount")}
+                </label>
+                <div className="form-control bg-success text-white fw-bold">
+                  {previewData.paymentDetails.amount}
+                </div>
+              </div>
+            </Col>
+          </Row>
+        </div>
+      </Collapsible>
+      {/* </div> */}
+    </>
+    // </Box>
+  );
+};
+
+export default VesselBasicDetailsView;
+
+
+import React, { useEffect, useState } from "react";
+import DynamicTabs from "../../../common/DynamicTabs.js";
+import WelcomeBox from "../../../common/WelcomeBox.js";
+import StatusCard from "../../../common/StatusCard.js";
+import ActionTable from "../../../common/ActionTable.tsx";
+import {
+  BsExclamationTriangle,
+  BsClipboardData,
+  BsSearch,
+  BsFilter,
+} from "react-icons/bs";
+import { useLanguageContext } from "../../../common/LanguageContext.js";
+import "./vesselOwner.css";
+import {
+  Card,
+  Form,
+  InputGroup,
+  Button,
+  Row,
+  Col,
+  Table,
+} from "react-bootstrap";
+import {
+  CHART_OPTIONS,
+  CHART_TYPES,
+  getChartOptions,
+  getUserRoleName,
+  headerStyle,
+} from "../../../../utils/constants.ts";
+import VerticalMarquee from "../../../common/VerticalMarquee.js";
+import chart_icon from "../../../../assets/icons/chart_icon.png";
+import {
+  INBOX_COLUMNS,
+  MOCK_TRANSACTION_DATA,
+  VESSEL_COLUMNS,
+  vesselTypesChartData,
+} from "./vesselconstants.js";
+import InputText from "../../../common/InputText.tsx";
+import { useTranslation } from "react-i18next";
+import InputDateRangePicker from "../../../common/InputDateRangePicker";
+import ActionModal from "../../../common/ActionModal.tsx";
+import DynamicChart from "../../../common/DynamicChart";
+import { Link } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
+
+const generateInboxData = () => {
+  const statuses = ["Completed", "Processing", "Rejected"];
+  const appTypes = [
+    "Registration",
+    "Survey",
+    "Manning",
+    "Certification",
+    "Training",
+  ];
+  const owners = [
+    "John Doe",
+    "Jane Smith",
+    "Robert Johnson",
+    "Emily Davis",
+    "Michael Wilson",
+  ];
+
+  const pendingWithLevels = [
+    "Level 1 Approver",
+    "Level 2 Approver",
+    "Level 3 Approver",
+  ];
+
+  return Array.from({ length: 20 }, (_, i) => ({
+    id: i + 1,
+    appNo: `APP-2025-${(i + 1).toString().padStart(3, "0")}`,
+    appType: appTypes[Math.floor(Math.random() * appTypes.length)],
+    owner: owners[Math.floor(Math.random() * owners.length)],
+    vesselNo: `WB${1420 + i}`,
+    date: new Date(
+      2025,
+      Math.floor(Math.random() * 12),
+      Math.floor(Math.random() * 28) + 1
+    )
+      .toISOString()
+      .split("T")[0],
+    status: statuses[Math.floor(Math.random() * statuses.length)],
+    pendingWith:
+      pendingWithLevels[Math.floor(Math.random() * pendingWithLevels.length)],
+  }));
+};
+
+const generateVesselData = (count = 20) => {
+  const vesselNames = [
+    "Sea Hawk",
+    "Blue Pearl",
+    "Ocean Spirit",
+    "Wave Rider",
+    "Aqua Nova",
+    "Neptune",
+    "Storm Chaser",
+    "Marine Star",
+  ];
+
+  return Array.from({ length: count }, (_, i) => {
+    const regNo = `REG-${1000 + i}`;
+    return {
+      id: regNo,
+      registrationNo:regNo,
+      //  (
+      //   <Link
+      //     to={`/vessel-registration/new-vessel/edit/${regNo}`}
+      //     style={{
+      //       color: "#007bff",
+      //       textDecoration: "underline",
+      //       cursor: "pointer",
+      //     }}
+      //   >
+      //     {regNo}
+      //   </Link>
+      // ),
+      vesselName: vesselNames[Math.floor(Math.random() * vesselNames.length)],
+      registeredYear: Math.floor(Math.random() * 23) + 2000,
+      lastSurveyDate: new Date(
+        Date.now() - Math.random() * (Date.now() - new Date(2020, 0, 1))
+      )
+        .toISOString()
+        .split("T")[0],
+    };
+  });
+};
+
+const VesselOwner = ({ userDetails, userRole }) => {
+  //   const tabs = Array.from({ length: 8 }, (_, i) => ({
+  //     title: `Vessel ${i + 1}`,
+  //     content: <VesselContent />,
+  //     onLoad: () => console.log(`Loading Vessel ${i + 1}...`),
+  //   }));
+  console.log(userRole);
+  const { t } = useTranslation();
+  const { changeLanguage } = useLanguageContext();
+
+  const navigate = useNavigate();
+
+  return (
+    <>
+      <WelcomeBox
+        userName={
+          userDetails
+            // ? userDetails?.firstName + " " + userDetails?.lastName + " User"
+             ? userDetails?.ownerCompanyName
+            : ""
+        }
+        title={getUserRoleName(userRole)}
+        desc={t("dashboard.Here’s your vessel performance overview.")}
+      />
+
+      {/* <DynamicTabs
+        tabs={tabs}
+        onTabChange={(i) => console.log(`Switched to tab ${i}`)}
+      /> */}
+
+      <VesselContent navigate={navigate} />
+    </>
+  );
+};
+
+const VesselContent = ({ vesselNumber }) => {
+  const { t } = useTranslation();
+  const { changeLanguage } = useLanguageContext();
+  // For Vessel Table
+  const vesselColumns = VESSEL_COLUMNS.map((col) => ({
+    ...col,
+    colName: t(`dashboard.${col.colName}`),
+    
+  }));
+
+  // For Inbox Table
+  const inboxColumns = INBOX_COLUMNS.map((col) => ({
+    ...col,
+    colName: t(`dashboard.${col.colName}`),
+  }));
+  const [inboxData, setInboxData] = useState([]);
+  const [filteredInboxData, setFilteredInboxData] = useState([]);
+  const [inboxCurrentPage, setInboxCurrentPage] = useState(1);
+  const [inboxSearchTerm, setInboxSearchTerm] = useState("");
+  const itemsInboxPerPage = 5;
+
+  const [vesselData, setVesselData] = useState([]);
+  const [filteredVesselData, setFilteredVesselData] = useState([]);
+  const [vesselCurrentPage, setVesselCurrentPage] = useState(1);
+  const [vesselSearchTerm, setVesselSearchTerm] = useState("");
+  const itemsVesselPerPage = 5;
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const navigate = useNavigate();
+  const handleViewAction = (rowData) => {
+    const regNo = rowData.id || "REG-1000";
+    navigate(`/vessel-registration/new-vessel/view/${regNo}`);
+  };
+  const handleEditAction = (rowData) => {
+    const regNo = rowData.id || "REG-1000";
+    navigate(`/vessel-registration/new-vessel/edit/${regNo}`);
+  };
+
+const handleApplySurvey = (rowData) => {
+    // const regNo = rowData.id || "REG-1000";
+    navigate(`/apply-vessel-survey`);
+  };
+  const handleUploadReports = (rowData) => {
+    const regNo = rowData.id || "REG-1000";
+    navigate(`/vessel-registration/new-vessel/reports-and-forms/${regNo}`);
+  };
+  
+  
+  //   const mockItems = [
+  //     {
+  //       id: 1,
+  //       title: "Welcome to the Portal",
+  //       description: "Scroll for updates",
+  //       type: "text",
+  //     },
+  //     {
+  //       id: 2,
+  //       title: "Policy Update",
+  //       type: "document",
+  //       documentUrl: "/docs/policy.pdf",
+  //     },
+  //     {
+  //       id: 3,
+  //       title: "Release Notes",
+  //       description: "Version 2.0 released",
+  //       type: "text",
+  //     },
+  //     {
+  //       id: 4,
+  //       title: "HR Guidelines",
+  //       type: "document",
+  //       documentUrl: "/docs/hr-guidelines.pdf",
+  //     },
+  //   ];
+
+  useEffect(() => {
+    const data = generateInboxData();
+    setInboxData(data);
+    setFilteredInboxData(data);
+
+    const vdata = generateVesselData();
+    setVesselData(vdata);
+    setFilteredVesselData(vdata);
+  }, []);
+
+  useEffect(() => {
+    const results = inboxData?.filter(
+      (item) =>
+        item.appNo?.toLowerCase()?.includes(inboxSearchTerm?.toLowerCase()) ||
+        item.appType?.toLowerCase()?.includes(inboxSearchTerm?.toLowerCase()) ||
+        item.owner?.toLowerCase()?.includes(inboxSearchTerm?.toLowerCase()) ||
+        item.vesselNo
+          ?.toLowerCase()
+          ?.includes(inboxSearchTerm?.toLowerCase()) ||
+        item.status?.toLowerCase()?.includes(inboxSearchTerm?.toLowerCase()) ||
+        item.pendingWith
+          ?.toLowerCase()
+          ?.includes(inboxSearchTerm?.toLowerCase())
+    );
+    setFilteredInboxData(results);
+    setInboxCurrentPage(1);
+  }, [inboxSearchTerm, inboxData]);
+
+  const handleTablePageChange = (page) => {
+    setInboxCurrentPage(page);
+  };
+
+  useEffect(() => {
+    const results = vesselData?.filter(
+      (item) =>
+        item?.registrationNo
+          ?.toString()
+          ?.toLowerCase()
+          ?.includes(vesselSearchTerm?.toLowerCase()) ||
+        item?.vesselName
+          ?.toLowerCase()
+          ?.includes(vesselSearchTerm?.toLowerCase()) ||
+        item?.registeredYear
+          ?.toString()
+          ?.toLowerCase()
+          ?.includes(vesselSearchTerm?.toLowerCase()) ||
+        item?.lastSurveyDate
+          ?.toLowerCase()
+          ?.includes(vesselSearchTerm?.toLowerCase())
+    );
+    setFilteredVesselData(results);
+    setVesselCurrentPage(1);
+  }, [vesselSearchTerm, vesselData]);
+
+  const handleVesselTablePageChange = (page) => {
+    setVesselCurrentPage(page);
+  };
+
+  const handleCardClick = (cardInfo, index) => {
+    if (index === 0) {
+      // navigate("/user-registration/view");
+    } else if (index === 1) {
+      setIsModalOpen(true);
+    }
+  };
+
+  const statData = [
+    {
+      title: t("dashboard.Total Registered Vessel Count"),
+      value: 35,
+      icon: BsClipboardData,
+      color: "#28a745",
+      subtitle: t("dashboard.(Total Number of Registered Vessels)"),
+    },
+
+    {
+      title: t("dashboard.Graphical Representation"),
+      imageSrc: chart_icon,
+      color: "#6ec1e4",
+      subtitle: t("dashboard.(Total number of registered vessel as per 'Type')"),
+    },
+
+    {
+      title: t("dashboard.Survey Due"),
+      value: 20,
+      icon: BsExclamationTriangle,
+      color: "#E8B60E",
+      subtitle: t(
+        "dashboard.(Total Number of Vessel having Survey due within next 30Days)"
+      ),
+    },
+    {
+      title: t("dashboard.Insurance Due"),
+      value: 15,
+      icon: BsExclamationTriangle,
+      color: "#902424",
+      subtitle: t("dashboard.(Total Number of Vessel having Insurance due within next 30Days)"),
+    },
+  ];
+  //   const [transactionSearch, setTransactionSearch] = useState("");
+  //   const tableData = {
+  //     regNo: "WB1423",
+  //     vesselName: "SALT AND LIGHT",
+  //     vesselType: "Passenger",
+  //     yearOfRegistry: "2007",
+  //     currentStatus: "Active",
+  //     portOfRegistry: "Kolkata",
+  //     lastSurvey: "25-10-2025",
+  //   };
+
+  // Filtered data for Transaction Info
+  // const filteredTransactionData = MOCK_TRANSACTION_DATA.filter((item) =>
+  //     Object.values(item).some((val) =>
+  //         String(val)?.toLowerCase()?.includes(transactionSearch.toLowerCase())
+  //     )
+  // );
+
+  return (
+    <>
+      {/* Vessel Info table */}
+
+      {/* <Card className="bg-transparent" style={{ marginBottom: 0 }}>
+                <Card.Header style={headerStyle}>Vessel Information</Card.Header>
+            </Card>
+            <Table
+                responsive="md"
+                striped
+                bordered
+                hover
+                className="custom-vessel-table"
+            >
+                <thead>
+                    <tr className="custom-header">
+                        <th>Regi No</th>
+                        <th>Vessel Name</th>
+                        <th>Vessel Type</th>
+                        <th>Year of Registry</th>
+                        <th>Current Status</th>
+                        <th>Port of Registry</th>
+                        <th>Last Survey</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>{tableData.regNo}</td>
+                        <td>{tableData.vesselName}</td>
+                        <td>{tableData.vesselType}</td>
+                        <td>{tableData.yearOfRegistry}</td>
+                        <td>
+                            <span className="status-badge">{tableData.currentStatus}</span>
+                        </td>
+                        <td>{tableData.portOfRegistry}</td>
+                        <td>{tableData.lastSurvey}</td>
+                    </tr>
+                </tbody>
+            </Table> */}
+
+      <div className="row g-3">
+        {statData.map((item, index) => (
+          <div className="col-md-4 col-lg-3 col-sm-12" key={index}>
+            <StatusCard
+              {...item}
+              onClick={() => handleCardClick(item, index)}
+            />
+          </div>
+        ))}
+
+        {/* <div className="col-md-4 col-lg-3 col-sm-12">
+                    <VerticalMarquee items={mockItems} speed={40} />
+                </div> */}
+      </div>
+
+      <br />
+
+      {/*           Transaction Subsequent To Registration */}
+      {/* <Card
+                className="bg-transparent"
+                style={{ marginBottom: 0, marginTop: "1rem" }}
+            >
+                <Card.Header style={headerStyle}>
+                    Transaction Subsequent To Registration
+                    <div style={{ float: "right", width: 260 }}>
+                        <input
+                            type="search"
+                            value={transactionSearch}
+                            onChange={(e) => setTransactionSearch(e.target.value)}
+                            placeholder="Search Transactions"
+                            className="form-control"
+                        />
+                    </div>
+                </Card.Header>
+                <div style={{ position: "relative", bottom: "2rem" }}>
+                    <ActionTable
+                        columns={TRANSACTION_COLUMNS}
+                        rowData={filteredTransactionData}
+                        tableHeader={null}
+                        hideExportBtn={false}
+                        hideSearchBar={true}
+                        pagination={false}
+                        noDataText="No transactions found."
+                    />
+                </div>
+            </Card> */}
+
+      {/* -----------------------------------   VESSEL SEARCH    --------------------------- */}
+
+      <Card>
+        <Card.Header
+          style={headerStyle}
+          className="dashboard-card-header d-flex justify-content-between align-items-center flex-wrap"
+        >
+          <div className="d-flex align-items-center">
+            <h6 className="mb-0 me-2">{t("dashboard.Vessel Information")}</h6>
+          </div>
+        </Card.Header>
+
+        <form
+          style={{ padding: "2rem", margin: 0 }}
+          // onSubmit={handleSubmit(onSubmitFilterForm)}
+        >
+          <Row>
+            <Col md={3}>
+              <InputText
+                type="text"
+                name="regisNo"
+                maxlength={13}
+                label={t("dashboard.Registration No.")}
+                placeholder={t("dashboard.Enter Registration No.")}
+                // register={{
+                //     ...register("regisNo", {}),
+                // }}
+                // errors={errors}
+              />
+            </Col>
+
+            <Col md={3}>
+              <InputText
+                type="text"
+                name="vesselName"
+                label={t("dashboard.Vessel Name")}
+                maxlength={80}
+                placeholder={t("dashboard.Enter Vessel name..")}
+                // register={{
+                //     ...register("vesselName", {}),
+                // }}
+                // errors={errors}
+              />
+            </Col>
+
+            <Col md={4}>
+              <InputDateRangePicker
+                label={t("dashboard.Date Range")}
+                // value={selectedRange}
+                // onChange={(range) => setValue("dateRange", range)}
+                // register={register}
+                name="dateRange"
+                // error={errors.dateRange}
+              />
+            </Col>
+
+            <Col md={2}>
+              <button
+                style={{ position: "relative", top: "1.5rem" }}
+                className="generic-btn-submit"
+                type="button"
+              >
+                {t("dashboard.Filter")}
+              </button>
+            </Col>
+          </Row>
+        </form>
+
+        <Card className="bg-transparent dashboard-card">
+          <Card.Header
+            style={headerStyle}
+            className="dashboard-card-header d-flex justify-content-between align-items-center flex-wrap"
+          >
+            <div className="d-flex align-items-center">
+              <h6 className="mb-0 me-2">{t("dashboard.Vessel List")}</h6>
+            </div>
+            <div className="d-flex align-items-center">
+              <Button variant="outline-secondary" className="filter-btn me-2">
+                <BsFilter size={18} />
+                <span className="ms-1 d-none d-sm-inline">{t("dashboard.Filter")}</span>
+              </Button>
+              <Form className="inbox-search">
+                <InputGroup>
+                  <Form.Control
+                    type="text"
+                    placeholder={t("dashboard.Search Vessels...")}
+                    aria-label="Search"
+                    value={vesselSearchTerm}
+                    onChange={(e) => setVesselSearchTerm(e.target.value)}
+                  />
+                  <Button variant="primary">
+                    <BsSearch />
+                  </Button>
+                </InputGroup>
+              </Form>
+            </div>
+          </Card.Header>
+
+          <div style={{ position: "relative", bottom: "2rem" }}>
+            <ActionTable
+              columns={vesselColumns}
+               handleEditRow={handleEditAction}
+               onApplyInitialSurvey={handleApplySurvey}
+              onViewRow={handleViewAction}
+              onUploadReports={handleUploadReports}
+              rowData={filteredVesselData}
+              tableHeader={null}
+              hideExportBtn={true}
+              hideSearchBar={true}
+              pagination={true}
+              inboxCurrentPage={vesselCurrentPage}
+              itemsInboxPerPage={itemsVesselPerPage}
+              onPageChange={handleVesselTablePageChange}
+              noDataText={
+                <div className="no-results text-center py-4">
+                  <BsSearch size={24} className="mb-2" />
+                  <p>No results found</p>
+                  <small>
+                    Try adjusting your search to find what you're looking for.
+                  </small>
+                </div>
+              }
+            />
+          </div>
+        </Card>
+      </Card>
+      {/* -----------------------------------  VESSEL SEARCH END  --------------------------- */}
+
+      {/* -----------------------------------   INBOX    --------------------------- */}
+
+      <Card className="bg-transparent mt-4 dashboard-card">
+        <Card.Header
+          style={headerStyle}
+          className="dashboard-card-header d-flex justify-content-between align-items-center flex-wrap"
+        >
+          <div className="d-flex align-items-center">
+            <h5 className="mb-0 me-2">{t("dashboard.Inbox")}</h5>
+            <span className="badge bg-primary rounded-pill">
+              {filteredInboxData.length}
+            </span>
+          </div>
+          <div className="d-flex align-items-center">
+            <Button variant="outline-secondary" className="filter-btn me-2">
+              <BsFilter size={18} />
+              <span className="ms-1 d-none d-sm-inline">{t("dashboard.Filter")}</span>
+            </Button>
+            <Form className="inbox-search">
+              <InputGroup>
+                <Form.Control
+                  type="text"
+                  placeholder="Search inbox..."
+                  aria-label="Search inbox"
+                  value={inboxSearchTerm}
+                  onChange={(e) => setInboxSearchTerm(e.target.value)}
+                />
+                <Button variant="primary">
+                  <BsSearch />
+                </Button>
+              </InputGroup>
+            </Form>
+          </div>
+        </Card.Header>
+
+        <div style={{ position: "relative", bottom: "2rem" }}>
+          <ActionTable
+            columns={inboxColumns}
+           
+            rowData={filteredInboxData}
+            tableHeader={null}
+            hideExportBtn={true}
+            hideSearchBar={true}
+            pagination={true}
+            inboxCurrentPage={inboxCurrentPage}
+            itemsInboxPerPage={itemsInboxPerPage}
+            onPageChange={handleTablePageChange}
+            noDataText={
+              <div className="no-results text-center py-4">
+                <BsSearch size={24} className="mb-2" />
+                <p>No results found</p>
+                <small>
+                  Try adjusting your search to find what you're looking for.
+                </small>
+              </div>
+            }
+          />
+        </div>
+      </Card>
+
+      {/* -----------------------------------   INBOX  END  --------------------------- */}
+
+      {/* -----------------------------------   CHART    --------------------------- */}
+      <ActionModal
+        show={isModalOpen}
+        close={setIsModalOpen}
+        title="Inland Vessel Types"
+        size={"md"}
+        isFooterHide={true}
+      >
+        <DynamicChart
+          type={CHART_TYPES[3]}
+          data={vesselTypesChartData}
+          options={getChartOptions("Distribution of Inland Vessel Types")}
+        />
+      </ActionModal>
+      {/* -----------------------------------   CHART END  --------------------------- */}
+    </>
+  );
+};
+
+export default VesselOwner;
+
+this is api path name
+SERVICE_BASE.IWT_REGISTRATION + URLS_ENDPOINT.USER_SERVICE.REGISTRATION_SEARCH_BY_ID;
+this is request params
+{
+    "applicationNumber": "REG-2025-576219"
+}
+now not have dynmaic id so statically params send this in view by id call this api in uploadreports
+this is full response
+{
+    "responseStatus": {
+        "status": "Registration details fetched successfully",
+        "message": "Operation completed successfully."
+    },
+    "data": [
+        {
+            "id": "7d8c5bf1-a0c9-4f8a-b196-fc257777b9a2",
+            "applicationNumber": "REG-2025-576219",
+            "basicDetails": {
+                "id": "7d8c5bf1-a0c9-4f8a-b196-fc257777b9a2",
+                "applicationNumber": "REG-2025-576219",
+                "status": "DRAFT",
+                "ownerDetails": {
+                    "id": "8d8a7fd5-3752-4396-9405-3bb39b2c327c",
+                    "categoryOfOwner": "Private Limited",
+                    "ownerCompanyName": "ABC Shipping Co.",
+                    "emailId": "owner048@owner.com",
+                    "phoneNumber": "9876543244",
+                    "panNo": "BZUPT6789R",
+                    "gstNo": "27ABCDE1234F1Z5",
+                    "addressLine1": "Plot 212, Marine Drive",
+                    "addressLine2": "Sector 5, Industrial Area",
+                    "pin": 400001,
+                    "district": "Mumbai",
+                    "state": "Maharashtra",
+                    "country": "India",
+                    "authorisedFname": "Ravi",
+                    "authorisedLname": "Kumar",
+                    "authorisedMob": "9876543210",
+                    "authorisedEmail": "authuser@owner.com",
+                    "loaReferenceId": "doc001_loa",
+                    "panReferenceId": "doc002_pan",
+                    "gstCertReferenceId": "doc003_gst",
+                    "addressReferenceId": "doc004_address",
+                    "companyCertReferenceId": "doc005_cert",
+                    "cinNo": "U12345MH2025PTC999999",
+                    "dinNo": "12345678",
+                    "moaCertificateReferenceId": "doc006_moa",
+                    "aoaCertificateReferenceId": "doc007_aoa",
+                    "userMIdFk": "user123",
+                    "aadharNumber": "123456789012",
+                    "tradeLicenseNumber": null,
+                    "fileStoreMap": [
+                        {
+                            "fileStoreId": "6a56348d-029d-4e1b-ab21-69198e8b18ad",
+                            "alfrescoId": "42573284-6d4b-436b-9732-846d4b936b26",
+                            "registrationNumber": "8d8a7fd5-3752-4396-9405-3bb39b2c327c",
+                            "fileName": "dummy.pdf",
+                            "module": "iwt.upload",
+                            "tenantId": "iwt.wb",
+                            "tag": null,
+                            "fieldName": "owner_details_dummy",
+                            "auditDetails": null,
+                            "downLoadFile": "http://3.111.175.246:7073/filestore/v1/files/id?fileStoreId=6a56348d-029d-4e1b-ab21-69198e8b18ad"
+                        },
+                        {
+                            "fileStoreId": "870f233e-a900-4322-a1db-a5365cb44e43",
+                            "alfrescoId": "65176986-95b1-4658-9769-8695b1665805",
+                            "registrationNumber": "8d8a7fd5-3752-4396-9405-3bb39b2c327c",
+                            "fileName": "dummy.pdf",
+                            "module": "iwt.upload",
+                            "tenantId": "iwt.wb",
+                            "tag": null,
+                            "fieldName": "owner_details_dummy",
+                            "auditDetails": null,
+                            "downLoadFile": "http://3.111.175.246:7073/filestore/v1/files/id?fileStoreId=870f233e-a900-4322-a1db-a5365cb44e43"
+                        },
+                        {
+                            "fileStoreId": "84270b2a-0dba-434d-a03d-8540ef43e94c",
+                            "alfrescoId": "f4be42cc-0834-49a1-be42-cc0834d9a162",
+                            "registrationNumber": "8d8a7fd5-3752-4396-9405-3bb39b2c327c",
+                            "fileName": "dummy.pdf",
+                            "module": "iwt.upload",
+                            "tenantId": "iwt.wb",
+                            "tag": null,
+                            "fieldName": "owner_details_dummy",
+                            "auditDetails": null,
+                            "downLoadFile": "http://3.111.175.246:7073/filestore/v1/files/id?fileStoreId=84270b2a-0dba-434d-a03d-8540ef43e94c"
+                        },
+                        {
+                            "fileStoreId": "258d0fef-2284-44f6-a2fb-f9303f65a3a0",
+                            "alfrescoId": "7010f21f-e93d-4c96-90f2-1fe93d7c96ef",
+                            "registrationNumber": "8d8a7fd5-3752-4396-9405-3bb39b2c327c",
+                            "fileName": "dummy.pdf",
+                            "module": "iwt.upload",
+                            "tenantId": "iwt.wb",
+                            "tag": null,
+                            "fieldName": "owner_details_dummy",
+                            "auditDetails": null,
+                            "downLoadFile": "http://3.111.175.246:7073/filestore/v1/files/id?fileStoreId=258d0fef-2284-44f6-a2fb-f9303f65a3a0"
+                        }
+                    ],
+                    "auditDetails": {
+                        "createdBy": "8d8a7fd5-3752-4396-9405-3bb39b2c327c",
+                        "createdOn": null,
+                        "updatedBy": "8d8a7fd5-3752-4396-9405-3bb39b2c327c",
+                        "updatedOn": null
+                    }
+                },
+                "builderDetails": {
+                    "id": "baf64aed-5254-45db-aca1-e9e1cbe4d4f1",
+                    "builderName": "Maritech Fabricators & Co.",
+                    "emailId": "neo_user@builder.com",
+                    "phone": "8596237412",
+                    "panNo": "ABCDE1234F",
+                    "gstNo": "27ABCDE1234F1Z5",
+                    "addressLine1": "Plot 15, Dockyard Lane",
+                    "addressLine2": "Sector 3, Industrial Area",
+                    "pin": "400001",
+                    "district": "Mumbai",
+                    "state": "Maharashtra",
+                    "country": "India",
+                    "panReferenceId": "doc123_pan",
+                    "gstCertificateReferenceId": "doc456_gst",
+                    "addressReferenceId": "doc789_address",
+                    "userId": "",
+                    "aadharNumber": "123456789012",
+                    "tradeLicenseNumber": null,
+                    "fileStoreMap": [],
+                    "auditDetails": {
+                        "createdBy": "baf64aed-5254-45db-aca1-e9e1cbe4d4f1",
+                        "createdOn": null,
+                        "updatedBy": "baf64aed-5254-45db-aca1-e9e1cbe4d4f1",
+                        "updatedOn": null
+                    }
+                },
+                "builderAuthorization": "APPROVED",
+                "authorizationLetter": {
+                    "id": "b2bf13ca-1804-4843-bd57-ce17d3471630",
+                    "documentName": "Authorization_Letter.pdf",
+                    "documentType": "AUTHORIZATION_LETTER",
+                    "applicationNumber": "REG-2025-576219",
+                    "fileStoreId": "9cb77694-6e20-4be9-80c3-4df8b607b915",
+                    "documentSource": "AUTHORIZATION_LETTER",
+                    "description": null,
+                    "auditDetails": {
+                        "createdBy": null,
+                        "createdOn": null,
+                        "updatedBy": "b2bf13ca-1804-4843-bd57-ce17d3471630",
+                        "updatedOn": "2025-07-31T12:47:03.548800"
+                    },
+                    "active": true
+                },
+                "constructedBy": "L&T Shipbuilders Ltd.",
+                "auditDetails": {
+                    "createdBy": "7d8c5bf1-a0c9-4f8a-b196-fc257777b9a2",
+                    "createdOn": "2025-07-31T12:47:02.579512100",
+                    "updatedBy": "7d8c5bf1-a0c9-4f8a-b196-fc257777b9a2",
+                    "updatedOn": "7d8c5bf1-a0c9-4f8a-b196-fc257777b9a2"
+                }
+            },
+            "vesselDetails": {
+                "id": "e8047ab3-ae0c-4faf-b6bd-da4e9e3d87f8",
+                "typeOfVessel": "Cargo SHIP",
+                "categoryOfVessel": "Bulk Carrier",
+                "zone": "Zone-XYZ",
+                "grossTonnage": 12000,
+                "workOrderValue": "90000003",
+                "purchaseType": "New",
+                "supervisionAuthority": "IWT Department",
+                "nameOfMaster": "",
+                "certficateNumber": "",
+                "nameOfRegistry": "",
+                "registrationNumber": "REG-2025-576219",
+                "vesselName": "",
+                "kindOfVessel": "",
+                "mortgage": "",
+                "placeOfBuild": "",
+                "insuranceDetails": "",
+                "yearOfBuild": 0,
+                "pniClubNo": "",
+                "pniClubName": "",
+                "applicationNo": "REG-2025-576219",
+                "nameOfClassificationSociety": "",
+                "iwtVesselBasicDetailsTFk": "7d8c5bf1-a0c9-4f8a-b196-fc257777b9a2",
+                "insuranceValidDate": "",
+                "auditDetails": {
+                    "createdBy": "e8047ab3-ae0c-4faf-b6bd-da4e9e3d87f8",
+                    "createdOn": "2025-07-31T12:47:03.709433900",
+                    "updatedBy": "e8047ab3-ae0c-4faf-b6bd-da4e9e3d87f8",
+                    "updatedOn": "2025-07-31T12:47:03.709433900"
+                }
+            },
+            "documents": [
+                {
+                    "id": "71fd7cac-e8f3-45ec-9e3e-8ced8179d046",
+                    "documentName": "Stability Booklet.pdf",
+                    "documentType": "STABILITY_BOOKLETS",
+                    "applicationNumber": "REG-2025-576219",
+                    "fileStoreId": "9cb77694-6e20-4be9-80c3-2222",
+                    "documentSource": "STABILITY_BOOKLETS",
+                    "description": null,
+                    "auditDetails": {
+                        "createdBy": null,
+                        "createdOn": null,
+                        "updatedBy": "71fd7cac-e8f3-45ec-9e3e-8ced8179d046",
+                        "updatedOn": "2025-07-31T12:47:04.009493800"
+                    },
+                    "active": true
+                },
+                {
+                    "id": "9e69dede-9b18-4b5d-b7af-0317b2dc3898",
+                    "documentName": "Tonnage Booklet.pdf",
+                    "documentType": "TONNAGE_BOOKLETS",
+                    "applicationNumber": "REG-2025-576219",
+                    "fileStoreId": "9cb77694-6e20-4be9-80c3-1111",
+                    "documentSource": "TONNAGE_BOOKLETS",
+                    "description": null,
+                    "auditDetails": {
+                        "createdBy": null,
+                        "createdOn": null,
+                        "updatedBy": "9e69dede-9b18-4b5d-b7af-0317b2dc3898",
+                        "updatedOn": "2025-07-31T12:47:03.951920700"
+                    },
+                    "active": true
+                },
+                {
+                    "id": "b60eb73a-5129-4366-aab7-f3872e372709",
+                    "documentName": "Drawing.pdf",
+                    "documentType": "DRAWINGS",
+                    "applicationNumber": "REG-2025-576219",
+                    "fileStoreId": "9cb77694-6e20-4be9-80c3-5555",
+                    "documentSource": "DRAWINGS",
+                    "description": null,
+                    "auditDetails": {
+                        "createdBy": null,
+                        "createdOn": null,
+                        "updatedBy": "b60eb73a-5129-4366-aab7-f3872e372709",
+                        "updatedOn": "2025-07-31T12:47:03.850909500"
+                    },
+                    "active": true
+                },
+                {
+                    "id": "467bcc01-8e41-4f5d-b85e-66eb69e7ad02",
+                    "documentName": "Work Order.pdf",
+                    "documentType": "WORK_ORDER",
+                    "applicationNumber": "REG-2025-576219",
+                    "fileStoreId": "9cb77694-6e20-4be9-80c3-4df8b607b915",
+                    "documentSource": "WORK_ORDER",
+                    "description": null,
+                    "auditDetails": {
+                        "createdBy": null,
+                        "createdOn": null,
+                        "updatedBy": "467bcc01-8e41-4f5d-b85e-66eb69e7ad02",
+                        "updatedOn": "2025-07-31T12:47:03.786491600"
+                    },
+                    "active": true
+                },
+                {
+                    "id": "b2bf13ca-1804-4843-bd57-ce17d3471630",
+                    "documentName": "Authorization_Letter.pdf",
+                    "documentType": "AUTHORIZATION_LETTER",
+                    "applicationNumber": "REG-2025-576219",
+                    "fileStoreId": "9cb77694-6e20-4be9-80c3-4df8b607b915",
+                    "documentSource": "AUTHORIZATION_LETTER",
+                    "description": null,
+                    "auditDetails": {
+                        "createdBy": null,
+                        "createdOn": null,
+                        "updatedBy": "b2bf13ca-1804-4843-bd57-ce17d3471630",
+                        "updatedOn": "2025-07-31T12:47:03.548800"
+                    },
+                    "active": true
+                }
+            ]
+        }
+    ],
+    "errors": null,
+    "timestamp": 1753985330.799741013,
+    "pagination": null
+}
+please write full code
+
