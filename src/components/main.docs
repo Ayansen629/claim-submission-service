@@ -1,3 +1,56 @@
+import React, { useState } from "react";
+import { useForm } from "react-hook-form";
+import { Modal, Form, Button, Spinner } from "react-bootstrap";
+import { useTranslation } from "react-i18next";
+import { FaTimesCircle, FaFileAlt } from "react-icons/fa";
+import { toast } from "react-toastify";
+import { postFORMdata, postData } from "../../services/http.service.ts";
+import {
+  BASE_IP,
+  URLS_ENDPOINT,
+   SERVICE_BASE,
+} from "../../utils/urlsConstants.ts";
+
+const FileReportsUploadModal = ({
+  show,
+  onHide,
+  reportType,
+  onSubmit,
+}) => {
+  const { t } = useTranslation();
+  const {
+    register,
+    handleSubmit,
+    reset,
+    formState: { errors },
+    setValue,
+  } = useForm();
+
+  const [uploadedFile, setUploadedFile] = useState(null);
+  const [uploading, setUploading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+
+  const getReportTypeMapping = (type) => {
+    const mapping = {
+      materialTest: "MATERIAL_TEST_REPORT",
+      radiography: "RADIOGRAPHY_REPORT", 
+      inspection: "INSPECTION_REPORT",
+      other: "OTHER_REPORT"
+    };
+    return mapping[type] || "OTHER_REPORT";
+  };
+
+  const getReportDisplayName = (type) => {
+    const reportNames = {
+      materialTest: "Material Test Report",
+      radiography: "Radiography Report", 
+      inspection: "Inspection Report",
+      other: "Other Report"
+    };
+    return reportNames[type] || "Report";
+  };
+
+ 
 const handleFormSubmit = async (data) => {
   if (!uploadedFile?.url) {
     toast.error("Please upload a file first.");
@@ -50,3 +103,1410 @@ const handleFormSubmit = async (data) => {
     setSubmitting(false);
   }
 };
+
+  const handleModalClose = () => {
+    resetForm();
+    onHide();
+  };
+
+  const resetForm = () => {
+    reset();
+    setUploadedFile(null);
+    setUploading(false);
+    setSubmitting(false);
+  };
+
+  const handleFileChange = async (e) => {
+    const file = e?.target?.files[0];
+    if (!file) return;
+
+    const maxSize = 10 * 1024 * 1024;
+    if (file.size > maxSize) {
+      toast.error("File size must be less than or equal to 10 MB.");
+      e.target.value = null;
+      return;
+    }
+
+    setUploading(true);
+    
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const uploadUrl = BASE_IP + URLS_ENDPOINT.FILE_STORE_SERVICE.UPLOAD_FILE;
+      const response = await postFORMdata(uploadUrl, formData);
+      
+      console.log("File upload response:", response);
+      
+      const fileStoreId = response?.data?.files[0]?.fileStoreId;
+      
+      setUploadedFile({ name: file.name, url: fileStoreId });
+      setValue("file", fileStoreId);
+      toast.success("File uploaded successfully!");
+    } catch (err) {
+      console.error("File upload failed:", err);
+      console.log("Error details:", err.response || err.message);
+      toast.error("File upload failed. Please try again.");
+      setUploadedFile(null);
+      e.target.value = null;
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const removeFile = () => {
+    setUploadedFile(null);
+    setValue("file", null);
+  };
+
+  return (
+    <Modal show={show} onHide={handleModalClose}>
+      <Modal.Header closeButton>
+        <Modal.Title>
+          {t("Upload")} {getReportDisplayName(reportType)}
+        </Modal.Title>
+      </Modal.Header>
+      
+      <Form onSubmit={handleSubmit(handleFormSubmit)}>
+        <Modal.Body>
+          <Form.Group className="mb-3">
+            <Form.Label>
+              {t("Select File")} <span className="text-danger">*</span>
+            </Form.Label>
+            
+            {uploading ? (
+              <div className="border rounded p-3 text-center bg-light">
+                <Spinner animation="border" size="sm" className="me-2" />
+                <span className="text-muted">Uploading file...</span>
+              </div>
+            ) : !uploadedFile ? (
+              <Form.Control
+                type="file"
+                onChange={handleFileChange}
+                required
+                accept=".pdf,.doc,.docx,.xls,.xlsx,.txt,.jpg,.jpeg,.png"
+              />
+            ) : (
+              <div className="border rounded p-2 bg-light">
+                <div className="d-flex align-items-center justify-content-between">
+                  <div className="d-flex align-items-center flex-grow-1">
+                    <FaFileAlt className="text-primary me-2" />
+                    <span className="text-truncate" title={uploadedFile.name}>
+                      {uploadedFile.name}
+                    </span>
+                  </div>
+                  <FaTimesCircle
+                    size={18}
+                    color="#dc3545"
+                    style={{ cursor: "pointer", marginLeft: "10px" }}
+                    onClick={removeFile}
+                    title="Remove file"
+                  />
+                </div>
+              </div>
+            )}
+          </Form.Group>
+
+          <Form.Group className="mb-3">
+            <Form.Label>{t("Description")}</Form.Label>
+            <Form.Control
+              as="textarea"
+              rows={3}
+              {...register("description")}
+              placeholder={t("Enter description")}
+            />
+          </Form.Group>
+        </Modal.Body>
+
+        <Modal.Footer>
+          <Button variant="secondary" onClick={handleModalClose}>
+            {t("Cancel")}
+          </Button>
+          <Button 
+            variant="primary" 
+            type="submit"
+            disabled={!uploadedFile || uploading || submitting}
+          >
+            {submitting ? (
+              <>
+                <Spinner animation="border" size="sm" className="me-2" />
+                Uploading...
+              </>
+            ) : (
+              t("Upload")
+            )}
+          </Button>
+        </Modal.Footer>
+      </Form>
+    </Modal>
+  );
+};
+
+export default FileReportsUploadModal;
+import React, { useState } from "react";
+import { Button, Card } from "react-bootstrap";
+import { BsPlus } from "react-icons/bs";
+import { useTranslation } from "react-i18next";
+import ActionTable from "../../../../../common/ActionTable.tsx";
+import FileReportsUploadModal from "../../../../../common/FileReportsUploadModal.jsx";
+import Collapsible from "../../../../../common/Collapsible.js";
+
+const ReportsDashboard = () => {
+  const { t } = useTranslation();
+  const [showFileModal, setShowFileModal] = useState(false);
+  const [currentReportType, setCurrentReportType] = useState("");
+  const [reports, setReports] = useState({
+    materialTest: [
+      {
+        id: 1,
+        fileName: "material_test_1.pdf",
+        description: t("Initial material test results"),
+        remarks: t("Approved"),
+      },
+      {
+        id: 2,
+        fileName: "material_test_2.pdf",
+        description: t("Follow-up material analysis"),
+        remarks: t("Pending review"),
+      },
+    ],
+    radiography: [
+      {
+        id: 1,
+        fileName: "radiography_report_1.pdf",
+        description: t("X-ray inspection results"),
+        remarks: t("Completed"),
+      },
+      {
+        id: 2,
+        fileName: "radiography_report_2.pdf",
+        description: t("Ultrasonic testing report"),
+        remarks: t("Approved"),
+      },
+    ],
+    inspection: [
+      {
+        id: 1,
+        fileName: "inspection_report_1.pdf",
+        description: t("Quarterly inspection"),
+        remarks: t("Completed"),
+      },
+      {
+        id: 2,
+        fileName: "inspection_report_2.pdf",
+        description: t("Annual safety check"),
+        remarks: t("Pending corrections"),
+      },
+    ],
+    other: [
+      {
+        id: 1,
+        fileName: "other_report_1.pdf",
+        description: t("Additional documentation"),
+        remarks: t("N/A"),
+      },
+      {
+        id: 2,
+        fileName: "other_report_2.pdf",
+        description: t("Supplementary notes"),
+        remarks: t("For reference"),
+      },
+    ],
+  });
+
+  const REPORT_COLUMNS = [
+    {
+      colName: t("Add Attachment"),
+      fieldName: "fileName",
+      clsName: "column-text-start",
+    },
+    {
+      colName: t("Description"),
+      fieldName: "description",
+      clsName: "column-text-start",
+    },
+    {
+      colName: t("Action"),
+      fieldName: "action",
+      actions: [ 'delete', 'download'],
+      clsName: "col-sm-2 column-text-start actions-column",
+    },
+  ];
+
+  const handleAddReport = (reportType) => {
+    setCurrentReportType(reportType);
+    setShowFileModal(true);
+  };
+
+  const handleFileUpload = (uploadedReport) => {
+    if (uploadedReport) {
+      const newReport = {
+        id: Date.now(),
+        fileName: uploadedReport.documentName,
+        description: uploadedReport.description || t("No description"),
+        remarks: t("Uploaded"),
+      };
+
+      setReports((prev) => ({
+        ...prev,
+        [currentReportType]: [...prev[currentReportType], newReport],
+      }));
+    }
+  };
+
+  const handleViewReport = (rowData, reportType) => {
+    console.log("View report:", rowData, reportType);
+    alert(t("Viewing report") + `: ${rowData.fileName}`);
+  };
+
+  const handleDeleteReport = (rowData, reportType) => {
+    if (window.confirm(t("Are you sure you want to delete this report?"))) {
+      setReports(prev => ({
+        ...prev,
+        [reportType]: prev[reportType].filter(report => report.id !== rowData.id)
+      }));
+    }
+  };
+
+  const handleDownloadReport = (rowData, reportType) => {
+    console.log("Download report:", rowData, reportType);
+    alert(t("Downloading report") + `: ${rowData.fileName}`);
+  };
+
+  const renderReportTable = (reportType, reportData, title) => {
+    return (
+      <Collapsible title={title} openStat={true}>
+        <div style={{ padding: "1rem" }}>
+          <div className="d-flex justify-content-end mb-3">
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => handleAddReport(reportType)}
+            >
+              <BsPlus size={20} /> {t("Add")}
+            </Button>
+          </div>
+
+          <ActionTable
+            columns={REPORT_COLUMNS}
+            rowData={reportData}
+            tableHeader={null}
+            hideExportBtn={true}
+            hideSearchBar={true}
+            pagination={false}
+            onViewRow={(rowData) => handleViewReport(rowData, reportType)}
+            onDeleteRow={(rowData) => handleDeleteReport(rowData, reportType)}
+            download={(rowData) => handleDownloadReport(rowData, reportType)}
+            noDataText={t("No reports available")}
+          />
+        </div>
+      </Collapsible>
+    );
+  };
+
+  return (
+    <Card className="mt-4">
+      <Card.Body style={{ padding: 0 }}>
+        <div className="reports-section">
+          {renderReportTable("materialTest", reports.materialTest, t("Material Test Report"))}
+          {renderReportTable("radiography", reports.radiography, t("Radiography Report"))}
+          {renderReportTable("inspection", reports.inspection, t("Inspection Report"))}
+          {renderReportTable("other", reports.other, t("Other Report"))}
+        </div>
+      </Card.Body>
+
+      <FileReportsUploadModal
+        show={showFileModal}
+        onHide={() => setShowFileModal(false)}
+        reportType={currentReportType}
+        onSubmit={handleFileUpload}
+      />
+    </Card>
+  );
+};
+
+export default ReportsDashboard;
+{
+    "responseStatus": {
+        "status": "Document(s) fetched successfully.",
+        "message": "Operation completed successfully."
+    },
+    "data": [
+        {
+            "id": "eeb8f6e3-9829-4d47-9528-1dcbe3f1a3d8",
+            "documentName": "Material Test Certificate",
+            "documentType": "MATERIAL_TEST_REPORT",
+            "applicationNumber": "039f85be-0201-4802-b6fb-c3b9d59af6e1",
+            "fileStoreId": "9cb77694-6e20-4be9-80c3-4df8b607b915",
+            "documentSource": "MATERIAL_TEST_REPORT",
+            "description": null,
+            "auditDetails": {
+                "createdBy": null,
+                "createdOn": null,
+                "updatedBy": "eeb8f6e3-9829-4d47-9528-1dcbe3f1a3d8",
+                "updatedOn": "2025-07-31T17:30:07.061038600"
+            },
+            "active": true
+        },
+        {
+            "id": "71fd7cac-e8f3-45ec-9e3e-8ced8179d046",
+            "documentName": "Stability Booklet.pdf",
+            "documentType": "STABILITY_BOOKLETS",
+            "applicationNumber": "REG-2025-576219",
+            "fileStoreId": "9cb77694-6e20-4be9-80c3-2222",
+            "documentSource": "STABILITY_BOOKLETS",
+            "description": null,
+            "auditDetails": {
+                "createdBy": null,
+                "createdOn": null,
+                "updatedBy": "71fd7cac-e8f3-45ec-9e3e-8ced8179d046",
+                "updatedOn": "2025-07-31T12:47:04.009493800"
+            },
+            "active": true
+        },
+        {
+            "id": "9e69dede-9b18-4b5d-b7af-0317b2dc3898",
+            "documentName": "Tonnage Booklet.pdf",
+            "documentType": "TONNAGE_BOOKLETS",
+            "applicationNumber": "REG-2025-576219",
+            "fileStoreId": "9cb77694-6e20-4be9-80c3-1111",
+            "documentSource": "TONNAGE_BOOKLETS",
+            "description": null,
+            "auditDetails": {
+                "createdBy": null,
+                "createdOn": null,
+                "updatedBy": "9e69dede-9b18-4b5d-b7af-0317b2dc3898",
+                "updatedOn": "2025-07-31T12:47:03.951920700"
+            },
+            "active": true
+        },
+        {
+            "id": "b60eb73a-5129-4366-aab7-f3872e372709",
+            "documentName": "Drawing.pdf",
+            "documentType": "DRAWINGS",
+            "applicationNumber": "REG-2025-576219",
+            "fileStoreId": "9cb77694-6e20-4be9-80c3-5555",
+            "documentSource": "DRAWINGS",
+            "description": null,
+            "auditDetails": {
+                "createdBy": null,
+                "createdOn": null,
+                "updatedBy": "b60eb73a-5129-4366-aab7-f3872e372709",
+                "updatedOn": "2025-07-31T12:47:03.850909500"
+            },
+            "active": true
+        },
+        {
+            "id": "467bcc01-8e41-4f5d-b85e-66eb69e7ad02",
+            "documentName": "Work Order.pdf",
+            "documentType": "WORK_ORDER",
+            "applicationNumber": "REG-2025-576219",
+            "fileStoreId": "9cb77694-6e20-4be9-80c3-4df8b607b915",
+            "documentSource": "WORK_ORDER",
+            "description": null,
+            "auditDetails": {
+                "createdBy": null,
+                "createdOn": null,
+                "updatedBy": "467bcc01-8e41-4f5d-b85e-66eb69e7ad02",
+                "updatedOn": "2025-07-31T12:47:03.786491600"
+            },
+            "active": true
+        },
+        {
+            "id": "b2bf13ca-1804-4843-bd57-ce17d3471630",
+            "documentName": "Authorization_Letter.pdf",
+            "documentType": "AUTHORIZATION_LETTER",
+            "applicationNumber": "REG-2025-576219",
+            "fileStoreId": "9cb77694-6e20-4be9-80c3-4df8b607b915",
+            "documentSource": "AUTHORIZATION_LETTER",
+            "description": null,
+            "auditDetails": {
+                "createdBy": null,
+                "createdOn": null,
+                "updatedBy": "b2bf13ca-1804-4843-bd57-ce17d3471630",
+                "updatedOn": "2025-07-31T12:47:03.548800"
+            },
+            "active": true
+        },
+        {
+            "id": "83f057ff-d9cc-4259-8b8a-88db34c708b1",
+            "documentName": "DRAWINGS_01.pdf",
+            "documentType": "DRAWINGS",
+            "applicationNumber": "REG-2025-340181",
+            "fileStoreId": "30fdf375-b03a-4ac3-a8e5-647e48538ed5",
+            "documentSource": "DRAWINGS",
+            "description": null,
+            "auditDetails": {
+                "createdBy": null,
+                "createdOn": null,
+                "updatedBy": "83f057ff-d9cc-4259-8b8a-88db34c708b1",
+                "updatedOn": "2025-07-31T12:40:37.399442497"
+            },
+            "active": true
+        },
+        {
+            "id": "2c551a0f-a48c-4a87-888d-0d2430b09fdf",
+            "documentName": "WORK_ORDER_01.pdf",
+            "documentType": "WORK_ORDER",
+            "applicationNumber": "REG-2025-340181",
+            "fileStoreId": "c926b039-b353-49b9-9948-30a53e9a2f99",
+            "documentSource": "WORK_ORDER",
+            "description": null,
+            "auditDetails": {
+                "createdBy": null,
+                "createdOn": null,
+                "updatedBy": "2c551a0f-a48c-4a87-888d-0d2430b09fdf",
+                "updatedOn": "2025-07-31T12:40:37.397927156"
+            },
+            "active": true
+        },
+        {
+            "id": "c38e85fc-fb14-4f8f-9e14-4bfe6d5042f5",
+            "documentName": "Stability Booklets.pdf",
+            "documentType": "STABILITY_BOOKLETS",
+            "applicationNumber": "REG-2025-340181",
+            "fileStoreId": "d1e61199-6ca9-4c96-bb7b-7cbad19942f7",
+            "documentSource": "STABILITY_BOOKLETS",
+            "description": null,
+            "auditDetails": {
+                "createdBy": null,
+                "createdOn": null,
+                "updatedBy": "c38e85fc-fb14-4f8f-9e14-4bfe6d5042f5",
+                "updatedOn": "2025-07-31T12:40:37.396485249"
+            },
+            "active": true
+        },
+        {
+            "id": "7ca56fb5-d229-41bd-a32f-9e3d5426ab45",
+            "documentName": "Tonnage Booklets.pdf",
+            "documentType": "TONNAGE_BOOKLETS",
+            "applicationNumber": "REG-2025-340181",
+            "fileStoreId": "d2f479d8-d32d-47a3-8fea-a6aacf6f6f92",
+            "documentSource": "TONNAGE_BOOKLETS",
+            "description": null,
+            "auditDetails": {
+                "createdBy": null,
+                "createdOn": null,
+                "updatedBy": "7ca56fb5-d229-41bd-a32f-9e3d5426ab45",
+                "updatedOn": "2025-07-31T12:40:37.394485102"
+            },
+            "active": true
+        },
+        {
+            "id": "be9ba555-2eee-4ba6-bbe7-3ce97f38ead9",
+            "documentName": "Authorization_Letter.pdf",
+            "documentType": "AUTHORIZATION_LETTER",
+            "applicationNumber": "REG-2025-340181",
+            "fileStoreId": "66168ed2-95f9-4e6e-85df-e06cf91dcad7",
+            "documentSource": "AUTHORIZATION_LETTER",
+            "description": null,
+            "auditDetails": {
+                "createdBy": null,
+                "createdOn": null,
+                "updatedBy": "143d530f-12ff-435f-84d0-6ab35f3783d2",
+                "updatedOn": "2025-07-31T12:40:37.351765324"
+            },
+            "active": true
+        },
+        {
+            "id": "73fea9b5-05b9-40eb-9569-2c5bf19ad66e",
+            "documentName": "Stability Booklet.pdf",
+            "documentType": "STABILITY_BOOKLETS",
+            "applicationNumber": "REG-2025-234663",
+            "fileStoreId": "9cb77694-6e20-4be9-80c3-2222",
+            "documentSource": "STABILITY_BOOKLETS",
+            "description": null,
+            "auditDetails": {
+                "createdBy": null,
+                "createdOn": null,
+                "updatedBy": "73fea9b5-05b9-40eb-9569-2c5bf19ad66e",
+                "updatedOn": "2025-07-31T12:20:54.031819700"
+            },
+            "active": true
+        },
+        {
+            "id": "cafead66-0763-4faa-b8bc-3d9d2a867f6c",
+            "documentName": "Tonnage Booklet.pdf",
+            "documentType": "TONNAGE_BOOKLETS",
+            "applicationNumber": "REG-2025-234663",
+            "fileStoreId": "9cb77694-6e20-4be9-80c3-1111",
+            "documentSource": "TONNAGE_BOOKLETS",
+            "description": null,
+            "auditDetails": {
+                "createdBy": null,
+                "createdOn": null,
+                "updatedBy": "cafead66-0763-4faa-b8bc-3d9d2a867f6c",
+                "updatedOn": "2025-07-31T12:20:53.039641400"
+            },
+            "active": true
+        },
+        {
+            "id": "acbfd221-2140-4cf5-98cd-7d0d9798046a",
+            "documentName": "Drawing.pdf",
+            "documentType": "DRAWINGS",
+            "applicationNumber": "REG-2025-234663",
+            "fileStoreId": "9cb77694-6e20-4be9-80c3-5555",
+            "documentSource": "DRAWINGS",
+            "description": null,
+            "auditDetails": {
+                "createdBy": null,
+                "createdOn": null,
+                "updatedBy": "acbfd221-2140-4cf5-98cd-7d0d9798046a",
+                "updatedOn": "2025-07-31T12:20:51.622568500"
+            },
+            "active": true
+        },
+        {
+            "id": "3206140d-a0c0-4509-8635-bff1ea705691",
+            "documentName": "Work Order.pdf",
+            "documentType": "WORK_ORDER",
+            "applicationNumber": "REG-2025-234663",
+            "fileStoreId": "9cb77694-6e20-4be9-80c3-4df8b607b915",
+            "documentSource": "WORK_ORDER",
+            "description": null,
+            "auditDetails": {
+                "createdBy": null,
+                "createdOn": null,
+                "updatedBy": "3206140d-a0c0-4509-8635-bff1ea705691",
+                "updatedOn": "2025-07-31T12:20:50.104925200"
+            },
+            "active": true
+        },
+        {
+            "id": "b0940dbb-825d-4d6b-921b-8b0dcbbf7f1b",
+            "documentName": "Authorization_Letter.pdf",
+            "documentType": "AUTHORIZATION_LETTER",
+            "applicationNumber": "REG-2025-234663",
+            "fileStoreId": "9cb77694-6e20-4be9-80c3-4df8b607b915",
+            "documentSource": "AUTHORIZATION_LETTER",
+            "description": null,
+            "auditDetails": {
+                "createdBy": null,
+                "createdOn": null,
+                "updatedBy": "b0940dbb-825d-4d6b-921b-8b0dcbbf7f1b",
+                "updatedOn": "2025-07-31T12:20:46.126242300"
+            },
+            "active": true
+        },
+        {
+            "id": "00e831ae-a74c-407b-81ca-a6b2b60ab8bd",
+            "documentName": "Stability Booklet.pdf",
+            "documentType": "STABILITY_BOOKLETS",
+            "applicationNumber": "REG-2025-317678",
+            "fileStoreId": "9cb77694-6e20-4be9-80c3-2222",
+            "documentSource": "STABILITY_BOOKLETS",
+            "description": null,
+            "auditDetails": {
+                "createdBy": null,
+                "createdOn": null,
+                "updatedBy": "00e831ae-a74c-407b-81ca-a6b2b60ab8bd",
+                "updatedOn": "2025-07-31T12:20:34.812998200"
+            },
+            "active": true
+        },
+        {
+            "id": "9eef0d4e-1dfb-4222-996e-78ab73987bde",
+            "documentName": "Tonnage Booklet.pdf",
+            "documentType": "TONNAGE_BOOKLETS",
+            "applicationNumber": "REG-2025-317678",
+            "fileStoreId": "9cb77694-6e20-4be9-80c3-1111",
+            "documentSource": "TONNAGE_BOOKLETS",
+            "description": null,
+            "auditDetails": {
+                "createdBy": null,
+                "createdOn": null,
+                "updatedBy": "9eef0d4e-1dfb-4222-996e-78ab73987bde",
+                "updatedOn": "2025-07-31T12:20:34.045560700"
+            },
+            "active": true
+        },
+        {
+            "id": "6f70212e-3ee1-4493-9cb7-c736a355c4e3",
+            "documentName": "Drawing.pdf",
+            "documentType": "DRAWINGS",
+            "applicationNumber": "REG-2025-317678",
+            "fileStoreId": "9cb77694-6e20-4be9-80c3-5555",
+            "documentSource": "DRAWINGS",
+            "description": null,
+            "auditDetails": {
+                "createdBy": null,
+                "createdOn": null,
+                "updatedBy": "6f70212e-3ee1-4493-9cb7-c736a355c4e3",
+                "updatedOn": "2025-07-31T12:20:33.045864400"
+            },
+            "active": true
+        },
+        {
+            "id": "aa5f3aaa-f2c5-414e-9805-6c7b4e13c3cd",
+            "documentName": "Work Order.pdf",
+            "documentType": "WORK_ORDER",
+            "applicationNumber": "REG-2025-317678",
+            "fileStoreId": "9cb77694-6e20-4be9-80c3-4df8b607b915",
+            "documentSource": "WORK_ORDER",
+            "description": null,
+            "auditDetails": {
+                "createdBy": null,
+                "createdOn": null,
+                "updatedBy": "aa5f3aaa-f2c5-414e-9805-6c7b4e13c3cd",
+                "updatedOn": "2025-07-31T12:20:32.293507200"
+            },
+            "active": true
+        },
+        {
+            "id": "f42f66da-baaf-41f7-9e8f-ad65ca47bbc1",
+            "documentName": "Authorization_Letter.pdf",
+            "documentType": "AUTHORIZATION_LETTER",
+            "applicationNumber": "REG-2025-317678",
+            "fileStoreId": "9cb77694-6e20-4be9-80c3-4df8b607b915",
+            "documentSource": "AUTHORIZATION_LETTER",
+            "description": null,
+            "auditDetails": {
+                "createdBy": null,
+                "createdOn": null,
+                "updatedBy": "f42f66da-baaf-41f7-9e8f-ad65ca47bbc1",
+                "updatedOn": "2025-07-31T12:20:30.813917900"
+            },
+            "active": true
+        },
+        {
+            "id": "3ad564cb-6899-4a43-a06e-a7b3d7b242d0",
+            "documentName": "DRAWINGS_01.pdf",
+            "documentType": "DRAWINGS",
+            "applicationNumber": "REG-2025-849285",
+            "fileStoreId": "9c564fb8-48e3-4b8f-b95b-602555df6cbb",
+            "documentSource": "DRAWINGS",
+            "description": null,
+            "auditDetails": {
+                "createdBy": null,
+                "createdOn": null,
+                "updatedBy": "3ad564cb-6899-4a43-a06e-a7b3d7b242d0",
+                "updatedOn": "2025-07-31T11:27:09.068544024"
+            },
+            "active": true
+        },
+        {
+            "id": "04d899fd-45db-47d3-b0ef-4ea1b6890028",
+            "documentName": "WORK_ORDER_02.pdf",
+            "documentType": "WORK_ORDER",
+            "applicationNumber": "REG-2025-849285",
+            "fileStoreId": "a6b8aafc-2a34-4db5-ac49-373188a2fb5c",
+            "documentSource": "WORK_ORDER",
+            "description": null,
+            "auditDetails": {
+                "createdBy": null,
+                "createdOn": null,
+                "updatedBy": "04d899fd-45db-47d3-b0ef-4ea1b6890028",
+                "updatedOn": "2025-07-31T11:27:09.067233934"
+            },
+            "active": true
+        },
+        {
+            "id": "6bc0c6ff-cf66-45de-b239-8984b19f97e5",
+            "documentName": "WORK_ORDER_01.pdf",
+            "documentType": "WORK_ORDER",
+            "applicationNumber": "REG-2025-849285",
+            "fileStoreId": "c342832d-0f14-42e6-962e-50ca1b70f701",
+            "documentSource": "WORK_ORDER",
+            "description": null,
+            "auditDetails": {
+                "createdBy": null,
+                "createdOn": null,
+                "updatedBy": "6bc0c6ff-cf66-45de-b239-8984b19f97e5",
+                "updatedOn": "2025-07-31T11:27:09.065999187"
+            },
+            "active": true
+        },
+        {
+            "id": "e41416e1-319d-4341-ada1-55b0278c00ab",
+            "documentName": "Stability Booklets.pdf",
+            "documentType": "STABILITY_BOOKLETS",
+            "applicationNumber": "REG-2025-849285",
+            "fileStoreId": "3341f70f-421e-4b8d-ae0f-bf0c30243e8f",
+            "documentSource": "STABILITY_BOOKLETS",
+            "description": null,
+            "auditDetails": {
+                "createdBy": null,
+                "createdOn": null,
+                "updatedBy": "e41416e1-319d-4341-ada1-55b0278c00ab",
+                "updatedOn": "2025-07-31T11:27:09.064731709"
+            },
+            "active": true
+        },
+        {
+            "id": "59e21ee1-38b7-426f-8a1f-25a12fa88cd8",
+            "documentName": "Tonnage Booklets.pdf",
+            "documentType": "TONNAGE_BOOKLETS",
+            "applicationNumber": "REG-2025-849285",
+            "fileStoreId": "feb877ab-1a2e-4a8a-b41d-89eb30ed14ba",
+            "documentSource": "TONNAGE_BOOKLETS",
+            "description": null,
+            "auditDetails": {
+                "createdBy": null,
+                "createdOn": null,
+                "updatedBy": "59e21ee1-38b7-426f-8a1f-25a12fa88cd8",
+                "updatedOn": "2025-07-31T11:27:09.063224649"
+            },
+            "active": true
+        },
+        {
+            "id": "7621deab-e84e-446f-afdb-88329000ef31",
+            "documentName": "Authorization_Letter.pdf",
+            "documentType": "AUTHORIZATION_LETTER",
+            "applicationNumber": "REG-2025-849285",
+            "fileStoreId": "bbbc6c23-534e-4b04-87ce-757b643dc970",
+            "documentSource": "AUTHORIZATION_LETTER",
+            "description": null,
+            "auditDetails": {
+                "createdBy": null,
+                "createdOn": null,
+                "updatedBy": "143d530f-12ff-435f-84d0-6ab35f3783d2",
+                "updatedOn": "2025-07-31T11:27:09.056271717"
+            },
+            "active": true
+        },
+        {
+            "id": "e7d5dc07-3a6c-4be6-8e16-6aaf7401d6bf",
+            "documentName": "Authorization_Letter.pdf",
+            "documentType": "AUTHORIZATION_LETTER",
+            "applicationNumber": "REG-2025-199568",
+            "fileStoreId": "741596bd-a301-451d-9da7-8ea2748fc9e1",
+            "documentSource": "AUTHORIZATION_LETTER",
+            "description": null,
+            "auditDetails": {
+                "createdBy": null,
+                "createdOn": null,
+                "updatedBy": "143d530f-12ff-435f-84d0-6ab35f3783d2",
+                "updatedOn": "2025-07-31T07:48:39.213916847"
+            },
+            "active": true
+        },
+        {
+            "id": "8827e9d5-06fd-48f8-8227-dbe853658953",
+            "documentName": "Authorization_Letter.pdf",
+            "documentType": "AUTHORIZATION_LETTER",
+            "applicationNumber": "REG-2025-587342",
+            "fileStoreId": "63ec6263-43d5-46a6-a4b8-96d225100f3f",
+            "documentSource": "AUTHORIZATION_LETTER",
+            "description": null,
+            "auditDetails": {
+                "createdBy": null,
+                "createdOn": null,
+                "updatedBy": "143d530f-12ff-435f-84d0-6ab35f3783d2",
+                "updatedOn": "2025-07-31T07:30:06.491949901"
+            },
+            "active": true
+        },
+        {
+            "id": "5d2eb2c5-39c8-448c-b1ca-f3de92457a0c",
+            "documentName": "Authorization_Letter.pdf",
+            "documentType": "AUTHORIZATION_LETTER",
+            "applicationNumber": "REG-2025-537852",
+            "fileStoreId": "0441e912-088a-4cc9-8ba2-1b3df0eff35a",
+            "documentSource": "AUTHORIZATION_LETTER",
+            "description": null,
+            "auditDetails": {
+                "createdBy": null,
+                "createdOn": null,
+                "updatedBy": "143d530f-12ff-435f-84d0-6ab35f3783d2",
+                "updatedOn": "2025-07-31T04:22:27.570296120"
+            },
+            "active": true
+        },
+        {
+            "id": "97263717-f85d-43ef-bd08-ddcabe7dc5cc",
+            "documentName": "Authorization_Letter.pdf",
+            "documentType": "AUTHORIZATION_LETTER",
+            "applicationNumber": "REG-2025-287285",
+            "fileStoreId": "8bbb0267-b8ad-4ea3-9edd-bc99619653e1",
+            "documentSource": "AUTHORIZATION_LETTER",
+            "description": null,
+            "auditDetails": {
+                "createdBy": null,
+                "createdOn": null,
+                "updatedBy": "143d530f-12ff-435f-84d0-6ab35f3783d2",
+                "updatedOn": "2025-07-31T04:19:46.333465728"
+            },
+            "active": true
+        },
+        {
+            "id": "b438f024-cbb4-4e01-a191-d3ea5fae7c84",
+            "documentName": "Authorization_Letter.pdf",
+            "documentType": "AUTHORIZATION_LETTER",
+            "applicationNumber": "REG-2025-959155",
+            "fileStoreId": "ebe4b73f-ac6b-460d-a96a-ebe756ce3aeb",
+            "documentSource": "AUTHORIZATION_LETTER",
+            "description": null,
+            "auditDetails": {
+                "createdBy": null,
+                "createdOn": null,
+                "updatedBy": "143d530f-12ff-435f-84d0-6ab35f3783d2",
+                "updatedOn": "2025-07-30T18:39:42.046307824"
+            },
+            "active": true
+        },
+        {
+            "id": "cc500a3a-66b7-4d3e-863c-c20fbd613249",
+            "documentName": "Authorization_Letter.pdf",
+            "documentType": "AUTHORIZATION_LETTER",
+            "applicationNumber": "REG-2025-152122",
+            "fileStoreId": "7f145c7c-1dd5-4ac1-9775-b5fc527b86db",
+            "documentSource": "AUTHORIZATION_LETTER",
+            "description": null,
+            "auditDetails": {
+                "createdBy": null,
+                "createdOn": null,
+                "updatedBy": "143d530f-12ff-435f-84d0-6ab35f3783d2",
+                "updatedOn": "2025-07-30T18:27:37.677782377"
+            },
+            "active": true
+        },
+        {
+            "id": "e015214e-3c24-4949-af1d-85ba825fb302",
+            "documentName": "Authorization_Letter.pdf",
+            "documentType": "AUTHORIZATION_LETTER",
+            "applicationNumber": "REG-2025-558669",
+            "fileStoreId": null,
+            "documentSource": "AUTHORIZATION_LETTER",
+            "description": null,
+            "auditDetails": {
+                "createdBy": null,
+                "createdOn": null,
+                "updatedBy": "143d530f-12ff-435f-84d0-6ab35f3783d2",
+                "updatedOn": "2025-07-30T18:21:12.191258669"
+            },
+            "active": true
+        },
+        {
+            "id": "e1f919fc-a7ee-4682-a546-4e7621dc0b89",
+            "documentName": "Authorization_Letter.pdf",
+            "documentType": "AUTHORIZATION_LETTER",
+            "applicationNumber": "REG-2025-182434",
+            "fileStoreId": null,
+            "documentSource": "AUTHORIZATION_LETTER",
+            "description": null,
+            "auditDetails": {
+                "createdBy": null,
+                "createdOn": null,
+                "updatedBy": "143d530f-12ff-435f-84d0-6ab35f3783d2",
+                "updatedOn": "2025-07-30T18:07:27.321189997"
+            },
+            "active": true
+        },
+        {
+            "id": "97e83b63-bab6-4c4a-bf09-d1dfa6b32719",
+            "documentName": "Authorization_Letter.pdf",
+            "documentType": "AUTHORIZATION_LETTER",
+            "applicationNumber": "REG-2025-463434",
+            "fileStoreId": null,
+            "documentSource": "AUTHORIZATION_LETTER",
+            "description": null,
+            "auditDetails": {
+                "createdBy": null,
+                "createdOn": null,
+                "updatedBy": "143d530f-12ff-435f-84d0-6ab35f3783d2",
+                "updatedOn": "2025-07-30T18:00:39.770010556"
+            },
+            "active": true
+        },
+        {
+            "id": "37f92bb9-6e4e-45c2-b16e-385f1058a61f",
+            "documentName": "Stability Booklet.pdf",
+            "documentType": "STABILITY_BOOKLETS",
+            "applicationNumber": "REG-2025-289399",
+            "fileStoreId": "9cb77694-6e20-4be9-80c3-2222",
+            "documentSource": "STABILITY_BOOKLETS",
+            "description": null,
+            "auditDetails": {
+                "createdBy": null,
+                "createdOn": null,
+                "updatedBy": "37f92bb9-6e4e-45c2-b16e-385f1058a61f",
+                "updatedOn": "2025-07-30T17:20:40.475116200"
+            },
+            "active": true
+        },
+        {
+            "id": "28605ad7-1371-4818-9980-5b21e74f261e",
+            "documentName": "Tonnage Booklet.pdf",
+            "documentType": "TONNAGE_BOOKLETS",
+            "applicationNumber": "REG-2025-289399",
+            "fileStoreId": "9cb77694-6e20-4be9-80c3-1111",
+            "documentSource": "TONNAGE_BOOKLETS",
+            "description": null,
+            "auditDetails": {
+                "createdBy": null,
+                "createdOn": null,
+                "updatedBy": "28605ad7-1371-4818-9980-5b21e74f261e",
+                "updatedOn": "2025-07-30T17:20:40.402111500"
+            },
+            "active": true
+        },
+        {
+            "id": "5896b903-058d-4498-abd7-927dc1862f35",
+            "documentName": "Drawing.pdf",
+            "documentType": "DRAWINGS",
+            "applicationNumber": "REG-2025-289399",
+            "fileStoreId": "9cb77694-6e20-4be9-80c3-5555",
+            "documentSource": "DRAWINGS",
+            "description": null,
+            "auditDetails": {
+                "createdBy": null,
+                "createdOn": null,
+                "updatedBy": "5896b903-058d-4498-abd7-927dc1862f35",
+                "updatedOn": "2025-07-30T17:20:40.309558800"
+            },
+            "active": true
+        },
+        {
+            "id": "d899a36b-cd85-4074-9129-3b65be3e1261",
+            "documentName": "Work Order.pdf",
+            "documentType": "WORK_ORDER",
+            "applicationNumber": "REG-2025-289399",
+            "fileStoreId": "9cb77694-6e20-4be9-80c3-4df8b607b915",
+            "documentSource": "WORK_ORDER",
+            "description": null,
+            "auditDetails": {
+                "createdBy": null,
+                "createdOn": null,
+                "updatedBy": "d899a36b-cd85-4074-9129-3b65be3e1261",
+                "updatedOn": "2025-07-30T17:20:40.220165300"
+            },
+            "active": true
+        },
+        {
+            "id": "a2a11942-613d-407c-883d-114ed786f3f0",
+            "documentName": "Authorization_Letter.pdf",
+            "documentType": "AUTHORIZATION_LETTER",
+            "applicationNumber": "REG-2025-289399",
+            "fileStoreId": "9cb77694-6e20-4be9-80c3-4df8b607b915",
+            "documentSource": "AUTHORIZATION_LETTER",
+            "description": null,
+            "auditDetails": {
+                "createdBy": null,
+                "createdOn": null,
+                "updatedBy": "a2a11942-613d-407c-883d-114ed786f3f0",
+                "updatedOn": "2025-07-30T17:20:39.640515600"
+            },
+            "active": true
+        },
+        {
+            "id": "f72ffc72-41bf-4466-bfbd-e4cdbade7f1a",
+            "documentName": "Authorization_Letter.pdf",
+            "documentType": "AUTHORIZATION_LETTER",
+            "applicationNumber": "REG-2025-223171",
+            "fileStoreId": "9cb77694-6e20-4be9-80c3-4df8b607b915",
+            "documentSource": "AUTHORIZATION_LETTER",
+            "description": null,
+            "auditDetails": {
+                "createdBy": null,
+                "createdOn": null,
+                "updatedBy": "f72ffc72-41bf-4466-bfbd-e4cdbade7f1a",
+                "updatedOn": "2025-07-30T17:18:07.231442700"
+            },
+            "active": true
+        },
+        {
+            "id": "75b9b46b-172e-4d51-83e0-f6425ff6aece",
+            "documentName": "Stability Booklet.pdf",
+            "documentType": "STABILITY_BOOKLETS",
+            "applicationNumber": "REG-2025-451150",
+            "fileStoreId": "9cb77694-6e20-4be9-80c3-2222",
+            "documentSource": "STABILITY_BOOKLETS",
+            "description": null,
+            "auditDetails": {
+                "createdBy": null,
+                "createdOn": null,
+                "updatedBy": "75b9b46b-172e-4d51-83e0-f6425ff6aece",
+                "updatedOn": "2025-07-30T17:12:56.350180200"
+            },
+            "active": true
+        },
+        {
+            "id": "ec4f3ecd-1d8f-4b2a-a5a5-70ecd327f7c8",
+            "documentName": "Tonnage Booklet.pdf",
+            "documentType": "TONNAGE_BOOKLETS",
+            "applicationNumber": "REG-2025-451150",
+            "fileStoreId": "9cb77694-6e20-4be9-80c3-1111",
+            "documentSource": "TONNAGE_BOOKLETS",
+            "description": null,
+            "auditDetails": {
+                "createdBy": null,
+                "createdOn": null,
+                "updatedBy": "ec4f3ecd-1d8f-4b2a-a5a5-70ecd327f7c8",
+                "updatedOn": "2025-07-30T17:12:56.267173400"
+            },
+            "active": true
+        },
+        {
+            "id": "5af13113-dc94-4367-9b23-83585fc48e52",
+            "documentName": "Drawing.pdf",
+            "documentType": "DRAWINGS",
+            "applicationNumber": "REG-2025-451150",
+            "fileStoreId": "9cb77694-6e20-4be9-80c3-5555",
+            "documentSource": "DRAWINGS",
+            "description": null,
+            "auditDetails": {
+                "createdBy": null,
+                "createdOn": null,
+                "updatedBy": "5af13113-dc94-4367-9b23-83585fc48e52",
+                "updatedOn": "2025-07-30T17:12:56.182724100"
+            },
+            "active": true
+        },
+        {
+            "id": "f3f1dcb3-dc76-4921-8d5c-ce5a9e294efc",
+            "documentName": "Work Order.pdf",
+            "documentType": "WORK_ORDER",
+            "applicationNumber": "REG-2025-451150",
+            "fileStoreId": "9cb77694-6e20-4be9-80c3-4df8b607b915",
+            "documentSource": "WORK_ORDER",
+            "description": null,
+            "auditDetails": {
+                "createdBy": null,
+                "createdOn": null,
+                "updatedBy": "f3f1dcb3-dc76-4921-8d5c-ce5a9e294efc",
+                "updatedOn": "2025-07-30T17:12:56.078020900"
+            },
+            "active": true
+        },
+        {
+            "id": "773cfb9b-1345-4746-ac46-534bbb54373a",
+            "documentName": "Authorization_Letter.pdf",
+            "documentType": "AUTHORIZATION_LETTER",
+            "applicationNumber": "REG-2025-451150",
+            "fileStoreId": "9cb77694-6e20-4be9-80c3-4df8b607b915",
+            "documentSource": "AUTHORIZATION_LETTER",
+            "description": null,
+            "auditDetails": {
+                "createdBy": null,
+                "createdOn": null,
+                "updatedBy": "773cfb9b-1345-4746-ac46-534bbb54373a",
+                "updatedOn": "2025-07-30T17:12:55.612045500"
+            },
+            "active": true
+        },
+        {
+            "id": "9a9f02fc-9f6d-4b26-a34b-cfd89d9b4446",
+            "documentName": "Stability Booklet.pdf",
+            "documentType": "STABILITY_BOOKLETS",
+            "applicationNumber": "REG-2025-604409",
+            "fileStoreId": "9cb77694-6e20-4be9-80c3-2222",
+            "documentSource": "STABILITY_BOOKLETS",
+            "description": null,
+            "auditDetails": {
+                "createdBy": null,
+                "createdOn": null,
+                "updatedBy": "9a9f02fc-9f6d-4b26-a34b-cfd89d9b4446",
+                "updatedOn": "2025-07-30T17:08:09.647837300"
+            },
+            "active": true
+        },
+        {
+            "id": "f8d65bb1-dbfb-4a8e-9793-ce1211b41538",
+            "documentName": "Tonnage Booklet.pdf",
+            "documentType": "TONNAGE_BOOKLETS",
+            "applicationNumber": "REG-2025-604409",
+            "fileStoreId": "9cb77694-6e20-4be9-80c3-1111",
+            "documentSource": "TONNAGE_BOOKLETS",
+            "description": null,
+            "auditDetails": {
+                "createdBy": null,
+                "createdOn": null,
+                "updatedBy": "f8d65bb1-dbfb-4a8e-9793-ce1211b41538",
+                "updatedOn": "2025-07-30T17:08:09.572986300"
+            },
+            "active": true
+        },
+        {
+            "id": "47d51f4b-1ede-4d3e-b81e-26f739b29c6b",
+            "documentName": "Drawing.pdf",
+            "documentType": "DRAWINGS",
+            "applicationNumber": "REG-2025-604409",
+            "fileStoreId": "9cb77694-6e20-4be9-80c3-5555",
+            "documentSource": "DRAWINGS",
+            "description": null,
+            "auditDetails": {
+                "createdBy": null,
+                "createdOn": null,
+                "updatedBy": "47d51f4b-1ede-4d3e-b81e-26f739b29c6b",
+                "updatedOn": "2025-07-30T17:08:09.495650400"
+            },
+            "active": true
+        },
+        {
+            "id": "6a8e8e82-646b-46c0-9867-878b340cbb8f",
+            "documentName": "Work Order.pdf",
+            "documentType": "WORK_ORDER",
+            "applicationNumber": "REG-2025-604409",
+            "fileStoreId": "9cb77694-6e20-4be9-80c3-4df8b607b915",
+            "documentSource": "WORK_ORDER",
+            "description": null,
+            "auditDetails": {
+                "createdBy": null,
+                "createdOn": null,
+                "updatedBy": "6a8e8e82-646b-46c0-9867-878b340cbb8f",
+                "updatedOn": "2025-07-30T17:08:09.415681200"
+            },
+            "active": true
+        },
+        {
+            "id": "94a28618-1fff-4ca9-8fe1-99ff7e34b996",
+            "documentName": "Authorization_Letter.pdf",
+            "documentType": "AUTHORIZATION_LETTER",
+            "applicationNumber": "REG-2025-604409",
+            "fileStoreId": "9cb77694-6e20-4be9-80c3-4df8b607b915",
+            "documentSource": "AUTHORIZATION_LETTER",
+            "description": null,
+            "auditDetails": {
+                "createdBy": null,
+                "createdOn": null,
+                "updatedBy": "94a28618-1fff-4ca9-8fe1-99ff7e34b996",
+                "updatedOn": "2025-07-30T17:08:08.994046700"
+            },
+            "active": true
+        },
+        {
+            "id": "81bb3033-45df-49f6-8db7-000e0c148745",
+            "documentName": "Authorization_Letter.pdf",
+            "documentType": "AUTHORIZATION_LETTER",
+            "applicationNumber": "REG-2025-520617",
+            "fileStoreId": "9e3f90df-028f-431b-aa11-2a8f9fe53adc",
+            "documentSource": "AUTHORIZATION_LETTER",
+            "description": null,
+            "auditDetails": {
+                "createdBy": null,
+                "createdOn": null,
+                "updatedBy": "81bb3033-45df-49f6-8db7-000e0c148745",
+                "updatedOn": "2025-07-30T10:49:14.919092593"
+            },
+            "active": true
+        },
+        {
+            "id": "f23c896f-e5b9-41b1-a393-756217b9caac",
+            "documentName": "Authorization_Letter.pdf",
+            "documentType": "AUTHORIZATION_LETTER",
+            "applicationNumber": "REG-2025-482103",
+            "fileStoreId": "f3827907-479a-44ea-9c82-6c3194d58403",
+            "documentSource": "AUTHORIZATION_LETTER",
+            "description": null,
+            "auditDetails": {
+                "createdBy": null,
+                "createdOn": null,
+                "updatedBy": "143d530f-12ff-435f-84d0-6ab35f3783d2",
+                "updatedOn": "2025-07-30T07:24:42.943066893"
+            },
+            "active": true
+        },
+        {
+            "id": "e994f259-c38c-4e0d-8d66-9e42d9a5ba3d",
+            "documentName": "Authorization_Letter.pdf",
+            "documentType": "AUTHORIZATION_LETTER",
+            "applicationNumber": "REG-2025-314648",
+            "fileStoreId": "bfa2f948-c8bd-4d50-8859-5266fd9743d9",
+            "documentSource": "AUTHORIZATION_LETTER",
+            "description": null,
+            "auditDetails": {
+                "createdBy": null,
+                "createdOn": null,
+                "updatedBy": "143d530f-12ff-435f-84d0-6ab35f3783d2",
+                "updatedOn": "2025-07-30T07:20:27.629673837"
+            },
+            "active": true
+        },
+        {
+            "id": "cbbffbb0-4fe4-47f4-94b8-408f692eb4f0",
+            "documentName": "Authorization_Letter.pdf",
+            "documentType": "AUTHORIZATION_LETTER",
+            "applicationNumber": "REG-2025-407460",
+            "fileStoreId": "9cb77694-6e20-4be9-80c3-4df8b607b915",
+            "documentSource": "AUTHORIZATION_LETTER",
+            "description": null,
+            "auditDetails": {
+                "createdBy": null,
+                "createdOn": null,
+                "updatedBy": "cbbffbb0-4fe4-47f4-94b8-408f692eb4f0",
+                "updatedOn": "2025-07-30T06:17:05.131557264"
+            },
+            "active": true
+        },
+        {
+            "id": "af247b56-bb21-4484-8117-0584535c5f5d",
+            "documentName": "Authorization_Letter.pdf",
+            "documentType": "AUTHORIZATION_LETTER",
+            "applicationNumber": "REG-2025-994136",
+            "fileStoreId": "9cb77694-6e20-4be9-80c3-4df8b607b915",
+            "documentSource": "AUTHORIZATION_LETTER",
+            "description": null,
+            "auditDetails": {
+                "createdBy": null,
+                "createdOn": null,
+                "updatedBy": "af247b56-bb21-4484-8117-0584535c5f5d",
+                "updatedOn": "2025-07-30T06:13:34.001050520"
+            },
+            "active": true
+        },
+        {
+            "id": "77ec0995-3ff2-4168-a1bc-8ce5395f1346",
+            "documentName": "Authorization_Letter.pdf",
+            "documentType": "AUTHORIZATION_LETTER",
+            "applicationNumber": "REG-2025-148886",
+            "fileStoreId": "9cb77694-6e20-4be9-80c3-4df8b607b915",
+            "documentSource": "AUTHORIZATION_LETTER",
+            "description": null,
+            "auditDetails": {
+                "createdBy": null,
+                "createdOn": null,
+                "updatedBy": "77ec0995-3ff2-4168-a1bc-8ce5395f1346",
+                "updatedOn": "2025-07-30T06:13:18.785128309"
+            },
+            "active": true
+        },
+        {
+            "id": "65594499-bf03-4679-aa76-c1c96ea55677",
+            "documentName": "Authorization_Letter.pdf",
+            "documentType": "AUTHORIZATION_LETTER",
+            "applicationNumber": "REG-2025-251846",
+            "fileStoreId": "9cb77694-6e20-4be9-80c3-4df8b607b915",
+            "documentSource": "AUTHORIZATION_LETTER",
+            "description": null,
+            "auditDetails": {
+                "createdBy": null,
+                "createdOn": null,
+                "updatedBy": "65594499-bf03-4679-aa76-c1c96ea55677",
+                "updatedOn": "2025-07-30T06:12:09.517176494"
+            },
+            "active": true
+        },
+        {
+            "id": "dd8dc609-d890-47d8-b9b7-ce3637dd838b",
+            "documentName": "Authorization_Letter.pdf",
+            "documentType": "AUTHORIZATION_LETTER",
+            "applicationNumber": "REG-2025-921320",
+            "fileStoreId": "9cb77694-6e20-4be9-80c3-4df8b607b915",
+            "documentSource": "AUTHORIZATION_LETTER",
+            "description": null,
+            "auditDetails": {
+                "createdBy": null,
+                "createdOn": null,
+                "updatedBy": "dd8dc609-d890-47d8-b9b7-ce3637dd838b",
+                "updatedOn": "2025-07-30T06:11:49.810793978"
+            },
+            "active": true
+        },
+        {
+            "id": "e32e73e2-9c5c-466b-9131-6bd1b52142d4",
+            "documentName": "Authorization_Letter.pdf",
+            "documentType": "AUTHORIZATION_LETTER",
+            "applicationNumber": "REG-2025-936722",
+            "fileStoreId": "9cb77694-6e20-4be9-80c3-4df8b607b915",
+            "documentSource": "AUTHORIZATION_LETTER",
+            "description": null,
+            "auditDetails": {
+                "createdBy": null,
+                "createdOn": null,
+                "updatedBy": "e32e73e2-9c5c-466b-9131-6bd1b52142d4",
+                "updatedOn": "2025-07-30T06:05:29.601726950"
+            },
+            "active": true
+        },
+        {
+            "id": "48e3b736-cb00-414a-be8c-454b5d7cfeff",
+            "documentName": "Authorization_Letter.pdf",
+            "documentType": "AUTHORIZATION_LETTER",
+            "applicationNumber": "REG-2025-776911",
+            "fileStoreId": "9cb77694-6e20-4be9-80c3-4df8b607b915",
+            "documentSource": "AUTHORIZATION_LETTER",
+            "description": null,
+            "auditDetails": {
+                "createdBy": null,
+                "createdOn": null,
+                "updatedBy": "48e3b736-cb00-414a-be8c-454b5d7cfeff",
+                "updatedOn": "2025-07-30T05:29:47.919947464"
+            },
+            "active": true
+        },
+        {
+            "id": "27ee5c31-5824-4059-89ba-9c2ed496f6da",
+            "documentName": "Authorization_Letter.pdf",
+            "documentType": "AUTHORIZATION_LETTER",
+            "applicationNumber": "REG-2025-427527",
+            "fileStoreId": "9cb77694-6e20-4be9-80c3-4df8b607b915",
+            "documentSource": "AUTHORIZATION_LETTER",
+            "description": null,
+            "auditDetails": {
+                "createdBy": null,
+                "createdOn": null,
+                "updatedBy": "27ee5c31-5824-4059-89ba-9c2ed496f6da",
+                "updatedOn": "2025-07-29T19:06:45.135390"
+            },
+            "active": true
+        },
+        {
+            "id": "a1daf846-e3e5-488f-a670-8b6b23b0c95f",
+            "documentName": "Material Test Certificate Updated",
+            "documentType": "MATERIAL_TEST_REPORT",
+            "applicationNumber": "039f85be-0201-4802-b6fb-c3b9d59af6e1",
+            "fileStoreId": "9cb77694-6e20-4be9-80c3-4df8b607b915",
+            "documentSource": "MATERIAL_TEST_REPORT",
+            "description": null,
+            "auditDetails": {
+                "createdBy": null,
+                "createdOn": null,
+                "updatedBy": "user-001",
+                "updatedOn": "2025-07-28T17:46:30.503408300"
+            },
+            "active": true
+        },
+        {
+            "id": "805aecb5-beb1-4ad8-a3fb-e62d95fa8bd3",
+            "documentName": "Material Test Certificate",
+            "documentType": "MATERIAL_TEST_REPORT",
+            "applicationNumber": null,
+            "fileStoreId": "9cb77694-6e20-4be9-80c3-4df8b607b915",
+            "documentSource": "MATERIAL_TEST_REPORT",
+            "description": null,
+            "auditDetails": {
+                "createdBy": null,
+                "createdOn": null,
+                "updatedBy": "805aecb5-beb1-4ad8-a3fb-e62d95fa8bd3",
+                "updatedOn": "2025-07-28T17:34:03.425546500"
+            },
+            "active": true
+        },
+        {
+            "id": "33356a32-535a-43f5-b66d-85eb0b93cc33",
+            "documentName": "Material Test Certificate",
+            "documentType": "MATERIAL_TEST_REPORT",
+            "applicationNumber": null,
+            "fileStoreId": "9cb77694-6e20-4be9-80c3-4df8b607b915",
+            "documentSource": "MATERIAL_TEST_REPORT",
+            "description": null,
+            "auditDetails": {
+                "createdBy": null,
+                "createdOn": null,
+                "updatedBy": "user-001",
+                "updatedOn": "2025-07-28T17:30:39.115771800"
+            },
+            "active": true
+        },
+        {
+            "id": "",
+            "documentName": "",
+            "documentType": null,
+            "applicationNumber": "039f85be-0201-4802-b6fb-c3b9d59af6e1",
+            "fileStoreId": "9cb77694-6e20-4be9-80c3-4df8b607b915",
+            "documentSource": null,
+            "description": null,
+            "auditDetails": {
+                "createdBy": null,
+                "createdOn": null,
+                "updatedBy": "",
+                "updatedOn": ""
+            },
+            "active": true
+        }
+    ],
+    "errors": null,
+    "timestamp": 1753966063.056111355,
+    "pagination": null
+}
+API PATH -REPORT_SEARCH
