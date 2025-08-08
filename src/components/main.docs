@@ -1,3 +1,9 @@
+please check 2nd step for reports only documenst check in 1st step
+and encloser & engine for 3rd step
+please previous code not need to change anything only do condition for officier roles login only
+only do chnages officer roles in view mode
+and vessel owner & builder not need to change anything
+please write full code
 import React, { useState, useEffect, useRef } from "react";
 import { Box, Typography, Stack } from "@mui/material";
 import { useParams, useLocation, useNavigate } from "react-router-dom";
@@ -22,14 +28,15 @@ import NewLoader from "../../../../common/NewLoader.js";
 import InvoiceModal from "../../../../common/InvoiceModal.js";
 import { getFromLocalStorage } from "../../../../../utils/localStorageUtils.js";
 import { OFFICER_ROLES } from "../../../../../utils/constants.ts";
+import { is, tr } from "date-fns/locale";
 
 const VesselReportsAndDocs = () => {
   const { t } = useTranslation();
   const { id } = useParams();
   const location = useLocation();
   const navigate = useNavigate();
-  const isEditMode = !!id && location.pathname.includes("/edit/");
-  const isViewMode = !!id && location.pathname.includes("/view/");
+  let isEditMode = !!id && location.pathname.includes("/edit/");
+  let isViewMode = !!id && location.pathname.includes("/view/");
   const { rowData, pageName } = location?.state || {};
 
   const stepperRef = useRef();
@@ -38,6 +45,7 @@ const VesselReportsAndDocs = () => {
   const methods = useForm({ mode: "onTouched" });
   const { trigger, getValues, setValue } = methods;
 
+  // const [isLoading, setIsLoading] = useState(false);
   const [showApprovalModal, setShowApprovalModal] = useState(false);
   const [selectedAction, setSelectedAction] = useState("");
   const [registrationData, setRegistrationData] = useState(null);
@@ -49,19 +57,11 @@ const VesselReportsAndDocs = () => {
   const [paymentData, setPaymentData] = useState(null);
   const [fullPaymentData, setFullPaymentData] = useState({});
 
-  // Get user role from login response
-  const getUserRole = () => {
-    const userDetails = getFromLocalStorage("userDetails");
-    if (userDetails) {
-      const parsedUser = JSON.parse(userDetails);
-      return parsedUser?.roles?.realmRoleLevels?.[0] || "";
-    }
-    return "";
-  };
-
-  const userRole = getUserRole();
-  const isOfficerLogin = OFFICER_ROLES.includes(userRole);
-
+  const userRole = getFromLocalStorage("userRole") || "";
+  const isOfficerLogin = OFFICER_ROLES.includes(userRole) || false;
+  if (isOfficerLogin) {
+    isViewMode = true;
+  }
   const actionsFromAPI = ["Approve", "Reject", "Request Changes"];
 
   const fetchPaymentDetails = async () => {
@@ -73,32 +73,41 @@ const VesselReportsAndDocs = () => {
       };
 
       const apiUrl = `${SERVICE_BASE.IWT_REGISTRATION}${URLS_ENDPOINT.VESSEL_SERVICE.PAYMENT_GENERATE}`;
-      const response = await postData(apiUrl, payload);
+      const { status, resp } = await postData(apiUrl, payload);
 
-      if (response?.status === 200 && response?.data?.responseStatus?.status === "FeeSlab found successfully") {
-        const apiData = response.data.data;
-        
-        const formattedData = {
-          invoiceBreakupInfo: apiData.feesDetailsl?.map((fee, index) => ({
-            id: fee.id || index.toString(),
-            label: fee.category_description || fee.category_name,
-            amount: fee.totalCalucation || fee.old_data,
-            categoryHeader: fee.catHeaderName
-          })) || [],
-          summary: {
-            subTotal: apiData.totalAmount || 0,
-            cgst: apiData.cgst || 0,
-            sgst: apiData.sgst || 0,
-            igst: apiData.igst || 0,
-            totalPayable: apiData.totalAmountAtergst || 0
-          }
-        };
-        
-        setPaymentData(formattedData);
-        setFullPaymentData(response.data);
+      if (
+        status !== 200 ||
+        resp?.responseStatus?.status !== "FeeSlab found successfully"
+      ) {
+        console.warn(
+          "Payment details not found or API response status mismatch."
+        );
+        return;
       }
+
+      const apiData = resp?.data?.data ?? {};
+
+      const invoiceBreakupInfo = (apiData?.feesDetailsl ?? []).map(
+        (fee, index) => ({
+          id: fee?.id ?? index.toString(),
+          label: fee?.category_description ?? fee?.category_name ?? "N/A",
+          amount: fee?.totalCalucation ?? fee?.old_data ?? 0,
+          categoryHeader: fee?.catHeaderName ?? "",
+        })
+      );
+
+      const summary = {
+        subTotal: apiData.totalAmount ?? 0,
+        cgst: apiData.cgst ?? 0,
+        sgst: apiData.sgst ?? 0,
+        igst: apiData.igst ?? 0,
+        totalPayable: apiData.totalAmountAtergst ?? 0,
+      };
+
+      setPaymentData({ invoiceBreakupInfo, summary });
+      setFullPaymentData(resp?.data ?? {});
     } catch (error) {
-      console.error("Error fetching payment details:", error);
+      console.error("Error fetching payment details:", error?.message || error);
     }
   };
 
@@ -124,89 +133,107 @@ const VesselReportsAndDocs = () => {
     loaderRef.current?.show();
 
     try {
-      const payload = { applicationNumber: id ?? "" };
+      const payload = { applicationNumbers: [id ?? ""] };
       const apiUrl = `${SERVICE_BASE.IWT_REGISTRATION}${URLS_ENDPOINT.USER_SERVICE.REGISTRATION_SEARCH_BY_ID}`;
-      const response = await postData(apiUrl, payload);
+      const { status, data } = await postData(apiUrl, payload);
 
-      const resData = response?.data?.data?.[0] ?? {};
-      const statusMessage = response?.data?.responseStatus?.status;
+      const resData = data?.data[0] ?? {};
+      // const statusMessage = res?.responseStatus?.status;
 
-      if (response?.status === 200 && statusMessage === "Registration details fetched successfully") {
-        setRegistrationData(resData);
-
-        // Set form values
-        const owner = resData?.basicDetails?.ownerDetails;
-        if (owner) {
-          setValue("ownerName", owner.ownerCompanyName || "");
-          setValue("ownerAddress", `${owner.addressLine1 || ""}, ${owner.addressLine2 || ""}`);
-          setValue("mobile", owner.phoneNumber || "");
-          setValue("email", owner.emailId || "");
-          setValue("pan", owner.panNo || "");
-          setValue("gst", owner.gstNo || "");
-          setValue("aadhar", owner.aadharNumber || "");
-          setValue("tradeLicence", owner.tradeLicenseNumber || "");
-        }
-
-        const vessel = resData?.vesselDetails;
-        if (vessel) {
-          setValue("grt", vessel.grossTonnage || "");
-          setValue("workOrderValue", vessel.workOrderValue || "");
-          setValue("vesselType", vessel.typeOfVessel || "");
-          setValue("category", vessel.categoryOfVessel || "");
-          setValue("zone", vessel.zone || "");
-          setValue("purchaseType", vessel.purchaseType || "");
-          setValue("supervisionAuthority", vessel.supervisionAuthority || "");
-          setValue("classificationSociety", vessel.nameOfClassificationSociety || "");
-          setValue("nameOfMaster", vessel.nameOfMaster || "");
-          setValue("certificateNo", vessel.certficateNumber || "");
-          setValue("nameOfRegistry", vessel.nameOfRegistry || "");
-          setValue("registrationNo", vessel.registrationNumber || "");
-          setValue("vesselName", vessel.vesselName || "");
-          setValue("kindOfVessel", vessel.kindOfVessel || "");
-          setValue("categoryOfVessel", vessel.categoryOfVessel || "");
-          setValue("mortgage", vessel.mortgage || "");
-          setValue("placeOfBuild", vessel.placeOfBuild || "");
-          setValue("detailsOfInsurance", vessel.insuranceDetails || "");
-          setValue("vesselyearOfBuild", vessel.yearOfBuild?.toString() || "");
-          setValue("protectionAndIndemnityClubNo", vessel.pniClubNo || "");
-          setValue("protectionAndIndemnityClubName", vessel.pniClubName || "");
-          setValue("insuranceValidUpto", vessel.insuranceValidDate || "");
-        }
-
-        const builder = resData?.basicDetails?.builderDetails;
-        if (builder) {
-          setValue("constructedBy", resData?.basicDetails?.constructedBy || "2");
-          setValue("builderName", builder.builderName || "");
-          setValue("builderAddress", `${builder.addressLine1 || ""}, ${builder.addressLine2 || ""}`);
-          setValue("builderEmail", builder.emailId || "");
-          setValue("builderMobile", builder.phone || "");
-          setValue("builderGST", builder.gstNo || "");
-          setValue("builderTradeLicence", builder.tradeLicenseNumber || "");
-          setValue("builderAuth", resData?.basicDetails?.builderAuthorization || "");
-        }
-
-        const engine = resData?.engineDetails;
-        if (engine) {
-          setValue("yearOfBuild", engine.yearOfBuild || "");
-          setValue("typeOfEngine", engine.engineType || "");
-          setValue("engineMake", engine.engineMake || "");
-          setValue("engineMakerAddress", engine.makerAddress || "");
-          setValue("enginepin", engine.pin || "");
-          setValue("enginephoneNumber", engine.mobile || "");
-          setValue("engineemail", engine.email || "");
-          setValue("horsepower", engine.horsepower?.toString() || "");
-          setValue("speed", engine.speed?.toString() || "");
-          setValue("yearOfMake", engine.yearOfMake || "");
-        }
-
-        const basicDetails = resData?.basicDetails;
-        if (basicDetails) {
-          setValue("occupation", basicDetails.occupation || "");
-          setValue("originalPlaceOfBusiness", basicDetails.originalPlaceBusiness || "");
-        }
-      } else {
+      if (status !== 200) {
         toast.error("Unable to fetch registration details.");
+        return;
       }
+
+      setRegistrationData(resData);
+
+      const batchSetValues = (valuesObj) => {
+        Object.entries(valuesObj).forEach(([key, value]) => {
+          setValue(key, value ?? "");
+        });
+      };
+
+      const {
+        basicDetails = {},
+        vesselDetails = {},
+        engineDetails = {},
+      } = resData;
+
+      const owner = basicDetails?.ownerDetails ?? {};
+      // Owner details
+      batchSetValues({
+        ownerName: owner?.ownerCompanyName ?? "",
+        ownerAddress: `${owner?.addressLine1 ?? ""}, ${
+          owner?.addressLine2 ?? ""
+        }`,
+        mobile: owner?.phoneNumber ?? "",
+        email: owner?.emailId ?? "",
+        pan: owner?.panNo ?? "",
+        gst: owner?.gstNo ?? "",
+        aadhar: owner?.aadharNumber ?? "",
+        tradeLicence: owner?.tradeLicenseNumber ?? "",
+      });
+
+      // Vessel details
+      batchSetValues({
+        grt: vesselDetails?.grossTonnage ?? "",
+        workOrderValue: vesselDetails?.workOrderValue ?? "",
+        vesselType: vesselDetails?.typeOfVessel ?? "",
+        category: vesselDetails?.categoryOfVessel ?? "",
+        zone: vesselDetails?.zone ?? "",
+        purchaseType: vesselDetails?.purchaseType ?? "",
+        supervisionAuthority: vesselDetails?.supervisionAuthority ?? "",
+        classificationSociety: vesselDetails?.nameOfClassificationSociety ?? "",
+        nameOfMaster: vesselDetails?.nameOfMaster ?? "",
+        certificateNo: vesselDetails?.certficateNumber ?? "",
+        nameOfRegistry: vesselDetails?.nameOfRegistry ?? "",
+        registrationNo: vesselDetails?.registrationNumber ?? "",
+        vesselName: vesselDetails?.vesselName ?? "",
+        kindOfVessel: vesselDetails?.kindOfVessel ?? "",
+        categoryOfVessel: vesselDetails?.categoryOfVessel ?? "",
+        mortgage: vesselDetails?.mortgage ?? "",
+        placeOfBuild: vesselDetails?.placeOfBuild ?? "",
+        detailsOfInsurance: vesselDetails?.insuranceDetails ?? "",
+        vesselyearOfBuild: vesselDetails?.yearOfBuild?.toString() ?? "",
+        protectionAndIndemnityClubNo: vesselDetails?.pniClubNo ?? "",
+        protectionAndIndemnityClubName: vesselDetails?.pniClubName ?? "",
+        insuranceValidUpto: vesselDetails?.insuranceValidDate ?? "",
+      });
+
+      // Builder details
+      const builder = basicDetails?.builderDetails ?? {};
+      batchSetValues({
+        constructedBy: basicDetails?.constructedBy ?? "2",
+        builderName: builder?.builderName,
+        builderAddress: `${builder?.addressLine1 ?? ""}, ${
+          builder.addressLine2 ?? ""
+        }`,
+        builderEmail: builder?.emailId ?? "",
+        builderMobile: builder?.phone ?? "",
+        builderGST: builder?.gstNo ?? "",
+        builderTradeLicence: builder?.tradeLicenseNumber ?? "",
+        builderAuth: basicDetails?.builderAuthorization ?? "",
+      });
+
+      // Engine details
+      batchSetValues({
+        yearOfBuild: engineDetails?.yearOfBuild ?? "",
+        typeOfEngine: engineDetails?.engineType ?? "",
+        engineMake: engineDetails?.engineMake ?? "",
+        engineMakerAddress: engineDetails?.makerAddress ?? "",
+        enginepin: engineDetails?.pin ?? "",
+        enginephoneNumber: engineDetails?.mobile ?? "",
+        engineemail: engineDetails?.email ?? "",
+        horsepower: engineDetails?.horsepower?.toString() ?? "",
+        speed: engineDetails?.speed?.toString() ?? "",
+        yearOfMake: engineDetails?.yearOfMake ?? "",
+      });
+
+      // Basic details
+      batchSetValues({
+        occupation: basicDetails?.occupation,
+        originalPlaceOfBusiness: basicDetails?.originalPlaceBusiness,
+      });
     } catch (err) {
       console.error("Failed to fetch registration details:", err);
       toast.error("Failed to fetch registration details.");
@@ -221,11 +248,13 @@ const VesselReportsAndDocs = () => {
     }
   }, []);
 
-  // Dynamic stepper creation based on API response and officer role
   useEffect(() => {
-    if (!registrationData) return;
-
-    const createStep = (label, component, validate = null, noValidation = true) => ({
+    const createStep = (
+      label,
+      component,
+      validate = null,
+      noValidation = true
+    ) => ({
       label,
       component,
       getFormData: () => methods?.getValues(),
@@ -233,106 +262,61 @@ const VesselReportsAndDocs = () => {
       goToNextStepNoValidtion: noValidation,
     });
 
-    const stepsList = [];
+    const stepsList = [
+      createStep(
+        "Basic Details",
+        <VesselBasicDetailsView
+          formMethods={methods}
+          isPreview
+          formData={getValues()}
+          registrationData={registrationData}
+          ref={loaderRef}
+          BASE_IP={BASE_IP}
+        />
+      ),
+    ];
 
-    // Step 1: Basic Details - Enable if basicDetails, vesselDetails AND documents exist
-    const hasBasicData = registrationData.basicDetails && registrationData.vesselDetails;
-    const hasDocumentsData = registrationData.documents && registrationData.documents.length > 0;
-    
-    if (hasBasicData && hasDocumentsData) {
+    const reportsDashboardStep = createStep(
+      "Reports & Documents",
+      <ReportsDashboard
+        formMethods={methods}
+        viewMode={isViewMode}
+        isUploadOnly
+        applicationNumber={rowData?.applicationNumber}
+        additionalData={rowData}
+        pageName={pageName}
+        ref={loaderRef}
+      />
+    );
+
+    if (pageName === "uploadReports" && !isViewMode) {
+      stepsList.push(reportsDashboardStep);
+    }
+
+    if (pageName === "vesselRegistration") {
+      if (!isViewMode) {
+        stepsList.push(reportsDashboardStep);
+      }
       stepsList.push(
         createStep(
-          "Basic Details",
-          <VesselBasicDetailsView
-            formMethods={methods}
-            isPreview
-            formData={getValues()}
+          "Application for Registration",
+          <RegistrationApplicationForm
+            ref={registrationFormRef}
             registrationData={registrationData}
-            ref={loaderRef}
-            BASE_IP={BASE_IP}
-          />
+          />,
+          async () => {
+            if (registrationFormRef.current?.validateForm) {
+              return await registrationFormRef.current.validateForm();
+            }
+            return true;
+          },
+          false
         )
       );
     }
 
-    // Step 2: Reports & Documents - Enable ONLY if reports have data
-    const hasReportsData = registrationData.reports && (
-      (registrationData.reports.materialTestReports && registrationData.reports.materialTestReports.length > 0) ||
-      (registrationData.reports.radiographyReports && registrationData.reports.radiographyReports.length > 0) ||
-      (registrationData.reports.inspectionReports && registrationData.reports.inspectionReports.length > 0) ||
-      (registrationData.reports.otherReports && registrationData.reports.otherReports.length > 0)
-    );
-
-    if (hasReportsData) {
-      const reportsDashboardStep = createStep(
-        "Reports & Documents",
-        <ReportsDashboard
-          formMethods={methods}
-          viewMode={isViewMode}
-          isUploadOnly
-          applicationNumber={rowData?.applicationNumber || id}
-          additionalData={rowData}
-          pageName={pageName}
-          ref={loaderRef}
-        />
-      );
-
-      if (pageName === "uploadReports" && !isViewMode) {
-        stepsList.push(reportsDashboardStep);
-      } else if (isOfficerLogin && isViewMode) {
-        stepsList.push(reportsDashboardStep);
-      } else if (pageName === "vesselRegistration" && !isViewMode) {
-        stepsList.push(reportsDashboardStep);
-      }
-    }
-
-    // Step 3: Application for Registration - Enable if engineDetails or enclosers exist
-    const hasEngineData = registrationData.engineDetails && 
-      registrationData.engineDetails !== null && 
-      Object.keys(registrationData.engineDetails).length > 0;
-    const hasEnclosersData = registrationData.enclosers && 
-      registrationData.enclosers.length > 0;
-    
-    if (hasEngineData || hasEnclosersData) {
-      if (pageName === "vesselRegistration") {
-        stepsList.push(
-          createStep(
-            "Application for Registration",
-            <RegistrationApplicationForm
-              ref={registrationFormRef}
-              registrationData={registrationData}
-            />,
-            async () => {
-              if (registrationFormRef.current?.validateForm) {
-                return await registrationFormRef.current.validateForm();
-              }
-              return true;
-            },
-            false
-          )
-        );
-      } else if (isOfficerLogin && isViewMode) {
-        stepsList.push(
-          createStep(
-            "Application for Registration",
-            <RegistrationApplicationForm
-              ref={registrationFormRef}
-              registrationData={registrationData}
-            />,
-            async () => {
-              if (registrationFormRef.current?.validateForm) {
-                return await registrationFormRef.current.validateForm();
-              }
-              return true;
-            },
-            false
-          )
-        );
-      }
-    }
-
     setSteps(stepsList);
-  }, [registrationData, pageName, rowData, methods, isViewMode, isOfficerLogin]);
+  }, [pageName, rowData, methods, registrationData, isViewMode]);
 
   const handleActionClick = (action) => {
     setSelectedAction(action);
@@ -371,125 +355,294 @@ const VesselReportsAndDocs = () => {
         id: registrationData?.basicDetails?.id || "",
         applicationNumber: id || "",
         status: registrationData?.basicDetails?.status || "",
-        constructedBy: registrationData?.basicDetails?.constructedBy || registrationFormData?.builderName || "",
+        constructedBy:
+          registrationData?.basicDetails?.constructedBy ||
+          registrationFormData?.builderName ||
+          "",
         ownerDetails: {
           id: registrationData?.basicDetails?.ownerDetails?.id || "",
-          ownerName: registrationFormData?.ownerName || registrationData?.basicDetails?.ownerDetails?.ownerCompanyName || "",
-          ownerType: registrationFormData?.ownerType || registrationData?.basicDetails?.ownerDetails?.categoryOfOwner || "",
-          email: registrationFormData?.builderEmail || registrationData?.basicDetails?.ownerDetails?.emailId || "",
-          address: registrationFormData?.address || registrationData?.basicDetails?.ownerDetails?.addressLine1 || ""
+          ownerName:
+            registrationFormData?.ownerName ||
+            registrationData?.basicDetails?.ownerDetails?.ownerCompanyName ||
+            "",
+          ownerType:
+            registrationFormData?.ownerType ||
+            registrationData?.basicDetails?.ownerDetails?.categoryOfOwner ||
+            "",
+          email:
+            registrationFormData?.builderEmail ||
+            registrationData?.basicDetails?.ownerDetails?.emailId ||
+            "",
+          address:
+            registrationFormData?.address ||
+            registrationData?.basicDetails?.ownerDetails?.addressLine1 ||
+            "",
         },
         builderDetails: {
           id: registrationData?.basicDetails?.builderDetails?.id || "",
-          builderName: registrationFormData?.builderName || registrationData?.basicDetails?.builderDetails?.builderName || "",
-          registrationNumber: registrationData?.basicDetails?.builderDetails?.registrationNumber || "",
-          address: registrationFormData?.builderAddress || registrationData?.basicDetails?.builderDetails?.addressLine1 || "",
-          contactPerson: registrationData?.basicDetails?.builderDetails?.contactPerson || "",
-          contactNumber: registrationFormData?.builderphoneNumber || registrationData?.basicDetails?.builderDetails?.phone || ""
+          builderName:
+            registrationFormData?.builderName ||
+            registrationData?.basicDetails?.builderDetails?.builderName ||
+            "",
+          registrationNumber:
+            registrationData?.basicDetails?.builderDetails
+              ?.registrationNumber || "",
+          address:
+            registrationFormData?.builderAddress ||
+            registrationData?.basicDetails?.builderDetails?.addressLine1 ||
+            "",
+          contactPerson:
+            registrationData?.basicDetails?.builderDetails?.contactPerson || "",
+          contactNumber:
+            registrationFormData?.builderphoneNumber ||
+            registrationData?.basicDetails?.builderDetails?.phone ||
+            "",
         },
-        builderAuthorization: registrationData?.basicDetails?.builderAuthorization || "",
-        authorizationLetter: registrationData?.basicDetails?.authorizationLetter ? {
-          id: registrationData.basicDetails.authorizationLetter.id || "",
-          fileStoreId: registrationData.basicDetails.authorizationLetter.fileStoreId || "",
-          documentName: registrationData.basicDetails.authorizationLetter.documentName || "Authorization_Letter.pdf",
-          documentType: registrationData.basicDetails.authorizationLetter.documentType || "AUTHORIZATION_LETTER",
-          documentSource: registrationData.basicDetails.authorizationLetter.documentSource || "AUTHORIZATION_LETTER",
-          descriptions: registrationData.basicDetails.authorizationLetter.description || "builder authorised letter"
-        } : {
-          id: "",
-          fileStoreId: "",
-          documentName: "Authorization_Letter.pdf",
-          documentType: "AUTHORIZATION_LETTER",
-          documentSource: "AUTHORIZATION_LETTER",
-          descriptions: "builder authorised letter"
-        },
-        occupation: registrationFormData?.occupation || registrationData?.basicDetails?.occupation || "",
-        originalPlaceBusiness: registrationFormData?.originalPlaceOfBusiness || registrationData?.basicDetails?.originalPlaceBusiness || "",
+        builderAuthorization:
+          registrationData?.basicDetails?.builderAuthorization || "",
+        authorizationLetter: registrationData?.basicDetails?.authorizationLetter
+          ? {
+              id: registrationData.basicDetails.authorizationLetter.id || "",
+              fileStoreId:
+                registrationData.basicDetails.authorizationLetter.fileStoreId ||
+                "",
+              documentName:
+                registrationData.basicDetails.authorizationLetter
+                  .documentName || "Authorization_Letter.pdf",
+              documentType:
+                registrationData.basicDetails.authorizationLetter
+                  .documentType || "AUTHORIZATION_LETTER",
+              documentSource:
+                registrationData.basicDetails.authorizationLetter
+                  .documentSource || "AUTHORIZATION_LETTER",
+              descriptions:
+                registrationData.basicDetails.authorizationLetter.description ||
+                "builder authorised letter",
+            }
+          : {
+              id: "",
+              fileStoreId: "",
+              documentName: "Authorization_Letter.pdf",
+              documentType: "AUTHORIZATION_LETTER",
+              documentSource: "AUTHORIZATION_LETTER",
+              descriptions: "builder authorised letter",
+            },
+        occupation:
+          registrationFormData?.occupation ||
+          registrationData?.basicDetails?.occupation ||
+          "",
+        originalPlaceBusiness:
+          registrationFormData?.originalPlaceOfBusiness ||
+          registrationData?.basicDetails?.originalPlaceBusiness ||
+          "",
         isDrawingFee: registrationData?.basicDetails?.isDrawingFee || false,
-        isSupervisionFee: registrationData?.basicDetails?.isSupervisionFee || false,
-        isApplicationRegistrationFee: registrationData?.basicDetails?.isApplicationRegistrationFee || false,
-        isProvisionaCertificate: registrationData?.basicDetails?.isProvisionaCertificate || false,
-        isEditable: registrationData?.basicDetails?.isEditable !== undefined ? registrationData.basicDetails.isEditable : true
+        isSupervisionFee:
+          registrationData?.basicDetails?.isSupervisionFee || false,
+        isApplicationRegistrationFee:
+          registrationData?.basicDetails?.isApplicationRegistrationFee || false,
+        isProvisionaCertificate:
+          registrationData?.basicDetails?.isProvisionaCertificate || false,
+        isEditable:
+          registrationData?.basicDetails?.isEditable !== undefined
+            ? registrationData.basicDetails.isEditable
+            : true,
       },
       vesselDetails: {
         id: registrationData?.vesselDetails?.id || "",
-        typeOfVessel: registrationFormData?.typeOfVessel || registrationData?.vesselDetails?.typeOfVessel || "",
-        categoryOfVessel: registrationFormData?.categoryOfVessel || registrationData?.vesselDetails?.categoryOfVessel || "",
-        zone: registrationFormData?.zone || registrationData?.vesselDetails?.zone || "",
-        grossTonnage: parseInt(formData?.grt) || registrationData?.vesselDetails?.grossTonnage || 0,
-        workOrderValue: formData?.workOrderValue || registrationData?.vesselDetails?.workOrderValue || "",
-        purchaseType: formData?.purchaseType || registrationData?.vesselDetails?.purchaseType || "",
-        supervisionAuthority: formData?.supervisionAuthority || registrationData?.vesselDetails?.supervisionAuthority || "",
-        nameOfMaster: registrationFormData?.nameOfMaster || registrationData?.vesselDetails?.nameOfMaster || "",
-        certficateNumber: registrationFormData?.certificateNo || registrationData?.vesselDetails?.certficateNumber || "",
-        nameOfRegistry: registrationFormData?.nameOfRegistry || registrationData?.vesselDetails?.nameOfRegistry || "",
-        registrationNumber: registrationFormData?.registrationNo || registrationData?.vesselDetails?.registrationNumber || "",
-        vesselName: registrationFormData?.vesselName || registrationData?.vesselDetails?.vesselName || "",
-        kindOfVessel: registrationFormData?.kindOfVessel || registrationData?.vesselDetails?.kindOfVessel || "",
-        mortgage: registrationFormData?.mortgage || registrationData?.vesselDetails?.mortgage || "",
-        placeOfBuild: registrationFormData?.placeOfBuild || registrationData?.vesselDetails?.placeOfBuild || "",
-        insuranceDetails: registrationFormData?.detailsOfInsurance || registrationData?.vesselDetails?.insuranceDetails || "",
-        yearOfBuild: parseInt(registrationFormData?.vesselyearOfBuild) || registrationData?.vesselDetails?.yearOfBuild || null,
-        pniClubNo: registrationFormData?.protectionAndIndemnityClubNo || registrationData?.vesselDetails?.pniClubNo || "",
-        pniClubName: registrationFormData?.protectionAndIndemnityClubName || registrationData?.vesselDetails?.pniClubName || "",
-        applicationNo: id || registrationData?.vesselDetails?.applicationNo || "",
-        nameOfClassificationSociety: formData?.classificationSociety || registrationData?.vesselDetails?.nameOfClassificationSociety || "",
-        iwtVesselBasicDetailsTFk: registrationData?.basicDetails?.id || registrationData?.vesselDetails?.iwtVesselBasicDetailsTFk || "",
-        insuranceValidDate: registrationFormData?.insuranceValidUpto || registrationData?.vesselDetails?.insuranceValidDate || ""
+        typeOfVessel:
+          registrationFormData?.typeOfVessel ||
+          registrationData?.vesselDetails?.typeOfVessel ||
+          "",
+        categoryOfVessel:
+          registrationFormData?.categoryOfVessel ||
+          registrationData?.vesselDetails?.categoryOfVessel ||
+          "",
+        zone:
+          registrationFormData?.zone ||
+          registrationData?.vesselDetails?.zone ||
+          "",
+        grossTonnage:
+          parseInt(formData?.grt) ||
+          registrationData?.vesselDetails?.grossTonnage ||
+          0,
+        workOrderValue:
+          formData?.workOrderValue ||
+          registrationData?.vesselDetails?.workOrderValue ||
+          "",
+        purchaseType:
+          formData?.purchaseType ||
+          registrationData?.vesselDetails?.purchaseType ||
+          "",
+        supervisionAuthority:
+          formData?.supervisionAuthority ||
+          registrationData?.vesselDetails?.supervisionAuthority ||
+          "",
+        nameOfMaster:
+          registrationFormData?.nameOfMaster ||
+          registrationData?.vesselDetails?.nameOfMaster ||
+          "",
+        certficateNumber:
+          registrationFormData?.certificateNo ||
+          registrationData?.vesselDetails?.certficateNumber ||
+          "",
+        nameOfRegistry:
+          registrationFormData?.nameOfRegistry ||
+          registrationData?.vesselDetails?.nameOfRegistry ||
+          "",
+        registrationNumber:
+          registrationFormData?.registrationNo ||
+          registrationData?.vesselDetails?.registrationNumber ||
+          "",
+        vesselName:
+          registrationFormData?.vesselName ||
+          registrationData?.vesselDetails?.vesselName ||
+          "",
+        kindOfVessel:
+          registrationFormData?.kindOfVessel ||
+          registrationData?.vesselDetails?.kindOfVessel ||
+          "",
+        mortgage:
+          registrationFormData?.mortgage ||
+          registrationData?.vesselDetails?.mortgage ||
+          "",
+        placeOfBuild:
+          registrationFormData?.placeOfBuild ||
+          registrationData?.vesselDetails?.placeOfBuild ||
+          "",
+        insuranceDetails:
+          registrationFormData?.detailsOfInsurance ||
+          registrationData?.vesselDetails?.insuranceDetails ||
+          "",
+        yearOfBuild:
+          parseInt(registrationFormData?.vesselyearOfBuild) ||
+          registrationData?.vesselDetails?.yearOfBuild ||
+          null,
+        pniClubNo:
+          registrationFormData?.protectionAndIndemnityClubNo ||
+          registrationData?.vesselDetails?.pniClubNo ||
+          "",
+        pniClubName:
+          registrationFormData?.protectionAndIndemnityClubName ||
+          registrationData?.vesselDetails?.pniClubName ||
+          "",
+        applicationNo:
+          id || registrationData?.vesselDetails?.applicationNo || "",
+        nameOfClassificationSociety:
+          formData?.classificationSociety ||
+          registrationData?.vesselDetails?.nameOfClassificationSociety ||
+          "",
+        iwtVesselBasicDetailsTFk:
+          registrationData?.basicDetails?.id ||
+          registrationData?.vesselDetails?.iwtVesselBasicDetailsTFk ||
+          "",
+        insuranceValidDate:
+          registrationFormData?.insuranceValidUpto ||
+          registrationData?.vesselDetails?.insuranceValidDate ||
+          "",
       },
       documents: extractDocuments(formData, registrationData),
-      engineDetails: registrationData?.engineDetails ? {
-        id: registrationData.engineDetails.id || "",
-        yearOfBuild: registrationFormData?.yearOfBuild || registrationData.engineDetails.yearOfBuild || "",
-        engineType: registrationFormData?.typeOfEngine || registrationData.engineDetails.engineType || "",
-        engineMake: registrationFormData?.engineMake || registrationData.engineDetails.engineMake || "",
-        makerAddress: registrationFormData?.engineMakerAddress || registrationData.engineDetails.makerAddress || "",
-        pin: registrationFormData?.enginepin || registrationData.engineDetails.pin || "",
-        mobile: registrationFormData?.enginephoneNumber || registrationData.engineDetails.mobile || "",
-        email: registrationFormData?.engineemail || registrationData.engineDetails.email || "",
-        horsepower: parseFloat(registrationFormData?.horsepower) || registrationData.engineDetails.horsepower || 0,
-        speed: parseFloat(registrationFormData?.speed) || registrationData.engineDetails.speed || 0,
-        yearOfMake: registrationFormData?.yearOfMake || registrationData.engineDetails.yearOfMake || "",
-        iwtApplRegistrationTFk: registrationData?.basicDetails?.id || registrationData.engineDetails.iwtApplRegistrationTFk || ""
-      } : {
-        id: "",
-        yearOfBuild: registrationFormData?.yearOfBuild || "",
-        engineType: registrationFormData?.typeOfEngine || "",
-        engineMake: registrationFormData?.engineMake || "",
-        makerAddress: registrationFormData?.engineMakerAddress || "",
-        pin: registrationFormData?.enginepin || "",
-        mobile: registrationFormData?.enginephoneNumber || "",
-        email: registrationFormData?.engineemail || "",
-        horsepower: parseFloat(registrationFormData?.horsepower) || 0,
-        speed: parseFloat(registrationFormData?.speed) || 0,
-        yearOfMake: registrationFormData?.yearOfMake || "",
-        iwtApplRegistrationTFk: registrationData?.basicDetails?.id || ""
-      },
-      enclosers: extractEnclosers(registrationFormData, registrationData)
+      engineDetails: registrationData?.engineDetails
+        ? {
+            id: registrationData.engineDetails.id || "",
+            yearOfBuild:
+              registrationFormData?.yearOfBuild ||
+              registrationData.engineDetails.yearOfBuild ||
+              "",
+            engineType:
+              registrationFormData?.typeOfEngine ||
+              registrationData.engineDetails.engineType ||
+              "",
+            engineMake:
+              registrationFormData?.engineMake ||
+              registrationData.engineDetails.engineMake ||
+              "",
+            makerAddress:
+              registrationFormData?.engineMakerAddress ||
+              registrationData.engineDetails.makerAddress ||
+              "",
+            pin:
+              registrationFormData?.enginepin ||
+              registrationData.engineDetails.pin ||
+              "",
+            mobile:
+              registrationFormData?.enginephoneNumber ||
+              registrationData.engineDetails.mobile ||
+              "",
+            email:
+              registrationFormData?.engineemail ||
+              registrationData.engineDetails.email ||
+              "",
+            horsepower:
+              parseFloat(registrationFormData?.horsepower) ||
+              registrationData.engineDetails.horsepower ||
+              0,
+            speed:
+              parseFloat(registrationFormData?.speed) ||
+              registrationData.engineDetails.speed ||
+              0,
+            yearOfMake:
+              registrationFormData?.yearOfMake ||
+              registrationData.engineDetails.yearOfMake ||
+              "",
+            iwtApplRegistrationTFk:
+              registrationData?.basicDetails?.id ||
+              registrationData.engineDetails.iwtApplRegistrationTFk ||
+              "",
+          }
+        : {
+            id: "",
+            yearOfBuild: registrationFormData?.yearOfBuild || "",
+            engineType: registrationFormData?.typeOfEngine || "",
+            engineMake: registrationFormData?.engineMake || "",
+            makerAddress: registrationFormData?.engineMakerAddress || "",
+            pin: registrationFormData?.enginepin || "",
+            mobile: registrationFormData?.enginephoneNumber || "",
+            email: registrationFormData?.engineemail || "",
+            horsepower: parseFloat(registrationFormData?.horsepower) || 0,
+            speed: parseFloat(registrationFormData?.speed) || 0,
+            yearOfMake: registrationFormData?.yearOfMake || "",
+            iwtApplRegistrationTFk: registrationData?.basicDetails?.id || "",
+          },
+      enclosers: extractEnclosers(registrationFormData, registrationData),
     };
   };
 
   const extractDocuments = (formData, registrationData) => {
     const documents = [];
-    
-    if (registrationData?.documents && Array.isArray(registrationData.documents)) {
-      registrationData.documents.forEach(doc => {
+
+    if (
+      registrationData?.documents &&
+      Array.isArray(registrationData.documents)
+    ) {
+      registrationData.documents.forEach((doc) => {
         documents.push({
           id: doc.id || "",
           fileStoreId: doc.fileStoreId || "",
           documentName: doc.documentName || "",
           documentType: doc.documentType || "",
           documentSource: doc.documentSource || "",
-          description: doc.description || ""
+          description: doc.description || "",
         });
       });
     }
 
     const documentTypes = [
-      { key: "WORK_ORDER", name: "Work Order.pdf", description: "Work Order document" },
+      {
+        key: "WORK_ORDER",
+        name: "Work Order.pdf",
+        description: "Work Order document",
+      },
       { key: "DRAWINGS", name: "Drawing.pdf", description: "Drawing document" },
-      { key: "TONNAGE_BOOKLETS", name: "Tonnage Booklet.pdf", description: "Tonnage document" },
-      { key: "STABILITY_BOOKLETS", name: "Stability Booklet.pdf", description: "Stability document" }
+      {
+        key: "TONNAGE_BOOKLETS",
+        name: "Tonnage Booklet.pdf",
+        description: "Tonnage document",
+      },
+      {
+        key: "STABILITY_BOOKLETS",
+        name: "Stability Booklet.pdf",
+        description: "Stability document",
+      },
     ];
 
     documentTypes.forEach(({ key, name, description }) => {
@@ -501,7 +654,7 @@ const VesselReportsAndDocs = () => {
           documentName: name,
           documentType: key,
           documentSource: key,
-          description
+          description,
         });
       }
     });
@@ -511,28 +664,55 @@ const VesselReportsAndDocs = () => {
 
   const extractEnclosers = (formData, registrationData) => {
     const enclosers = [];
-    
-    if (registrationData?.enclosers && Array.isArray(registrationData.enclosers)) {
-      registrationData.enclosers.forEach(encloser => {
+
+    if (
+      registrationData?.enclosers &&
+      Array.isArray(registrationData.enclosers)
+    ) {
+      registrationData.enclosers.forEach((encloser) => {
         enclosers.push({
           id: encloser.id || "",
           fileStoreId: encloser.fileStoreId || "",
           documentName: encloser.documentName || "",
           documentType: encloser.documentType || "",
           documentSource: encloser.documentSource || "",
-          description: encloser.description || ""
+          description: encloser.description || "",
         });
       });
     }
 
     const encloserTypes = [
-      { key: "thirdPartyInsurance", type: "THIRD_PARTY_INSURANCE", name: "Third Party Insurance" },
-      { key: "builderCertificate", type: "BUILDERS_CERTIFICATE", name: "Builder Certificate" },
-      { key: "instrumentOfSale", type: "INSTRUMENT_OF_SALE", name: "Instrument of Sale" },
-      { key: "mortgageDetails", type: "MORTGAGE_DETAILS", name: "Mortgage Details" },
-      { key: "pniInsurance", type: "PREOTECTION_AND_INDEMNITY_INSURANCE_NO", name: "Protection and Indemnity Insurance" },
-      { key: "declarationOfOwnership", type: "DECLARATION_OF_OWNERSHIP", name: "Declaration of Ownership" },
-      { key: "challan", type: "CHALLAN", name: "Challan" }
+      {
+        key: "thirdPartyInsurance",
+        type: "THIRD_PARTY_INSURANCE",
+        name: "Third Party Insurance",
+      },
+      {
+        key: "builderCertificate",
+        type: "BUILDERS_CERTIFICATE",
+        name: "Builder Certificate",
+      },
+      {
+        key: "instrumentOfSale",
+        type: "INSTRUMENT_OF_SALE",
+        name: "Instrument of Sale",
+      },
+      {
+        key: "mortgageDetails",
+        type: "MORTGAGE_DETAILS",
+        name: "Mortgage Details",
+      },
+      {
+        key: "pniInsurance",
+        type: "PREOTECTION_AND_INDEMNITY_INSURANCE_NO",
+        name: "Protection and Indemnity Insurance",
+      },
+      {
+        key: "declarationOfOwnership",
+        type: "DECLARATION_OF_OWNERSHIP",
+        name: "Declaration of Ownership",
+      },
+      { key: "challan", type: "CHALLAN", name: "Challan" },
     ];
 
     encloserTypes.forEach(({ key, type, name }) => {
@@ -544,7 +724,7 @@ const VesselReportsAndDocs = () => {
           documentName: `${name}.pdf`,
           documentType: type,
           documentSource: type,
-          description: `${name} document`
+          description: `${name} document`,
         });
       }
     });
@@ -554,6 +734,7 @@ const VesselReportsAndDocs = () => {
 
   const handleSubmit = async () => {
     try {
+      // setIsLoading(true);
       loaderRef.current?.show();
 
       const formData = methods.getValues();
@@ -563,48 +744,56 @@ const VesselReportsAndDocs = () => {
       }
 
       const payload = createRegistrationPayload(formData, registrationFormData);
-      
-      const apiUrl = SERVICE_BASE.IWT_REGISTRATION + URLS_ENDPOINT.VESSEL_SERVICE.CREATE;
+
+      const apiUrl =
+        SERVICE_BASE.IWT_REGISTRATION + URLS_ENDPOINT.VESSEL_SERVICE.CREATE;
       const response = await postData(apiUrl, payload);
-      
+
       if (response?.status === 200 && response?.data?.responseStatus) {
         toast.success(
-          response?.data?.responseStatus?.message || "Registration submitted successfully!"
+          response?.data?.responseStatus?.message ||
+            "Registration submitted successfully!"
         );
         setDisableSubmit(true);
         setInitialStep(steps.length - 1);
+        // setTimeout(() => {
+        // navigate("/dashboard");
+        // }, 1500);
       } else {
         toast.error(
-          response?.data?.responseStatus?.message || "Submission failed. Please try again."
+          response?.data?.responseStatus?.message ||
+            "Submission failed. Please try again."
         );
       }
-      
+
     } catch (error) {
       console.error("Submission error:", error);
       toast.error("Failed to submit form. Please try again.");
     } finally {
+      // setIsLoading(false);
       loaderRef.current?.hide();
     }
   };
 
-  const actionDropdown = isViewMode && isOfficerLogin ? (
-    <ActionDropdown
-      actions={actionsFromAPI}
-      onActionClick={handleActionClick}
-      variant="contained"
-      sx={{
-        backgroundColor: "#2E57A7",
-        fontWeight: "bold",
-        borderRadius: "0.5rem",
-        minWidth: "8rem",
-        fontSize: "0.9rem",
-        color: "#fff",
-        "&:hover": {
-          backgroundColor: "#1f4ea0",
-        },
-      }}
-    />
-  ) : null;
+  const actionDropdown =
+    isViewMode && isOfficerLogin ? (
+      <ActionDropdown
+        actions={actionsFromAPI}
+        onActionClick={handleActionClick}
+        variant="contained"
+        sx={{
+          backgroundColor: "#2E57A7",
+          fontWeight: "bold",
+          borderRadius: "0.5rem",
+          minWidth: "8rem",
+          fontSize: "0.9rem",
+          color: "#fff",
+          "&:hover": {
+            backgroundColor: "#1f4ea0",
+          },
+        }}
+      />
+    ) : null;
 
   return (
     <Box
@@ -615,6 +804,10 @@ const VesselReportsAndDocs = () => {
       }}
     >
       <NewLoader ref={loaderRef} />
+      {/* {isLoading ? (
+        <></>
+      ) : (
+      )} */}
       <>
         <div className="d-flex flex-column flex-md-row justify-content-between align-items-start align-items-md-center mb-4 gap-3">
           <div
@@ -693,7 +886,7 @@ const VesselReportsAndDocs = () => {
             onGetInvoice={handleGetInvoice}
           />
         )}
-        {(isOfficerLogin && isViewMode) && (
+        {isOfficerLogin && isViewMode && (
           <ApprovalModal
             show={showApprovalModal}
             handleClose={handleCloseModal}
