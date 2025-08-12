@@ -1,1714 +1,1717 @@
-import React, { useRef, useState, useEffect, forwardRef, useImperativeHandle, use } from "react";
-import { useNavigate, useParams, useLocation } from "react-router-dom";
+import React, { useState, useEffect, useRef } from "react";
+import { Box, Typography, Stack } from "@mui/material";
+import { useParams, useLocation, useNavigate } from "react-router-dom";
+import Stepper from "../../../../common/Stepper.jsx";
 import { useForm } from "react-hook-form";
-import { Container, Row, Col, Card } from "react-bootstrap";
-import { toast } from "react-toastify";
+import ActionDropdown from "../../../../common/ActionDropdown";
+import ApprovalModal from "../../../../common/ApprovalModal";
 import { useTranslation } from "react-i18next";
-import { FaUser, FaLock, FaDownload } from "react-icons/fa";
-import InputFile from "../../../../common/InputFile.jsx";
-import InputText from "../../../../common/InputText.tsx";
-import InputSelect from "../../../../common/InputSelect.tsx";
-import Collapsible from "../../../../common/Collapsible.js";
-import { CONSTANT_REGEX, renameFile } from "../../../../../utils/constants.ts";
-import { useMasterData } from "../../../../context/MasterDataContext.js";
+import { toast } from "react-toastify";
+import { postData } from "../../../../../services/http.service.ts";
+import {
+  SERVICE_BASE,
+  URLS_ENDPOINT,
+  BASE_IP,
+} from "../../../../../utils/urlsConstants.ts";
+import VesselBasicDetailsView from "./VesselBasicDetailsView.js";
+import ReportsDashboard from "./reports/reportsDashboard.js";
+import { Button } from "react-bootstrap";
+import { BsArrowLeft } from "react-icons/bs";
+import RegistrationApplicationForm from "./RegistrationApplicationForm.jsx";
 import NewLoader from "../../../../common/NewLoader.js";
-import { getData, postData, postFORMdata } from "../../../../../services/http.service.ts";
-import { BASE_IP, SERVICE_BASE, URLS_ENDPOINT } from "../../../../../utils/urlsConstants.ts";
+import InvoiceModal from "../../../../common/InvoiceModal.js";
 import { getFromLocalStorage } from "../../../../../utils/localStorageUtils.js";
-import axios from "axios";
-import styles from "./RegistrationApplicationForm.module.css";
-
-const RegistrationApplicationForm = forwardRef(({ registrationData }, ref) => {
+import { OFFICER_ROLES, USER_ROLES } from "../../../../../utils/constants.ts";
+import { handleErrorMessage } from "../../../../../utils/errorMessageHandler.js";
+import CurvingMarkingNote from "../../new-vessel/common/CurvingMarkingNote.js";
+import CurvingMarkingNoteL5 from "../../new-vessel/common/CurvingMarkingNoteL5.js";
+const VesselReportsAndDocs = () => {
   const { t } = useTranslation();
   const { id } = useParams();
+  const location = useLocation();
+  const navigate = useNavigate();
+  let isEditMode = !!id && location.pathname.includes("/edit/");
+  let isViewMode = !!id && location.pathname.includes("/view/");
+  const { rowData, pageName } = location?.state || {};
+  const [actionsFromAPI, setActionsFromAPI] = useState([]);
+
+  const stepperRef = useRef();
+  const registrationFormRef = useRef();
+
+  const methods = useForm({ mode: "onTouched" });
+  const { trigger, getValues, setValue } = methods;
+
+  // const [isLoading, setIsLoading] = useState(false);
+  const [showApprovalModal, setShowApprovalModal] = useState(false);
+  const [selectedAction, setSelectedAction] = useState("");
+  const [registrationData, setRegistrationData] = useState(null);
+  const [steps, setSteps] = useState([]);
+  const [disableSubmit, setDisableSubmit] = useState(false);
+  const [initialStep, setInitialStep] = useState(0);
   const loaderRef = useRef();
-  const { masterData } = useMasterData();
-  const [isDataLoaded, setIsDataLoaded] = useState(false);
-  const [suggestions, setSuggestions] = useState([]);
+  const [showInvoiceModal, setShowInvoiceModal] = useState(false);
+  const [paymentData, setPaymentData] = useState(null);
+  const [fullPaymentData, setFullPaymentData] = useState({});
 
-  const {
-    register,
-    formState: { errors },
-    setValue,
-    watch,
-    clearErrors,
-    trigger,
-    setError,
-  } = useForm({
-    mode: "onChange",
-    defaultValues: {
-      ownerName: "", address: "", ownerType: "", builderEmail: "",
-      applicantphoneNumber: "", ownerpin: "",
-      // ownercity: "",
-      ownerdistrict: "",
-      ownerstateUt: "", occupation: "", originalPlaceOfBusiness: "",
-      nameOfMaster: "", certificateNo: "", nameOfRegistry: "", registrationNo: "",
-      vesselName: "", kindOfVessel: "", typeOfVessel: "", categoryOfVessel: "",
-      zone: "", mortgage: "", placeOfBuild: "", detailsOfInsurance: "",
-      vesselyearOfBuild: "", protectionAndIndemnityClubNo: "", protectionAndIndemnityClubName: "",
-      insuranceValidUpto: "", yearOfBuild: "", typeOfEngine: "", engineMake: "",
-      engineMakerAddress: "", enginepin: "", enginephoneNumber: "", engineemail: "",
-      horsepower: "", speed: "", yearOfMake: "", builderName: "", builderAddress: "",
-      builderemail: "", builderphoneNumber: "", pin: "",
-      // city: "", 
-      district: "",
-      stateUt: "", country: "India",
-    },
-  });
+  const userRole = getFromLocalStorage("userRole") || "";
+  const userDetails = getFromLocalStorage("userDetails") || {};
+  const isOfficerLogin = OFFICER_ROLES.includes(userRole) || false;
+  if (isOfficerLogin) {
+    isViewMode = true;
+  }
 
-  useImperativeHandle(ref, () => ({
-    validateForm: async () => {
-      const isValid = await trigger();
-      if (!isValid) {
-        const firstErrorField = Object.keys(errors)[0];
-        if (firstErrorField) {
-          const element = document.querySelector(`[name="${firstErrorField}"]`);
-          if (element) {
-            element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            element.focus();
-          }
-        }
-      }
-      return isValid;
-    },
-    getFormData: () => watch(),
-  }));
-
-
-  const [fileStates, setFileStates] = useState({
-    thirdPartyInsurance: null,
-    builderCertificate: null,
-    instrumentOfSale: null,
-    mortgageDetails: null,
-    pniInsurance: null,
-    declarationOfOwnership: null,
-    challan: null,
-  });
-
-  const hasValue = (value) => {
-    return value !== null && value !== undefined && value !== "" && value !== "N/A";
-  };
-
-  const isOwnerFieldDisabled = (fieldName) => {
-    if (!isDataLoaded || !registrationData?.basicDetails?.ownerDetails) return false;
-    const owner = registrationData.basicDetails.ownerDetails;
-
-    switch (fieldName) {
-      case 'ownerName':
-        return hasValue(owner.ownerCompanyName);
-      case 'address':
-        return hasValue(owner.addressLine1);
-      case 'ownerType':
-        return hasValue(owner.categoryOfOwner);
-      case 'builderEmail':
-        return hasValue(owner.emailId);
-      case 'applicantphoneNumber':
-        return hasValue(owner.phoneNumber);
-      case 'ownerpin':
-        return hasValue(owner.pin);
-      // case 'ownercity':
-      //   return hasValue(owner.city);
-      case 'ownerdistrict':
-        return hasValue(owner.district);
-      case 'ownerstateUt':
-        return hasValue(owner.state);
-      case 'occupation':
-        return false;
-      case 'originalPlaceOfBusiness':
-        return false;
-      default:
-        return false;
-    }
-  };
-  const vesselKindOptions = masterData?.kindOfVessels?.map(type => ({
-    value: type.valueCode,
-    label: type.valueLabel
-  })) || [];
-  const vesselTypeOptions = masterData?.vesselTypes?.map(type => ({
-    value: type.valueCode,
-    label: type.valueLabel
-  })) || [];
-
-  const categoryOptions = masterData?.vesselCategories?.map(category => ({
-    value: category.valueCode,
-    label: category.valueLabel
-  })) || [];
-
-  const zoneOptions = masterData?.zones?.map(zone => ({
-    value: zone.valueCode,
-    label: zone.valueLabel
-  })) || [];
-
-  const isBuilderFieldDisabled = (fieldName) => {
-    if (!isDataLoaded || !registrationData?.basicDetails?.builderDetails) return false;
-    const builder = registrationData.basicDetails.builderDetails;
-
-    switch (fieldName) {
-      case 'builderName':
-        return hasValue(builder.builderName);
-      case 'builderAddress':
-        return hasValue(builder.addressLine1);
-      case 'builderemail':
-        return hasValue(builder.emailId);
-      case 'builderphoneNumber':
-        return hasValue(builder.phone);
-      case 'pin':
-        return hasValue(builder.pin);
-      // case 'city':
-      //   return hasValue(builder.city);
-      case 'district':
-        return hasValue(builder.district);
-      case 'stateUt':
-        return hasValue(builder.state);
-      default:
-        return false;
-    }
-  };
-
-  const hasOwnerData = isDataLoaded && registrationData?.basicDetails?.ownerDetails &&
-    Object.values(registrationData.basicDetails.ownerDetails).some(value => hasValue(value));
-
-  const hasBuilderData = isDataLoaded && registrationData?.basicDetails?.builderDetails &&
-    Object.values(registrationData.basicDetails.builderDetails).some(value => hasValue(value));
-
-  const getFileDisplayName = (documentType) => {
-    const fileState = fileStates[documentType];
-    return fileState?.name || "";
-  };
-
-
-  useEffect(() => {
-    if (registrationData && !isDataLoaded) {
-      const { basicDetails, vesselDetails, engineDetails, enclosers } = registrationData;
-
-      // Basic Details
-      if (basicDetails?.ownerDetails) {
-        const owner = basicDetails.ownerDetails;
-        setValue("ownerName", owner.ownerCompanyName || "");
-        setValue("address", owner.addressLine1 || "");
-        setValue("ownerType", owner.categoryOfOwner || "");
-        setValue("builderEmail", owner.emailId || "");
-        setValue("applicantphoneNumber", owner.phoneNumber || "");
-        setValue("ownerpin", owner.pin?.toString() || "");
-        // setValue("ownercity", owner.city || "N/A");
-        setValue("ownerdistrict", owner.district || "");
-        setValue("ownerstateUt", owner.state || "");
-        setValue("occupation", basicDetails.occupation || "");
-        setValue("originalPlaceOfBusiness", basicDetails.originalPlaceBusiness || "");
-      }
-
-      // Vessel Details 
-      if (vesselDetails) {
-        setValue("nameOfMaster", vesselDetails.nameOfMaster || "");
-        setValue("certificateNo", vesselDetails.certficateNumber || "");
-        setValue("nameOfRegistry", vesselDetails.nameOfRegistry || "");
-        setValue("registrationNo", vesselDetails.registrationNumber || "");
-        setValue("vesselName", vesselDetails.vesselName || "");
-        setValue("kindOfVessel", vesselDetails.kindOfVessel || "");
-        setValue("mortgage", vesselDetails.mortgage || "");
-        setValue("placeOfBuild", vesselDetails.placeOfBuild || "");
-        setValue("detailsOfInsurance", vesselDetails.insuranceDetails || "");
-        setValue("vesselyearOfBuild", vesselDetails.yearOfBuild?.toString() || "");
-        setValue("protectionAndIndemnityClubNo", vesselDetails.pniClubNo || "");
-        setValue("protectionAndIndemnityClubName", vesselDetails.pniClubName || "");
-        setValue("insuranceValidUpto", vesselDetails.insuranceValidDate || "");
-      }
-
-      // Engine Details
-      if (engineDetails) {
-        setValue("yearOfBuild", engineDetails.yearOfBuild || "");
-        setValue("typeOfEngine", engineDetails.engineType || "");
-        setValue("engineMake", engineDetails.engineMake || "");
-        setValue("engineMakerAddress", engineDetails.makerAddress || "");
-        setValue("enginepin", engineDetails.pin || "");
-        setValue("enginephoneNumber", engineDetails.mobile || "");
-        setValue("engineemail", engineDetails.email || "");
-        setValue("horsepower", engineDetails.horsepower?.toString() || "");
-        setValue("speed", engineDetails.speed?.toString() || "");
-        setValue("yearOfMake", engineDetails.yearOfMake || "");
-      }
-
-      // Builder Details
-      if (basicDetails?.builderDetails) {
-        const builder = basicDetails.builderDetails;
-        setValue("builderName", builder.builderName || "");
-        setValue("builderAddress", builder.addressLine1 || "");
-        setValue("builderemail", builder.emailId || "");
-        setValue("builderphoneNumber", builder.phone || "");
-        setValue("pin", builder.pin?.toString() || "");
-        // setValue("city", builder.city || "N/A");
-        setValue("district", builder.district || "");
-        setValue("stateUt", builder.state || "");
-      }
-
-
-      if (enclosers && Array.isArray(enclosers)) {
-        const fileMapping = {
-          "THIRD_PARTY_INSURANCE": "thirdPartyInsurance",
-          "BUILDERS_CERTIFICATE": "builderCertificate",
-          "INSTRUMENT_OF_SALE": "instrumentOfSale",
-          "MORTGAGE_DETAILS": "mortgageDetails",
-          "PREOTECTION_AND_INDEMNITY_INSURANCE_NO": "pniInsurance",
-          "DECLARATION_OF_OWNERSHIP": "declarationOfOwnership",
-          "CHALLAN": "challan"
-        };
-
-        enclosers.forEach(encloser => {
-          const fieldName = fileMapping[encloser.documentType];
-          if (fieldName && encloser.fileStoreId) {
-            setFileStates(prev => ({
-              ...prev,
-              [fieldName]: {
-                name: encloser.documentName,
-                fileStoreId: encloser.fileStoreId
-              }
-            }));
-            setValue(`${fieldName}FileStoreId`, encloser.fileStoreId);
-          }
-        });
-      }
-
-      setIsDataLoaded(true);
-    }
-  }, [registrationData, setValue, isDataLoaded]);
-
-
-  useEffect(() => {
-    if (registrationData?.vesselDetails && masterData && isDataLoaded) {
-      const vesselDetails = registrationData.vesselDetails;
-
-      const findValueCode = (apiValue, masterArray) => {
-        if (!apiValue || !masterArray) return "";
-        const found = masterArray.find(item =>
-          item.valueLabel === apiValue || item.valueCode === apiValue
-        );
-        return found?.valueCode || "";
+  const fetchPaymentDetails = async () => {
+    try {
+      const payload = {
+        category: "REGISTRATION",
+        paymentProcess: "APPLICATIONCHARGE",
+        application_no: id ?? "",
       };
 
-      setValue("typeOfVessel", findValueCode(vesselDetails.typeOfVessel, masterData.vesselTypes));
-      setValue("categoryOfVessel", findValueCode(vesselDetails.categoryOfVessel, masterData.vesselCategories));
-      setValue("zone", findValueCode(vesselDetails.zone, masterData.zones));
-      setValue("kindOfVessel", findValueCode(vesselDetails.kindOfVessel, masterData.kindOfVessels));
-    }
-  }, [masterData, registrationData, isDataLoaded, setValue]);
-
-  const fetchAddressDetails = async (pin, prefix = "") => {
-    try {
       loaderRef.current?.show();
-      const URL = process.env.REACT_APP_PUBLIC_URL + URLS_ENDPOINT.APP_SERVICES.GET_DETAILS_BY_PINCODE + pin;
-      const response = await getData(URL);
-
-      if (response?.status === 200 && response?.data?.length > 0) {
-        const data = response.data[0];
-        if (prefix) {
-          // setValue(`${prefix}city`, data.district);
-          setValue(`${prefix}district`, data.district);
-          setValue(`${prefix}stateUt`, data.stateName);
-          // clearErrors(`${prefix}city`);
-          clearErrors(`${prefix}district`);
-          clearErrors(`${prefix}stateUt`);
-        } else {
-          // setValue("city", data.district);
-          setValue("district", data.district);
-          setValue("stateUt", data.stateName);
-          // clearErrors("city");
-          clearErrors("district");
-          clearErrors("stateUt");
-        }
-        setValue("country", "India");
-      } else {
-        toast.info("No data found for this PIN code");
+      const apiUrl = `${SERVICE_BASE.IWT_REGISTRATION}${URLS_ENDPOINT.VESSEL_SERVICE.PAYMENT_GENERATE}`;
+      const { status, data } = await postData(apiUrl, payload);
+      if (
+        status !== 200 ||
+        data?.responseStatus?.status !== "FeeSlab found successfully"
+      ) {
+        console.warn(
+          "Payment details not found or API response status mismatch."
+        );
+        return;
       }
-    } catch (error) {
-      toast.error("Error fetching address details");
-    } finally {
+
       loaderRef.current?.hide();
+      const apiData = data?.data ?? {};
+
+      const invoiceBreakupInfo = (apiData?.feesDetailsl ?? []).map(
+        (fee, index) => ({
+          id: fee?.id ?? index.toString(),
+          label: fee?.category_description ?? fee?.category_name ?? "N/A",
+          amount: fee?.totalCalucation ?? fee?.old_data ?? 0,
+          categoryHeader: fee?.catHeaderName ?? "",
+        })
+      );
+
+      const summary = {
+        subTotal: apiData.totalAmount ?? 0,
+        cgst: apiData.cgst ?? 0,
+        sgst: apiData.sgst ?? 0,
+        igst: apiData.igst ?? 0,
+        totalPayable: apiData.totalAmountAtergst ?? 0,
+      };
+      console.log("Payment Data:", invoiceBreakupInfo, summary);
+      setPaymentData({ invoiceBreakupInfo, summary });
+      setFullPaymentData(data ?? {});
+    } catch (error) {
+      loaderRef.current?.hide();
+      console.error("Error fetching payment details:", error?.message || error);
     }
   };
 
-  const handleDropdownChange = (name, value) => {
-    setValue(name, value, { shouldValidate: true });
-    clearErrors(name);
+  const handleGetInvoice = async () => {
+    await fetchPaymentDetails();
+    setShowInvoiceModal(true);
   };
 
-  const handleFileChange = async (e, documentType) => {
-    const file = e?.target?.files[0];
-    if (!file) return;
-
-    const maxSize = 10 * 1024 * 1024;
-    if (file.size > maxSize) {
-      toast.error("File size must be less than or equal to 10 MB.");
-      e.target.value = null;
-      return;
+  const handleProceedToPay = () => {
+    setShowInvoiceModal(false);
+    if (paymentData && id) {
+      navigate(`/payment/${id}`, {
+        state: {
+          paymentData,
+          applicationNumber: id,
+          fullPaymentData,
+        },
+      });
     }
+  };
 
+  const fetchRegistrationDetails = async () => {
     loaderRef.current?.show();
 
     try {
-      const formData = new FormData();
-      formData.append("file", file);
+      const payload = { applicationNumbers: [id ?? ""] };
+      const apiUrl = `${SERVICE_BASE.IWT_REGISTRATION}${URLS_ENDPOINT.USER_SERVICE.REGISTRATION_SEARCH_BY_ID}`;
+      const { status, data } = await postData(apiUrl, payload);
 
-      const uploadUrl = BASE_IP + URLS_ENDPOINT.FILE_STORE_SERVICE.UPLOAD_FILE;
-      const response = await postFORMdata(uploadUrl, formData);
+      const resData = data?.data[0] ?? {};
+      // const statusMessage = res?.responseStatus?.status;
 
-      const fileStoreId = response?.data?.files[0]?.fileStoreId;
+      if (status !== 200) {
+        toast.error("Unable to fetch registration details.");
+        return;
+      }
 
-      if (fileStoreId) {
+      setRegistrationData(resData);
 
-        const getStandardizedFileName = (docType) => {
-          const fileNames = {
-            "thirdPartyInsurance": "Third Party Insurance.pdf",
-            "builderCertificate": "Builder's Certificate.pdf",
-            "instrumentOfSale": "Instrument of Sale.pdf",
-            "mortgageDetails": "Mortgage Details.pdf",
-            "pniInsurance": "Protection & Indemnity Insurance.pdf",
-            "declarationOfOwnership": "Declaration of Ownership.pdf",
-            "challan": "Challan.pdf"
-          };
-          return fileNames[docType] || file.name;
-        };
+      const batchSetValues = (valuesObj) => {
+        Object.entries(valuesObj).forEach(([key, value]) => {
+          setValue(key, value ?? "");
+        });
+      };
 
-        const standardizedName = getStandardizedFileName(documentType);
+      const {
+        basicDetails = {},
+        vesselDetails = {},
+        engineDetails = {},
+        processActionMapResponce = [],
+      } = resData;
 
-        setFileStates(prev => ({
-          ...prev,
-          [documentType]: {
-            name: standardizedName,
-            fileStoreId,
-            originalName: file.name
-          }
-        }));
-        setValue(`${documentType}FileStoreId`, fileStoreId);
-        toast.success("File uploaded successfully!");
+      const owner = basicDetails?.ownerDetails ?? {};
+      batchSetValues({
+        ownerName: owner?.ownerCompanyName ?? "",
+        ownerAddress: `${owner?.addressLine1 ?? ""}, ${
+          owner?.addressLine2 ?? ""
+        }`,
+        mobile: owner?.phoneNumber ?? "",
+        email: owner?.emailId ?? "",
+        pan: owner?.panNo ?? "",
+        gst: owner?.gstNo ?? "",
+        aadhar: owner?.aadharNumber ?? "",
+        tradeLicence: owner?.tradeLicenseNumber ?? "",
+      });
+
+      batchSetValues({
+        grt: vesselDetails?.grossTonnage ?? "",
+        workOrderValue: vesselDetails?.workOrderValue ?? "",
+        vesselType: vesselDetails?.typeOfVessel ?? "",
+        category: vesselDetails?.categoryOfVessel ?? "",
+        zone: vesselDetails?.zone ?? "",
+        purchaseType: vesselDetails?.purchaseType ?? "",
+        supervisionAuthority: vesselDetails?.supervisionAuthority ?? "",
+        classificationSociety: vesselDetails?.nameOfClassificationSociety ?? "",
+        nameOfMaster: vesselDetails?.nameOfMaster ?? "",
+        certificateNo: vesselDetails?.certficateNumber ?? "",
+        nameOfRegistry: vesselDetails?.nameOfRegistry ?? "",
+        registrationNo: vesselDetails?.registrationNumber ?? "",
+        vesselName: vesselDetails?.vesselName ?? "",
+        kindOfVessel: vesselDetails?.kindOfVessel ?? "",
+        categoryOfVessel: vesselDetails?.categoryOfVessel ?? "",
+        mortgage: vesselDetails?.mortgage ?? "",
+        placeOfBuild: vesselDetails?.placeOfBuild ?? "",
+        detailsOfInsurance: vesselDetails?.insuranceDetails ?? "",
+        vesselyearOfBuild: vesselDetails?.yearOfBuild?.toString() ?? "",
+        protectionAndIndemnityClubNo: vesselDetails?.pniClubNo ?? "",
+        protectionAndIndemnityClubName: vesselDetails?.pniClubName ?? "",
+        insuranceValidUpto: vesselDetails?.insuranceValidDate ?? "",
+      });
+
+      const builder = basicDetails?.builderDetails ?? {};
+      batchSetValues({
+        constructedBy: basicDetails?.constructedBy ?? "2",
+        builderName: builder?.builderName,
+        builderAddress: `${builder?.addressLine1 ?? ""}, ${
+          builder.addressLine2 ?? ""
+        }`,
+        builderEmail: builder?.emailId ?? "",
+        builderMobile: builder?.phone ?? "",
+        builderGST: builder?.gstNo ?? "",
+        builderTradeLicence: builder?.tradeLicenseNumber ?? "",
+        builderAuth: basicDetails?.builderAuthorization ?? "",
+      });
+
+      batchSetValues({
+        yearOfBuild: engineDetails?.yearOfBuild ?? "",
+        typeOfEngine: engineDetails?.engineType ?? "",
+        engineMake: engineDetails?.engineMake ?? "",
+        engineMakerAddress: engineDetails?.makerAddress ?? "",
+        enginepin: engineDetails?.pin ?? "",
+        enginephoneNumber: engineDetails?.mobile ?? "",
+        engineemail: engineDetails?.email ?? "",
+        horsepower: engineDetails?.horsepower?.toString() ?? "",
+        speed: engineDetails?.speed?.toString() ?? "",
+        yearOfMake: engineDetails?.yearOfMake ?? "",
+      });
+
+      batchSetValues({
+        occupation: basicDetails?.occupation,
+        originalPlaceOfBusiness: basicDetails?.originalPlaceBusiness,
+      });
+
+      if (isOfficerLogin) {
+        setActionsFromAPI(
+          processActionMapResponce[0]?.processs[0]?.actions || []
+        );
       }
     } catch (err) {
-      console.error("File upload failed:", err);
-      toast.error("File upload failed. Please try again.");
-      setFileStates(prev => ({ ...prev, [documentType]: null }));
-      e.target.value = null;
+      console.error("Failed to fetch registration details:", err);
+      toast.error("Failed to fetch registration details.");
     } finally {
       loaderRef.current?.hide();
     }
   };
-
-  // const handleFileDownload = (fileStoreId, fileName, originalName) => {
-  //   if (fileStoreId) {
-  //     const downloadUrl = `${BASE_IP}/filestore/v1/files/id?fileStoreId=${fileStoreId}`;
-  //     const link = document.createElement('a');
-  //     link.href = downloadUrl;
-  //     link.download = originalName || fileName; 
-  //     link.target = '_blank';
-  //     document.body.appendChild(link);
-  //     link.click();
-  //     document.body.removeChild(link);
-  //   }
-  // };
-
-  const handleFileDownload = async (fileStoreId, fileName, originalName) => {
-    try {
-      if (!fileStoreId) return;
-      const url = `${BASE_IP}/filestore/v1/files/id?fileStoreId=${fileStoreId}`;
-
-      loaderRef.current?.show();
-
-      const accessToken = getFromLocalStorage("access_token");
-      const tokenDetails = getFromLocalStorage("tokenDetails");
-      const sessionState = tokenDetails
-        ? JSON.parse(tokenDetails)?.session_state
-        : "";
-
-      const response = await axios({
-        method: "GET",
-        url: url,
-        responseType: "blob",
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          "X-Request-ID": sessionState,
-          Accept: "application/octet-stream",
-        },
-      });
-
-      if (response.data) {
-        let filename = fileName || "document";
-        const contentDisposition = response.headers["content-disposition"];
-        if (contentDisposition) {
-          const filenameMatch = contentDisposition.match(
-            /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/
-          );
-          if (filenameMatch && filenameMatch[1]) {
-            filename = filenameMatch[1].replace(/['"]/g, "");
-          }
-        }
-
-        const blob = new Blob([response.data], {
-          type: response.headers["content-type"] || "application/octet-stream",
-        });
-        const blobUrl = window.URL.createObjectURL(blob);
-
-        const link = document.createElement("a");
-        link.href = blobUrl;
-        link.setAttribute("download", filename);
-        document.body.appendChild(link);
-        link.click();
-
-        setTimeout(() => {
-          document.body.removeChild(link);
-          window.URL.revokeObjectURL(blobUrl);
-        }, 100);
-      }
-    } catch (error) {
-      console.error("Error downloading file:", error);
-      toast.error("Failed to download file. Please try again.");
-    } finally {
-      loaderRef.current?.hide();
-    }
-  };
-
-  const getVesselNameSuggestions = async (value) => {
-    try {
-      const vesselName = value.trim();
-      if (!vesselName) return;
-      const applicationNo = registrationData?.vesselDetails?.applicationNo;
-      const regId = registrationData?.vesselDetails?.id;
-      if (!applicationNo || !regId) return;
-
-      loaderRef.current?.show();
-
-      const apiUrl = SERVICE_BASE.IWT_REGISTRATION + URLS_ENDPOINT.VESSEL_SERVICE.VESSELNAME_SEARCH + `?vesselName=${encodeURIComponent(vesselName)}`;
-
-      const response = await postData(apiUrl, {
-        vesselRegistrationId: regId,
-        applicationNumber: applicationNo,
-        vesselName: vesselName
-      });
-
-      setSuggestions([]);
-      clearErrors("vesselName");
-      loaderRef.current?.hide();
-
-      return true;
-
-    } catch (error) {
-
-      const suggestions = error?.response?.data?.data?.suggestions || [];
-      setSuggestions(suggestions);
-      toast.error(error?.response?.data?.responseStatus?.message || "The Vessel is not available please try with another name");
-      setError("vesselName", {
-        type: "manual",
-        message: t("The Vessel is not available please try with another name"),
-      });
-      loaderRef.current?.hide();
-
-      return false;
-    }
-  };
-
-  const checkVesselNameError = () => {
-    if (errors?.vesselName) {
-      return false;
-    }
-    return true;
-  }
-
-  const values = watch();
 
   useEffect(() => {
-    const timer = setTimeout(() => {
-      getVesselNameSuggestions(values.vesselName);
-    }, 1000);
+    if (id) {
+      fetchRegistrationDetails();
+    }
+  }, []);
 
-    return () => clearTimeout(timer);
-  }, [values.vesselName]);
-  const shouldShowBuilderDetails = () => {
-  return registrationData?.basicDetails?.builderDetails !== null && 
-         registrationData?.basicDetails?.builderDetails?.builderName !== null &&
-         registrationData?.basicDetails?.constructedBy !== "1";
-};
+  useEffect(() => {
+    if (!registrationData) return;
 
-const hasRegistrationNumber = () => {
-  return hasValue(registrationData?.vesselDetails?.registrationNumber);
-};
-const isVesselFieldDisabled = (fieldName) => {
-  if (!isDataLoaded || !registrationData?.vesselDetails) return false;
-  const vessel = registrationData.vesselDetails;
-  
-  const hasRegistrationNumber = hasValue(vessel.registrationNumber);
-  return !hasRegistrationNumber;
-};
+    const createStep = (
+      label,
+      component,
+      validate = null,
+      noValidation = true
+    ) => ({
+      label,
+      component,
+      getFormData: () => methods?.getValues(),
+      validate,
+      goToNextStepNoValidtion: noValidation,
+    });
+
+    if (isOfficerLogin && isViewMode) {
+      const stepsList = [];
+      const hasBasicDetails =
+        registrationData?.basicDetails && registrationData?.vesselDetails;
+      if (hasBasicDetails) {
+        stepsList.push(
+          createStep(
+            "Basic Details",
+            <VesselBasicDetailsView
+              formMethods={methods}
+              isPreview
+              formData={getValues()}
+              registrationData={registrationData}
+              ref={loaderRef}
+              BASE_IP={BASE_IP}
+            />
+          )
+        );
+      }
+
+      const hasReports =
+        registrationData?.reports &&
+        ((registrationData.reports?.materialTestReports &&
+          registrationData.reports.materialTestReports?.length > 0) ||
+          (registrationData.reports?.radiographyReports &&
+            registrationData.reports?.radiographyReports?.length > 0) ||
+          (registrationData.reports?.inspectionReports &&
+            registrationData.reports?.inspectionReports?.length > 0) ||
+          (registrationData.reports?.otherReports &&
+            registrationData.reports.otherReports?.length > 0));
+      if (hasReports) {
+        stepsList.push(
+          createStep(
+            "Reports & Documents",
+            <ReportsDashboard
+              formMethods={methods}
+              viewMode={isViewMode}
+              isUploadOnly
+              applicationNumber={registrationData?.applicationNumber}
+              additionalData={registrationData}
+              pageName={pageName}
+              ref={loaderRef}
+            />
+          )
+        );
+      }
+
+      const hasEngineDetails =
+        registrationData?.engineDetails &&
+        registrationData.engineDetails !== null &&
+        Object.keys(registrationData.engineDetails).length > 0;
+      const hasEnclosers =
+        registrationData?.enclosers && registrationData.enclosers.length > 0;
+
+      if (hasEngineDetails || hasEnclosers) {
+        stepsList.push(
+          createStep(
+            "Application for Registration",
+            <RegistrationApplicationForm
+              ref={registrationFormRef}
+              registrationData={registrationData}
+              isViewMode={isViewMode}
+            />,
+            async () => {
+              if (registrationFormRef.current?.validateForm) {
+                return await registrationFormRef.current.validateForm();
+              }
+              return true;
+            },
+            false
+          )
+        );
+      }
+
+      // //  Curving & Marking Note step for L3 and L4 officers
+      // if (
+      //   userRole === USER_ROLES.OFFICER_L3 ||
+      //   userRole === USER_ROLES.OFFICER_L4
+      // ) {
+      //   stepsList.push(
+      //     createStep(
+      //       "Curving & Marking Note",
+      //       <CurvingMarkingNote registrationData={registrationData} />
+      //     )
+      //   );
+      // }
+
+      // //  Director Review step for L5 officers
+      // if (userRole === USER_ROLES.OFFICER_L5) {
+      //   stepsList.push(
+      //     createStep(
+      //       "Director Review",
+      //       <CurvingMarkingNoteL5 registrationData={registrationData} />
+      //     )
+      //   );
+      // }
+
+        
+            if (registrationData?.basicDetails?.isCmnGenerated) {
+              if (userRole === USER_ROLES.OFFICER_L5) {
+                stepsList.push(
+                  createStep(
+                    "Director Review",
+                    <CurvingMarkingNoteL5
+                      registrationData={registrationData}
+                    />
+                  )
+                );
+              } else if (
+                userRole === USER_ROLES.OFFICER_L3 ||
+                userRole === USER_ROLES.OFFICER_L4
+              ) {
+                stepsList.push(
+                  createStep(
+                    "Curving & Marking Note",
+                    <CurvingMarkingNote
+                      registrationData={registrationData}
+                    />
+                  )
+                );
+              }
+            }
+
+      setSteps(stepsList);
+    } else {
+      const stepsList = [
+        createStep(
+          "Basic Details",
+          <VesselBasicDetailsView
+            formMethods={methods}
+            isPreview
+            formData={getValues()}
+            registrationData={registrationData}
+            ref={loaderRef}
+            BASE_IP={BASE_IP}
+          />
+        ),
+      ];
+
+      const reportsDashboardStep = createStep(
+        "Reports & Documents",
+        <ReportsDashboard
+          formMethods={methods}
+          viewMode={isViewMode}
+          isUploadOnly
+          applicationNumber={rowData?.applicationNumber}
+          additionalData={rowData}
+          pageName={pageName}
+          ref={loaderRef}
+        />
+      );
+
+      if (pageName === "uploadReports" && !isViewMode) {
+        stepsList.push(reportsDashboardStep);
+      }
+
+      if (pageName === "vesselRegistration") {
+        if (!isViewMode) {
+          stepsList.push(reportsDashboardStep);
+        }
+        stepsList.push(
+          createStep(
+            "Application for Registration",
+            <RegistrationApplicationForm
+              ref={registrationFormRef}
+              registrationData={registrationData}
+            />,
+            async () => {
+              if (registrationFormRef.current?.validateForm) {
+                return await registrationFormRef.current.validateForm();
+              }
+              return true;
+            },
+            false
+          )
+        );
+      }
+
+      setSteps(stepsList);
+    }
+  }, [
+    pageName,
+    rowData,
+    methods,
+    registrationData,
+    isViewMode,
+    isOfficerLogin,
+    userRole,
+  ]);
+
+  const handleActionClick = (action) => {
+    setSelectedAction(action);
+    setShowApprovalModal(true);
+  };
+
+  const workflowApplicationSubmit = async (modalFormData) => {
+    try {
+      const URL =
+        SERVICE_BASE.IWT_WORKFLOW +
+        URLS_ENDPOINT.WORK_FLOW_SERVICE.WORKFLOW_ACTION;
+      
+        loaderRef?.current?.show();
+
+      const payload = {
+        applicationNo: registrationData?.applicationNumber,
+        processId:
+          registrationData?.processActionMapResponce[0]?.processs?.[0]
+            ?.processId,
+        actionId: selectedAction?.actionId,
+        assignerRole: userRole,
+        assignerName:
+          userDetails?.userName ||
+          getFromLocalStorage("userDetails")?.userName ||
+          "",
+        fileId: modalFormData?.document?.url || "",
+        remarks: modalFormData?.reason,
+      };
+
+      const response = await postData(URL, payload);
+      if (
+        response &&
+        response?.status === 200 &&
+        response?.data?.responseStatus?.status === "200"
+      ) {
+        toast.success(
+          response?.data?.responseStatus?.message ||
+            "Action submitted successfully"
+        );
+        handleCloseModal();
+        loaderRef?.current?.hide();
+        setTimeout(() => {
+          navigate("/dashboard");
+        }, 1000);
+      } else {
+        loaderRef?.current?.hide();
+        toast.info(
+          response?.data?.responseStatus?.message || "Something went wrong..",
+          { position: "top-right" }
+        );
+      }
+    } catch (err) {
+      console.log(err);
+      loaderRef?.current?.hide();
+      handleErrorMessage(err?.response?.data);
+    }
+  };
+
+  const handleCloseModal = () => {
+    setShowApprovalModal(false);
+    setSelectedAction("");
+  };
+
+  const handleFormSubmit = async (stepInfo) => {
+    console.log("Current Step Info from Stepper:", stepInfo);
+  };
+
+  const handleFinalSubmit = () => {
+    const allFormData = methods.getValues();
+    toast.success("Form submitted successfully!");
+  };
+
+  const createRegistrationPayload = (formData, registrationFormData) => {
+    return {
+      id: registrationData?.id || "",
+      applicationNumber: id || "",
+      basicDetails: {
+        id: registrationData?.basicDetails?.id || "",
+        applicationNumber: id || "",
+        status: registrationData?.basicDetails?.status || "",
+        constructedBy:
+          registrationData?.basicDetails?.constructedBy ||
+          registrationFormData?.builderName ||
+          "",
+        ownerDetails: {
+          id: registrationData?.basicDetails?.ownerDetails?.id || "",
+          ownerName:
+            registrationFormData?.ownerName ||
+            registrationData?.basicDetails?.ownerDetails?.ownerCompanyName ||
+            "",
+          ownerType:
+            registrationFormData?.ownerType ||
+            registrationData?.basicDetails?.ownerDetails?.categoryOfOwner ||
+            "",
+          email:
+            registrationFormData?.builderEmail ||
+            registrationData?.basicDetails?.ownerDetails?.emailId ||
+            "",
+          address:
+            registrationFormData?.address ||
+            registrationData?.basicDetails?.ownerDetails?.addressLine1 ||
+            "",
+        },
+        builderDetails: {
+          id: registrationData?.basicDetails?.builderDetails?.id || "",
+          builderName:
+            registrationFormData?.builderName ||
+            registrationData?.basicDetails?.builderDetails?.builderName ||
+            "",
+          registrationNumber:
+            registrationData?.basicDetails?.builderDetails
+              ?.registrationNumber || "",
+          address:
+            registrationFormData?.builderAddress ||
+            registrationData?.basicDetails?.builderDetails?.addressLine1 ||
+            "",
+          contactPerson:
+            registrationData?.basicDetails?.builderDetails?.contactPerson || "",
+          contactNumber:
+            registrationFormData?.builderphoneNumber ||
+            registrationData?.basicDetails?.builderDetails?.phone ||
+            "",
+        },
+        builderAuthorization:
+          registrationData?.basicDetails?.builderAuthorization || "",
+        authorizationLetter: registrationData?.basicDetails?.authorizationLetter
+          ? {
+              id: registrationData.basicDetails.authorizationLetter.id || "",
+              fileStoreId:
+                registrationData.basicDetails.authorizationLetter.fileStoreId ||
+                "",
+              documentName:
+                registrationData.basicDetails.authorizationLetter
+                  .documentName || "Authorization_Letter.pdf",
+              documentType:
+                registrationData.basicDetails.authorizationLetter
+                  .documentType || "AUTHORIZATION_LETTER",
+              documentSource:
+                registrationData.basicDetails.authorizationLetter
+                  .documentSource || "AUTHORIZATION_LETTER",
+              descriptions:
+                registrationData.basicDetails.authorizationLetter.description ||
+                "builder authorised letter",
+            }
+          : {
+              id: "",
+              fileStoreId: "",
+              documentName: "Authorization_Letter.pdf",
+              documentType: "AUTHORIZATION_LETTER",
+              documentSource: "AUTHORIZATION_LETTER",
+              descriptions: "builder authorised letter",
+            },
+        occupation:
+          registrationFormData?.occupation ||
+          registrationData?.basicDetails?.occupation ||
+          "",
+        originalPlaceBusiness:
+          registrationFormData?.originalPlaceOfBusiness ||
+          registrationData?.basicDetails?.originalPlaceBusiness ||
+          "",
+        isDrawingFee: registrationData?.basicDetails?.isDrawingFee || false,
+        isSupervisionFee:
+          registrationData?.basicDetails?.isSupervisionFee || false,
+        isApplicationRegistrationFee:
+          registrationData?.basicDetails?.isApplicationRegistrationFee || false,
+        isProvisionaCertificate:
+          registrationData?.basicDetails?.isProvisionaCertificate || false,
+        isEditable:
+          registrationData?.basicDetails?.isEditable !== undefined
+            ? registrationData.basicDetails.isEditable
+            : true,
+      },
+      vesselDetails: {
+        id: registrationData?.vesselDetails?.id || "",
+        typeOfVessel:
+          registrationFormData?.typeOfVessel ||
+          registrationData?.vesselDetails?.typeOfVessel ||
+          "",
+        categoryOfVessel:
+          registrationFormData?.categoryOfVessel ||
+          registrationData?.vesselDetails?.categoryOfVessel ||
+          "",
+        zone:
+          registrationFormData?.zone ||
+          registrationData?.vesselDetails?.zone ||
+          "",
+        grossTonnage:
+          parseInt(formData?.grt) ||
+          registrationData?.vesselDetails?.grossTonnage ||
+          0,
+        workOrderValue:
+          formData?.workOrderValue ||
+          registrationData?.vesselDetails?.workOrderValue ||
+          "",
+        purchaseType:
+          formData?.purchaseType ||
+          registrationData?.vesselDetails?.purchaseType ||
+          "",
+        supervisionAuthority:
+          formData?.supervisionAuthority ||
+          registrationData?.vesselDetails?.supervisionAuthority ||
+          "",
+        nameOfMaster:
+          registrationFormData?.nameOfMaster ||
+          registrationData?.vesselDetails?.nameOfMaster ||
+          "",
+        certficateNumber:
+          registrationFormData?.certificateNo ||
+          registrationData?.vesselDetails?.certficateNumber ||
+          "",
+        nameOfRegistry:
+          registrationFormData?.nameOfRegistry ||
+          registrationData?.vesselDetails?.nameOfRegistry ||
+          "",
+        registrationNumber:
+          registrationFormData?.registrationNo ||
+          registrationData?.vesselDetails?.registrationNumber ||
+          "",
+        vesselName:
+          registrationFormData?.vesselName ||
+          registrationData?.vesselDetails?.vesselName ||
+          "",
+        kindOfVessel:
+          registrationFormData?.kindOfVessel ||
+          registrationData?.vesselDetails?.kindOfVessel ||
+          "",
+        mortgage:
+          registrationFormData?.mortgage ||
+          registrationData?.vesselDetails?.mortgage ||
+          "",
+        placeOfBuild:
+          registrationFormData?.placeOfBuild ||
+          registrationData?.vesselDetails?.placeOfBuild ||
+          "",
+        insuranceDetails:
+          registrationFormData?.detailsOfInsurance ||
+          registrationData?.vesselDetails?.insuranceDetails ||
+          "",
+        yearOfBuild:
+          parseInt(registrationFormData?.vesselyearOfBuild) ||
+          registrationData?.vesselDetails?.yearOfBuild ||
+          null,
+        pniClubNo:
+          registrationFormData?.protectionAndIndemnityClubNo ||
+          registrationData?.vesselDetails?.pniClubNo ||
+          "",
+        pniClubName:
+          registrationFormData?.protectionAndIndemnityClubName ||
+          registrationData?.vesselDetails?.pniClubName ||
+          "",
+        applicationNo:
+          id || registrationData?.vesselDetails?.applicationNo || "",
+        nameOfClassificationSociety:
+          formData?.classificationSociety ||
+          registrationData?.vesselDetails?.nameOfClassificationSociety ||
+          "",
+        iwtVesselBasicDetailsTFk:
+          registrationData?.basicDetails?.id ||
+          registrationData?.vesselDetails?.iwtVesselBasicDetailsTFk ||
+          "",
+        insuranceValidDate:
+          registrationFormData?.insuranceValidUpto ||
+          registrationData?.vesselDetails?.insuranceValidDate ||
+          "",
+      },
+      documents: extractDocuments(formData, registrationData),
+      engineDetails: registrationData?.engineDetails
+        ? {
+            id: registrationData.engineDetails.id || "",
+            yearOfBuild:
+              registrationFormData?.yearOfBuild ||
+              registrationData.engineDetails.yearOfBuild ||
+              "",
+            engineType:
+              registrationFormData?.typeOfEngine ||
+              registrationData.engineDetails.engineType ||
+              "",
+            engineMake:
+              registrationFormData?.engineMake ||
+              registrationData.engineDetails.engineMake ||
+              "",
+            makerAddress:
+              registrationFormData?.engineMakerAddress ||
+              registrationData.engineDetails.makerAddress ||
+              "",
+            pin:
+              registrationFormData?.enginepin ||
+              registrationData.engineDetails.pin ||
+              "",
+            mobile:
+              registrationFormData?.enginephoneNumber ||
+              registrationData.engineDetails.mobile ||
+              "",
+            email:
+              registrationFormData?.engineemail ||
+              registrationData.engineDetails.email ||
+              "",
+            horsepower:
+              parseFloat(registrationFormData?.horsepower) ||
+              registrationData.engineDetails.horsepower ||
+              0,
+            speed:
+              parseFloat(registrationFormData?.speed) ||
+              registrationData.engineDetails.speed ||
+              0,
+            yearOfMake:
+              registrationFormData?.yearOfMake ||
+              registrationData.engineDetails.yearOfMake ||
+              "",
+            iwtApplRegistrationTFk:
+              registrationData?.basicDetails?.id ||
+              registrationData.engineDetails.iwtApplRegistrationTFk ||
+              "",
+          }
+        : {
+            id: "",
+            yearOfBuild: registrationFormData?.yearOfBuild || "",
+            engineType: registrationFormData?.typeOfEngine || "",
+            engineMake: registrationFormData?.engineMake || "",
+            makerAddress: registrationFormData?.engineMakerAddress || "",
+            pin: registrationFormData?.enginepin || "",
+            mobile: registrationFormData?.enginephoneNumber || "",
+            email: registrationFormData?.engineemail || "",
+            horsepower: parseFloat(registrationFormData?.horsepower) || 0,
+            speed: parseFloat(registrationFormData?.speed) || 0,
+            yearOfMake: registrationFormData?.yearOfMake || "",
+            iwtApplRegistrationTFk: registrationData?.basicDetails?.id || "",
+          },
+      enclosers: extractEnclosers(registrationFormData, registrationData),
+    };
+  };
+
+  const extractDocuments = (formData, registrationData) => {
+    const documents = [];
+
+    if (
+      registrationData?.documents &&
+      Array.isArray(registrationData.documents)
+    ) {
+      registrationData.documents.forEach((doc) => {
+        documents.push({
+          id: doc.id || "",
+          fileStoreId: doc.fileStoreId || "",
+          documentName: doc.documentName || "",
+          documentType: doc.documentType || "",
+          documentSource: doc.documentSource || "",
+          description: doc.description || "",
+        });
+      });
+    }
+
+    const documentTypes = [
+      {
+        key: "WORK_ORDER",
+        name: "Work Order.pdf",
+        description: "Work Order document",
+      },
+      { key: "DRAWINGS", name: "Drawing.pdf", description: "Drawing document" },
+      {
+        key: "TONNAGE_BOOKLETS",
+        name: "Tonnage Booklet.pdf",
+        description: "Tonnage document",
+      },
+      {
+        key: "STABILITY_BOOKLETS",
+        name: "Stability Booklet.pdf",
+        description: "Stability document",
+      },
+    ];
+
+    documentTypes.forEach(({ key, name, description }) => {
+      const fileStoreId = formData?.[`${key}_fileStoreId`];
+      if (fileStoreId) {
+        documents.push({
+          id: "",
+          fileStoreId,
+          documentName: name,
+          documentType: key,
+          documentSource: key,
+          description,
+        });
+      }
+    });
+
+    return documents;
+  };
+
+  const extractEnclosers = (formData, registrationData) => {
+    const enclosers = [];
+
+    if (
+      registrationData?.enclosers &&
+      Array.isArray(registrationData.enclosers)
+    ) {
+      registrationData.enclosers.forEach((encloser) => {
+        enclosers.push({
+          id: encloser.id || "",
+          fileStoreId: encloser.fileStoreId || "",
+          documentName: encloser.documentName || "",
+          documentType: encloser.documentType || "",
+          documentSource: encloser.documentSource || "",
+          description: encloser.description || "",
+        });
+      });
+    }
+
+    const encloserTypes = [
+      {
+        key: "thirdPartyInsurance",
+        type: "THIRD_PARTY_INSURANCE",
+        name: "Third Party Insurance",
+      },
+      {
+        key: "builderCertificate",
+        type: "BUILDERS_CERTIFICATE",
+        name: "Builder Certificate",
+      },
+      {
+        key: "instrumentOfSale",
+        type: "INSTRUMENT_OF_SALE",
+        name: "Instrument of Sale",
+      },
+      {
+        key: "mortgageDetails",
+        type: "MORTGAGE_DETAILS",
+        name: "Mortgage Details",
+      },
+      {
+        key: "pniInsurance",
+        type: "PREOTECTION_AND_INDEMNITY_INSURANCE_NO",
+        name: "Protection and Indemnity Insurance",
+      },
+      {
+        key: "declarationOfOwnership",
+        type: "DECLARATION_OF_OWNERSHIP",
+        name: "Declaration of Ownership",
+      },
+      { key: "challan", type: "CHALLAN", name: "Challan" },
+    ];
+
+    encloserTypes.forEach(({ key, type, name }) => {
+      const fileStoreId = formData?.[`${key}FileStoreId`];
+      if (fileStoreId) {
+        enclosers.push({
+          id: "",
+          fileStoreId,
+          documentName: `${name}.pdf`,
+          documentType: type,
+          documentSource: type,
+          description: `${name} document`,
+        });
+      }
+    });
+
+    return enclosers;
+  };
+
+  const handleSubmit = async () => {
+    try {
+      // setIsLoading(true);
+      loaderRef.current?.show();
+
+      const formData = methods.getValues();
+      let registrationFormData = {};
+      if (registrationFormRef.current?.getFormData) {
+        registrationFormData = registrationFormRef.current.getFormData();
+      }
+
+      const payload = createRegistrationPayload(formData, registrationFormData);
+
+      const apiUrl =
+        SERVICE_BASE.IWT_REGISTRATION + URLS_ENDPOINT.VESSEL_SERVICE.CREATE;
+      const response = await postData(apiUrl, payload);
+
+      if (response?.status === 200 && response?.data?.responseStatus) {
+      // if (response?.status === 200 && response?.data?.responseStatus?.status === "Data Created Successfully") {
+
+        toast.success(
+          response?.data?.responseStatus?.message ||
+            "Registration submitted successfully!"
+        );
+        setDisableSubmit(true);
+        setInitialStep(steps.length - 1);
+        // setTimeout(() => {
+        // navigate("/dashboard");
+        // }, 1500);
+      } else {
+        toast.error(
+          response?.data?.responseStatus?.message ||
+            "Submission failed. Please try again."
+        );
+      }
+    } catch (error) {
+      console.error("Submission error:", error);
+      toast.error("Failed to submit form. Please try again.");
+    } finally {
+      // setIsLoading(false);
+      loaderRef.current?.hide();
+    }
+  };
+
+  const actionDropdown =
+    isViewMode && isOfficerLogin && actionsFromAPI.length > 0 ? (
+      <ActionDropdown
+        actions={actionsFromAPI}
+        onActionClick={handleActionClick}
+        variant="contained"
+        sx={{
+          backgroundColor: "#2E57A7",
+          fontWeight: "bold",
+          borderRadius: "0.5rem",
+          minWidth: "8rem",
+          fontSize: "0.9rem",
+          color: "#fff",
+          "&:hover": {
+            backgroundColor: "#1f4ea0",
+          },
+        }}
+      />
+    ) : null;
 
   return (
-    <>
+    <Box
+      sx={{
+        padding: "1rem 0.5rem 0 0.5rem",
+        backgroundColor: "#f5f6fa",
+        minHeight: "100vh",
+      }}
+    >
       <NewLoader ref={loaderRef} />
-      <Container fluid className="p-0">
-        <Card className="mb-1">
-          <Card.Body>
-            <form className="employee-form">
-              <div className="d-flex align-items-center">
-                <h6 style={{ color: "#2466BF" }}>{t("FORM-2")}</h6>
-              </div>
-
-              {/* APPLICANT DETAILS */}
-              <Collapsible
-                title={
-                  <div className="d-flex align-items-center">
-                    <FaUser className="me-2" style={{ color: "#2466BF" }} />
-                    <span style={{ color: "#2466BF" }}>{t("APPLICANT DETAILS")}</span>
-                    {hasOwnerData && (
-                      <FaLock className="ms-2" style={{ color: "#6c757d" }} title="Some fields are auto-populated and cannot be edited" />
-                    )}
-                  </div>
-                }
-                defaultOpen={true}
+      <>
+        <div className="d-flex flex-column flex-md-row justify-content-between align-items-start align-items-md-center mb-4 gap-3">
+          <div
+            className="d-flex align-items-center flex-grow-1"
+            style={{ gap: "16px" }}
+          >
+            <Button
+              variant="outline-primary"
+              onClick={() => navigate("/dashboard")}
+              className="d-flex align-items-center justify-content-center shadow-sm"
+              style={{
+                borderRadius: "50%",
+                width: "40px",
+                height: "40px",
+                border: "2px solid #2E57A7",
+                color: "#2E57A7",
+                backgroundColor: "#fff",
+                transition: "all 0.3s ease",
+                padding: "0",
+              }}
+              onMouseEnter={(e) => {
+                e.target.style.backgroundColor = "#2E57A7";
+                e.target.style.color = "#fff";
+                e.target.style.transform = "translateY(-2px)";
+                e.target.style.boxShadow = "0 4px 12px rgba(46, 87, 167, 0.3)";
+              }}
+              onMouseLeave={(e) => {
+                e.target.style.backgroundColor = "#fff";
+                e.target.style.color = "#2E57A7";
+                e.target.style.transform = "translateY(0)";
+                e.target.style.boxShadow = "0 2px 4px rgba(0,0,0,0.1)";
+              }}
+            >
+              <BsArrowLeft size={16} />
+            </Button>
+            <Stack spacing={0.5} className="flex-grow-1">
+              <Typography
+                sx={{
+                  fontWeight: 550,
+                  color: "#2E57A7",
+                  fontSize: { xs: "1rem", sm: "1.1rem", md: "1.2rem" },
+                  lineHeight: 1.2,
+                }}
               >
-                <Card className="form-section-card">
-                  <Card.Body>
-                    <Row className="g-3">
-                      <Col md={4}>
-                        <InputText
-                          name="ownerName"
-                          label={t("Owner Name")}
-                          placeholder={t("Enter owner name")}
-                          required={true}
-                          register={{
-                            ...register("ownerName", {
-                              required: t("Owner Name is required"),
-                              minLength: { value: 3, message: t("Minimum 3 characters required") },
-                            }),
-                          }}
-                          errors={errors}
-                          clearErrors={clearErrors}
-                          readOnly={isOwnerFieldDisabled('ownerName')}
-                          disabled={isOwnerFieldDisabled('ownerName')}
-                          style={{
-                            backgroundColor: isOwnerFieldDisabled('ownerName') ? '#e9ecef' : '#ffffff',
-                            cursor: isOwnerFieldDisabled('ownerName') ? 'not-allowed' : 'text'
-                          }}
-                        />
-                      </Col>
-                      <Col md={4}>
-                        <InputText
-                          name="address"
-                          label={t("Address")}
-                          placeholder={t("Enter address")}
-                          required={true}
-                          register={{
-                            ...register("address", {
-                              required: t("Address is required"),
-                              minLength: { value: 5, message: t("Minimum 5 characters required") },
-                            }),
-                          }}
-                          errors={errors}
-                          clearErrors={clearErrors}
-                          readOnly={isOwnerFieldDisabled('address')}
-                          disabled={isOwnerFieldDisabled('address')}
-                          style={{
-                            backgroundColor: isOwnerFieldDisabled('address') ? '#e9ecef' : '#ffffff',
-                            cursor: isOwnerFieldDisabled('address') ? 'not-allowed' : 'text'
-                          }}
-                        />
-                      </Col>
-                      <Col md={4}>
-                        <InputText
-                          name="ownerType"
-                          label={t("Owner Type")}
-                          placeholder={t("Enter owner type")}
-                          required={true}
-                          register={{
-                            ...register("ownerType", {
-                              required: t("Owner Type is required"),
-                            }),
-                          }}
-                          errors={errors}
-                          clearErrors={clearErrors}
-                          readOnly={isOwnerFieldDisabled('ownerType')}
-                          disabled={isOwnerFieldDisabled('ownerType')}
-                          style={{
-                            backgroundColor: isOwnerFieldDisabled('ownerType') ? '#e9ecef' : '#ffffff',
-                            cursor: isOwnerFieldDisabled('ownerType') ? 'not-allowed' : 'text'
-                          }}
-                        />
-                      </Col>
-                      <Col md={4}>
-                        <InputText
-                          name="builderEmail"
-                          label={t("Email ID")}
-                          type="email"
-                          placeholder={t("Enter email address")}
-                          required={true}
-                          register={{
-                            ...register("builderEmail", {
-                              required: t("Email is required"),
-                              pattern: { value: CONSTANT_REGEX.EMAIL, message: t("Invalid email address") },
-                            }),
-                          }}
-                          errors={errors}
-                          clearErrors={clearErrors}
-                          readOnly={isOwnerFieldDisabled('builderEmail')}
-                          disabled={isOwnerFieldDisabled('builderEmail')}
-                          style={{
-                            backgroundColor: isOwnerFieldDisabled('builderEmail') ? '#e9ecef' : '#ffffff',
-                            cursor: isOwnerFieldDisabled('builderEmail') ? 'not-allowed' : 'text'
-                          }}
-                        />
-                      </Col>
-                      <Col md={4}>
-                        <InputText
-                          name="applicantphoneNumber"
-                          label={t("Phone Number")}
-                          placeholder={t("Enter 10-digit phone number")}
-                          required={true}
-                          maxlength={10}
-                          register={{
-                            ...register("applicantphoneNumber", {
-                              required: t("Phone Number is required"),
-                              pattern: { value: CONSTANT_REGEX.MOBILE, message: t("Phone number must be 10 digits") },
-                            }),
-                          }}
-                          errors={errors}
-                          clearErrors={clearErrors}
-                          readOnly={isOwnerFieldDisabled('applicantphoneNumber')}
-                          disabled={isOwnerFieldDisabled('applicantphoneNumber')}
-                          style={{
-                            backgroundColor: isOwnerFieldDisabled('applicantphoneNumber') ? '#e9ecef' : '#ffffff',
-                            cursor: isOwnerFieldDisabled('applicantphoneNumber') ? 'not-allowed' : 'text'
-                          }}
-                        />
-                      </Col>
-                      <Col md={4}>
-                        <InputText
-                          name="ownerpin"
-                          label={t("PIN")}
-                          placeholder={t("Enter 6-digit PIN code")}
-                          required={true}
-                          register={{
-                            ...register("ownerpin", {
-                              required: t("PIN Code is required"),
-                              pattern: { value: /^[0-9]{6}$/, message: t("PIN must be 6 digits") },
-                            }),
-                          }}
-                          onChange={async (e) => {
-                            const pinValue = e.target.value;
-                            if (pinValue.length === 6 && !isOwnerFieldDisabled('ownerpin')) {
-                              await fetchAddressDetails(pinValue, "owner");
-                            }
-                          }}
-                          errors={errors}
-                          clearErrors={clearErrors}
-                          readOnly={isOwnerFieldDisabled('ownerpin')}
-                          disabled={isOwnerFieldDisabled('ownerpin')}
-                          style={{
-                            backgroundColor: isOwnerFieldDisabled('ownerpin') ? '#e9ecef' : '#ffffff',
-                            cursor: isOwnerFieldDisabled('ownerpin') ? 'not-allowed' : 'text'
-                          }}
-                        />
-                      </Col>
-                      {/* <Col md={4}>
-                        <InputText
-                          name="ownercity"
-                          label={t("City")}
-                          required={true}
-                          placeholder={t("Auto-populated")}
-                          register={{
-                            ...register("ownercity", { required: t("City is required") }),
-                          }}
-                          errors={errors}
-                          readOnly={true}
-                          clearErrors={clearErrors}
-                          style={{ backgroundColor: '#e9ecef', cursor: 'not-allowed' }}
-                        />
-                      </Col> */}
-                      <Col md={4}>
-                        <InputText
-                          name="ownerdistrict"
-                          label={t("District")}
-                          required={true}
-                          placeholder={t("Auto-populated")}
-                          register={{
-                            ...register("ownerdistrict", { required: t("District is required") }),
-                          }}
-                          errors={errors}
-                          readOnly={true}
-                          clearErrors={clearErrors}
-                          style={{ backgroundColor: '#e9ecef', cursor: 'not-allowed' }}
-                        />
-                      </Col>
-                      <Col md={4}>
-                        <InputText
-                          name="ownerstateUt"
-                          label={t("State/UT")}
-                          required={true}
-                          placeholder={t("Auto-populated")}
-                          register={{
-                            ...register("ownerstateUt", { required: t("State/UT is required") }),
-                          }}
-                          errors={errors}
-                          readOnly={true}
-                          clearErrors={clearErrors}
-                          style={{ backgroundColor: '#e9ecef', cursor: 'not-allowed' }}
-                        />
-                      </Col>
-                      <Col md={4}>
-                        <InputText
-                          name="occupation"
-                          label={t("Occupation")}
-                          placeholder={t("Occupation")}
-                          register={{ ...register("occupation") }}
-                          errors={errors}
-                          clearErrors={clearErrors}
-                          readOnly={isOwnerFieldDisabled('occupation')}
-                          disabled={isOwnerFieldDisabled('occupation')}
-                          style={{
-                            backgroundColor: isOwnerFieldDisabled('occupation') ? '#e9ecef' : '#ffffff',
-                            cursor: isOwnerFieldDisabled('occupation') ? 'not-allowed' : 'text'
-                          }}
-                        />
-                      </Col>
-                      <Col md={4}>
-                        <InputText
-                          name="originalPlaceOfBusiness"
-                          label={t("Original Place of Business")}
-                          placeholder={t("Original Place of Business")}
-                          register={{ ...register("originalPlaceOfBusiness") }}
-                          errors={errors}
-                          clearErrors={clearErrors}
-                          readOnly={isOwnerFieldDisabled('originalPlaceOfBusiness')}
-                          disabled={isOwnerFieldDisabled('originalPlaceOfBusiness')}
-                          style={{
-                            backgroundColor: isOwnerFieldDisabled('originalPlaceOfBusiness') ? '#e9ecef' : '#ffffff',
-                            cursor: isOwnerFieldDisabled('originalPlaceOfBusiness') ? 'not-allowed' : 'text'
-                          }}
-                        />
-                      </Col>
-                    </Row>
-                  </Card.Body>
-                </Card>
-              </Collapsible>
-
-              {/* VESSEL DETAILS */}
-              <Collapsible
-                title={
-                  <div className="d-flex align-items-center">
-                    <FaUser className="me-2" style={{ color: "#2466BF" }} />
-                    <span style={{ color: "#2466BF" }}>{t("VESSEL DETAILS")}</span>
-                  </div>
-                }
-                defaultOpen={true}
+                Vessel Application Details - ({id})
+              </Typography>
+              <Typography
+                sx={{
+                  color: "#026931ff",
+                  fontSize: { xs: "0.95rem", sm: "0.85rem" },
+                  fontWeight: "bold",
+                  lineHeight: 1.3,
+                }}
               >
-                <Card className="form-section-card">
-                  <Card.Body>
-                    <Row className="g-3">
-                      <Col md={4}>
-                        <InputText
-                          name="nameOfMaster"
-                          label={t("Name of Master")}
-                          placeholder={t("Enter name of master")}
-                          required={true}
-                          register={{
-                            ...register("nameOfMaster", { required: t("Name of Master is required") }),
-                          }}
-                          errors={errors}
-                          clearErrors={clearErrors}
-                        />
-                      </Col>
-                      <Col md={4}>
-                        <InputText
-                          name="certificateNo"
-                          label={t("Certificate No.")}
-                          placeholder={t("Enter certificate number")}
-                          required={true}
-                          register={{
-                            ...register("certificateNo", { required: t("Certificate No. is required") }),
-                          }}
-                          errors={errors}
-                          clearErrors={clearErrors}
-                        />
-                      </Col>
-                      <Col md={4}>
-                        <InputText
-                          name="nameOfRegistry"
-                          label={t("Name of Registry")}
-                          placeholder={t("Enter name of registry")}
-                          required={true}
-                          register={{
-                            ...register("nameOfRegistry", { required: t("Name of Registry is required") }),
-                          }}
-                          errors={errors}
-                          clearErrors={clearErrors}
-                        />
-                      </Col>
-                      <Col md={4}>
-  <InputText
-    name="registrationNo"
-    label={t("Registration No.")}
-    placeholder={t("Enter registration number")}
-    required={hasRegistrationNumber()}
-    register={{
-      ...register("registrationNo", 
-        hasRegistrationNumber() ? { required: t("Registration No. is required") } : {}
-      ),
-    }}
-    errors={errors}
-    clearErrors={clearErrors}
-    readOnly={isVesselFieldDisabled('registrationNo')}
-    disabled={isVesselFieldDisabled('registrationNo')}
-    style={{
-      backgroundColor: isVesselFieldDisabled('registrationNo') ? '#e9ecef' : '#ffffff',
-      cursor: isVesselFieldDisabled('registrationNo') ? 'not-allowed' : 'text'
-    }}
-  />
-</Col>
-                      {/* <Col md={4}>
-                        <InputText
-                          name="registrationNo"
-                          label={t("Registration No.")}
-                          placeholder={t("Enter registration number")}
-                          required={true}
-                          register={{
-                            ...register("registrationNo", { required: t("Registration No. is required") }),
-                          }}
-                          errors={errors}
-                          clearErrors={clearErrors}
-                        />
-                      </Col> */}
-                      <Col md={4} className="position-relative">
-                        <InputText
-                          name="vesselName"
-                          label={t("Vessel Name")}
-                          placeholder={t("Enter vessel name")}
-                          required={true}
-                          register={{
-                            ...register("vesselName", {
-                              required: t("Vessel Name is required"),
-                              validate: async (value) => {
-                                const isValid = checkVesselNameError();
-                                if (!isValid) {
-                                  return t("The Vessel is not available please try with another name");
-                                }
-                              },
-                            }),
-                            // onBlur: (e) => getVesselNameSuggestions(e.target.value),
-                            // onChange: (e) => {
-                            //   const value = e.target.value;
-                            //   setValue("vesselName", value);
-                            //   if (value) {
-                            //     getVesselNameSuggestions(value);
-                            //   } else {
-                            //     setSuggestions([]);
-                            //   }
-                            // }
-                          }}
-
-                          errors={errors}
-                          clearErrors={clearErrors}
-                        />
-                        {suggestions.length > 0 && (
-                          <div
-                            className={`${styles.suggestionCard} border rounded mt-1 bg-white w-100`}
-                            style={{
-                              top: `${errors?.vesselName ? (errors?.vesselName?.type === "validate" ? "90%" : "60%") : '60%'}`,
-                            }}
-                          >
-                            <div className="px-3 py-2 border-bottom bg-light" style={{ fontWeight: "600", fontSize: "0.875rem", color: "#545D69" }}>
-                              {t("Suggestions")}
-                            </div>
-                            {suggestions.map((suggestion, index) => (
-                              <div
-                                key={suggestion + index}
-                                className={`${styles.suggestionItem} px-3 py-2 suggestion-item`}
-                                onClick={() => {
-                                  setValue("vesselName", suggestion);
-                                  setSuggestions([]);
-                                  clearErrors("vesselName");
-                                }}
-                              >
-                                {suggestion}
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </Col>
-
-                      <Col md={4}>
-                        <InputSelect
-                          name="kindOfVessel"
-                          label={t("Kind of Vessel")}
-                          required={true}
-                          placeholder={t("Select kind of vessel")}
-                          options={vesselKindOptions}
-                          register={register("kindOfVessel", { required: t("Kind of Vessel is required") })}
-                          errors={errors}
-                          value={watch("kindOfVessel") || ""}
-                          onChange={(val) => handleDropdownChange("kindOfVessel", val)}
-                          clearErrors={clearErrors}
-                        />
-                      </Col>
-                      <Col md={4}>
-                        <InputSelect
-                          name="typeOfVessel"
-                          label={t("Type of Vessel")}
-                          required={true}
-                          placeholder={t("Select type of vessel")}
-                          options={vesselTypeOptions}
-                          register={register("typeOfVessel", { required: t("Type of Vessel is required") })}
-                          errors={errors}
-                          value={watch("typeOfVessel") || ""}
-                          onChange={(val) => handleDropdownChange("typeOfVessel", val)}
-                          clearErrors={clearErrors}
-                        />
-                      </Col>
-                      <Col md={4}>
-                        <InputSelect
-                          name="categoryOfVessel"
-                          label={t("Category of Vessel")}
-                          required={true}
-                          placeholder={t("Select category of vessel")}
-                          options={categoryOptions}
-                          register={register("categoryOfVessel", { required: t("Category of Vessel is required") })}
-                          errors={errors}
-                          value={watch("categoryOfVessel") || ""}
-                          onChange={(val) => handleDropdownChange("categoryOfVessel", val)}
-                          clearErrors={clearErrors}
-                        />
-                      </Col>
-                      <Col md={4}>
-                        <InputSelect
-                          name="zone"
-                          label={t("Zone")}
-                          required={true}
-                          placeholder={t("Select zone")}
-                          options={zoneOptions}
-                          register={register("zone", { required: t("Zone is required") })}
-                          errors={errors}
-                          value={watch("zone") || ""}
-                          onChange={(val) => handleDropdownChange("zone", val)}
-                          clearErrors={clearErrors}
-                        />
-                      </Col>
-                      <Col md={4}>
-                        <InputSelect
-                          name="mortgage"
-                          label={t("Mortgage")}
-                          required={true}
-                          placeholder={t("Select Mortgage")}
-                          options={[
-                            { value: "yes", label: "Yes" },
-                            { value: "no", label: "No" },
-                          ]}
-                          register={register("mortgage", { required: t("Mortgage is required") })}
-                          errors={errors}
-                          value={watch("mortgage") || ""}
-                          onChange={(val) => handleDropdownChange("mortgage", val)}
-                          clearErrors={clearErrors}
-                        />
-                      </Col>
-                      <Col md={4}>
-                        <InputText
-                          name="placeOfBuild"
-                          label={t("Place of Build")}
-                          placeholder={t("Enter place of build")}
-                          required={true}
-                          register={{
-                            ...register("placeOfBuild", { required: t("Place of Build is required") }),
-                          }}
-                          errors={errors}
-                          clearErrors={clearErrors}
-                        />
-                      </Col>
-                      <Col md={4}>
-                        <InputText
-                          name="detailsOfInsurance"
-                          label={t("Details of Insurance")}
-                          placeholder={t("Enter details of insurance")}
-                          required={true}
-                          register={{
-                            ...register("detailsOfInsurance", { required: t("Details of Insurance is required") }),
-                          }}
-                          errors={errors}
-                          clearErrors={clearErrors}
-                        />
-                      </Col>
-                      <Col md={4}>
-                        <InputText
-                          name="vesselyearOfBuild"
-                          label={t("Year of Build")}
-                          placeholder={t("Enter year of build")}
-                          required={true}
-                          register={{
-                            ...register("vesselyearOfBuild", {
-                              required: t("Year of Build is required"),
-                              pattern: { value: /^[0-9]{4}$/, message: t("Enter a valid year (YYYY)") },
-                              min: { value: 1900, message: t("Year must be after 1900") },
-                              max: { value: new Date().getFullYear(), message: t("Year cannot be in the future") },
-                            }),
-                          }}
-                          errors={errors}
-                          clearErrors={clearErrors}
-                        />
-                      </Col>
-                      <Col md={4}>
-                        <InputText
-                          name="protectionAndIndemnityClubNo"
-                          label={t("Protection & Indemnity Club No.")}
-                          placeholder={t("Enter PNI Club No.")}
-                          required={true}
-                          register={{
-                            ...register("protectionAndIndemnityClubNo", {
-                              required: t("PNI Club No. is required"),
-                            }),
-                          }}
-                          errors={errors}
-                          clearErrors={clearErrors}
-                        />
-                      </Col>
-                      <Col md={4}>
-                        <InputText
-                          name="protectionAndIndemnityClubName"
-                          label={t("Protection & Indemnity Club Name")}
-                          placeholder={t("Enter PNI Club Name")}
-                          required={true}
-                          register={{
-                            ...register("protectionAndIndemnityClubName", {
-                              required: t("PNI Club Name is required"),
-                            }),
-                          }}
-                          errors={errors}
-                          clearErrors={clearErrors}
-                        />
-                      </Col>
-                    </Row>
-                  </Card.Body>
-                </Card>
-              </Collapsible>
-
-              {/* ENGINE DETAILS */}
-              <Collapsible
-                title={
-                  <div className="d-flex align-items-center">
-                    <FaUser className="me-2" style={{ color: "#2466BF" }} />
-                    <span style={{ color: "#2466BF" }}>{t("Engine Details")}</span>
-                  </div>
-                }
-                defaultOpen={true}
-              >
-                <Card className="form-section-card">
-                  <Card.Body>
-                    <Row className="g-3">
-                      <Col md={4}>
-                        <InputText
-                          name="insuranceValidUpto"
-                          label={t("Insurance Valid Upto")}
-                          placeholder={t("Enter insurance valid upto")}
-                          required={true}
-                          register={{
-                            ...register("insuranceValidUpto", { required: t("Insurance Valid Upto is required") }),
-                          }}
-                          errors={errors}
-                          clearErrors={clearErrors}
-                        />
-                      </Col>
-                      <Col md={4}>
-                        <InputText
-                          name="yearOfBuild"
-                          label={t("Year of Build")}
-                          placeholder={t("Enter year of build")}
-                          required={true}
-                          register={{
-                            ...register("yearOfBuild", {
-                              required: t("Year of Build is required"),
-                              pattern: { value: /^[0-9]{4}$/, message: t("Enter a valid year (YYYY)") },
-                            }),
-                          }}
-                          errors={errors}
-                          clearErrors={clearErrors}
-                        />
-                      </Col>
-                      <Col md={4}>
-                        <InputText
-                          name="typeOfEngine"
-                          label={t("Type of Engine")}
-                          placeholder={t("Enter type of engine")}
-                          required={true}
-                          register={{
-                            ...register("typeOfEngine", { required: t("Type of Engine is required") }),
-                          }}
-                          errors={errors}
-                          clearErrors={clearErrors}
-                        />
-                      </Col>
-                      <Col md={4}>
-                        <InputText
-                          name="engineMake"
-                          label={t("Engine Make")}
-                          placeholder={t("Enter engine make")}
-                          required={true}
-                          register={{
-                            ...register("engineMake", { required: t("Engine Make is required") }),
-                          }}
-                          errors={errors}
-                          clearErrors={clearErrors}
-                        />
-                      </Col>
-                      <Col md={4}>
-                        <InputText
-                          name="engineMakerAddress"
-                          label={t("Engine Maker Address")}
-                          placeholder={t("Enter engine maker address")}
-                          required={true}
-                          register={{
-                            ...register("engineMakerAddress", { required: t("Engine Maker Address is required") }),
-                          }}
-                          errors={errors}
-                          clearErrors={clearErrors}
-                        />
-                      </Col>
-                      <Col md={4}>
-                        <InputText
-                          name="enginepin"
-                          label={t("PIN")}
-                          placeholder={t("Enter 6-digit PIN code")}
-                          required={true}
-                          register={{
-                            ...register("enginepin", {
-                              required: t("PIN Code is required"),
-                              pattern: { value: /^[0-9]{6}$/, message: t("PIN must be 6 digits") },
-                            }),
-                          }}
-                          errors={errors}
-                          clearErrors={clearErrors}
-                        />
-                      </Col>
-                      <Col md={4}>
-                        <InputText
-                          name="enginephoneNumber"
-                          label={t("Phone Number")}
-                          placeholder={t("Enter 10-digit phone number")}
-                          required={true}
-                          maxlength={10}
-                          register={{
-                            ...register("enginephoneNumber", {
-                              required: t("Phone Number is required"),
-                              pattern: { value: CONSTANT_REGEX.MOBILE, message: t("Phone number must be 10 digits") },
-                            }),
-                          }}
-                          errors={errors}
-                          clearErrors={clearErrors}
-                        />
-                      </Col>
-                      <Col md={4}>
-                        <InputText
-                          name="engineemail"
-                          label={t("Email ID")}
-                          type="email"
-                          placeholder={t("Enter email address")}
-                          required={true}
-                          register={{
-                            ...register("engineemail", {
-                              required: t("Email is required"),
-                              pattern: { value: CONSTANT_REGEX.EMAIL, message: t("Invalid email address") },
-                            }),
-                          }}
-                          errors={errors}
-                          clearErrors={clearErrors}
-                        />
-                      </Col>
-                      <Col md={4}>
-                        <InputText
-                          name="horsepower"
-                          label={t("Horsepower")}
-                          type="number"
-                          placeholder={t("Enter horsepower")}
-                          required={true}
-                          register={{
-                            ...register("horsepower", {
-                              required: t("Horsepower is required"),
-                              min: { value: 1, message: t("Horsepower must be positive") },
-                            }),
-                          }}
-                          errors={errors}
-                          clearErrors={clearErrors}
-                        />
-                      </Col>
-                      <Col md={4}>
-                        <InputText
-                          name="speed"
-                          label={t("Speed")}
-                          placeholder={t("Enter speed")}
-                          required={true}
-                          register={{
-                            ...register("speed", { required: t("Speed is required") }),
-                          }}
-                          errors={errors}
-                          clearErrors={clearErrors}
-                        />
-                      </Col>
-                      <Col md={4}>
-                        <InputText
-                          name="yearOfMake"
-                          label={t("Year of Make")}
-                          placeholder={t("Enter year of make")}
-                          required={true}
-                          register={{
-                            ...register("yearOfMake", {
-                              required: t("Year of Make is required"),
-                              pattern: { value: /^[0-9]{4}$/, message: t("Enter a valid year (YYYY)") },
-                            }),
-                          }}
-                          errors={errors}
-                          clearErrors={clearErrors}
-                        />
-                      </Col>
-                    </Row>
-                  </Card.Body>
-                </Card>
-              </Collapsible>
-
-              {/* BUILDER DETAILS */}
-           {
-           shouldShowBuilderDetails() && (
-  <Collapsible
-    title={
-      <div className="d-flex align-items-center">
-        <FaUser className="me-2" style={{ color: "#2466BF" }} />
-        <span style={{ color: "#2466BF" }}>{t("Builder Details")}</span>
-        {hasBuilderData && (
-          <FaLock className="ms-2" style={{ color: "#6c757d" }} title="Some fields are auto-populated and cannot be edited" />
+                {pageName === "uploadReports"
+                  ? "Upload neccessary Reports & Documents"
+                  : pageName === "vesselRegistration"
+                  ? "Please fill up the Vessel Registration form.."
+                  : ""}
+              </Typography>
+            </Stack>
+          </div>
+        </div>
+        {steps?.length > 0 && (
+          <Stepper
+            ref={stepperRef}
+            steps={steps}
+            viewMode={true}
+            actionComponent={actionDropdown}
+            onSyncData={handleFormSubmit}
+            onSave={handleFinalSubmit}
+            onSubmit={handleSubmit}
+            disableSubmit={disableSubmit}
+            initialStep={initialStep}
+            omitSubmitButton={pageName === "uploadReports" || (isOfficerLogin && actionsFromAPI?.length === 0 && steps?.length === 1) }
+            onGetInvoice={handleGetInvoice}
+          />
         )}
-      </div>
-    }
-    defaultOpen={true}
-  >
-                <Card className="form-section-card">
-                  <Card.Body>
-                    <Row className="g-3">
-                      <Col md={4}>
-                        <InputText
-                          name="builderName"
-                          label={t("Name of Builder")}
-                          placeholder={t("Enter name of builder")}
-                          required={true}
-                          register={{
-                            ...register("builderName", { required: t("Name of Builder is required") }),
-                          }}
-                          errors={errors}
-                          clearErrors={clearErrors}
-                          readOnly={isBuilderFieldDisabled('builderName')}
-                          disabled={isBuilderFieldDisabled('builderName')}
-                          style={{
-                            backgroundColor: isBuilderFieldDisabled('builderName') ? '#e9ecef' : '#ffffff',
-                            cursor: isBuilderFieldDisabled('builderName') ? 'not-allowed' : 'text'
-                          }}
-                        />
-                      </Col>
-                      <Col md={4}>
-                        <InputText
-                          name="builderAddress"
-                          label={t("Address of Builder")}
-                          placeholder={t("Enter address of builder")}
-                          required={true}
-                          register={{
-                            ...register("builderAddress", { required: t("Address of Builder is required") }),
-                          }}
-                          errors={errors}
-                          clearErrors={clearErrors}
-                          readOnly={isBuilderFieldDisabled('builderAddress')}
-                          disabled={isBuilderFieldDisabled('builderAddress')}
-                          style={{
-                            backgroundColor: isBuilderFieldDisabled('builderAddress') ? '#e9ecef' : '#ffffff',
-                            cursor: isBuilderFieldDisabled('builderAddress') ? 'not-allowed' : 'text'
-                          }}
-                        />
-                      </Col>
-                      <Col md={4}>
-                        <InputText
-                          name="builderemail"
-                          label={t("Email ID")}
-                          type="email"
-                          placeholder={t("Enter email address")}
-                          required={true}
-                          register={{
-                            ...register("builderemail", {
-                              required: t("Email is required"),
-                              pattern: { value: CONSTANT_REGEX.EMAIL, message: t("Invalid email address") },
-                            }),
-                          }}
-                          errors={errors}
-                          clearErrors={clearErrors}
-                          readOnly={isBuilderFieldDisabled('builderemail')}
-                          disabled={isBuilderFieldDisabled('builderemail')}
-                          style={{
-                            backgroundColor: isBuilderFieldDisabled('builderemail') ? '#e9ecef' : '#ffffff',
-                            cursor: isBuilderFieldDisabled('builderemail') ? 'not-allowed' : 'text'
-                          }}
-                        />
-                      </Col>
-                      <Col md={4}>
-                        <InputText
-                          name="builderphoneNumber"
-                          label={t("Phone Number")}
-                          placeholder={t("Enter 10-digit phone number")}
-                          required={true}
-                          maxlength={10}
-                          register={{
-                            ...register("builderphoneNumber", {
-                              required: t("Phone Number is required"),
-                              pattern: { value: CONSTANT_REGEX.MOBILE, message: t("Phone number must be 10 digits") },
-                            }),
-                          }}
-                          errors={errors}
-                          clearErrors={clearErrors}
-                          readOnly={isBuilderFieldDisabled('builderphoneNumber')}
-                          disabled={isBuilderFieldDisabled('builderphoneNumber')}
-                          style={{
-                            backgroundColor: isBuilderFieldDisabled('builderphoneNumber') ? '#e9ecef' : '#ffffff',
-                            cursor: isBuilderFieldDisabled('builderphoneNumber') ? 'not-allowed' : 'text'
-                          }}
-                        />
-                      </Col>
-                      <Col md={4}>
-                        <InputText
-                          name="pin"
-                          label={t("PIN")}
-                          placeholder={t("Enter 6-digit PIN code")}
-                          required={true}
-                          register={{
-                            ...register("pin", {
-                              required: t("PIN Code is required"),
-                              pattern: { value: /^[0-9]{6}$/, message: t("PIN must be 6 digits") },
-                            }),
-                          }}
-                          onChange={(e) => {
-                            const pinValue = e.target.value;
-                            if (pinValue.length === 6 && !isBuilderFieldDisabled('pin')) {
-                              fetchAddressDetails(pinValue);
-                            }
-                          }}
-                          errors={errors}
-                          clearErrors={clearErrors}
-                          readOnly={isBuilderFieldDisabled('pin')}
-                          disabled={isBuilderFieldDisabled('pin')}
-                          style={{
-                            backgroundColor: isBuilderFieldDisabled('pin') ? '#e9ecef' : '#ffffff',
-                            cursor: isBuilderFieldDisabled('pin') ? 'not-allowed' : 'text'
-                          }}
-                        />
-                      </Col>
-                      {/* <Col md={4}>
-                        <InputText
-                          name="city"
-                          label={t("City")}
-                          required={true}
-                          placeholder={t("Auto-populated")}
-                          register={{
-                            ...register("city", { required: t("City is required") }),
-                          }}
-                          errors={errors}
-                          readOnly={true}
-                          clearErrors={clearErrors}
-                          style={{ backgroundColor: '#e9ecef', cursor: 'not-allowed' }}
-                        />
-                      </Col> */}
-                      <Col md={4}>
-                        <InputText
-                          name="district"
-                          label={t("District")}
-                          required={true}
-                          placeholder={t("Auto-populated")}
-                          register={{
-                            ...register("district", { required: t("District is required") }),
-                          }}
-                          errors={errors}
-                          readOnly={true}
-                          clearErrors={clearErrors}
-                          style={{ backgroundColor: '#e9ecef', cursor: 'not-allowed' }}
-                        />
-                      </Col>
-                      <Col md={4}>
-                        <InputText
-                          name="stateUt"
-                          label={t("State/UT")}
-                          required={true}
-                          placeholder={t("Auto-populated")}
-                          register={{
-                            ...register("stateUt", { required: t("State/UT is required") }),
-                          }}
-                          errors={errors}
-                          readOnly={true}
-                          clearErrors={clearErrors}
-                          style={{ backgroundColor: '#e9ecef', cursor: 'not-allowed' }}
-                        />
-                      </Col>
-                    </Row>
-                  </Card.Body>
-                </Card>
-              </Collapsible>
-           )}
-
-              {/* FORM-3 - DECLARATION OF OWNERSHIP */}
-
-              <div className="d-flex align-items-center mb-3 mt-4">
-                <h6 style={{ color: "#2466BF" }}>{t("FORM-3")}</h6>
-              </div>
-              <Collapsible
-                title={
-                  <div className="d-flex align-items-center">
-                    <FaUser className="me-2" style={{ color: "#2466BF" }} />
-                    <span style={{ color: "#2466BF" }}>{t("DECLARATION OF OWNERSHIP")}</span>
-                  </div>
-                }
-                defaultOpen={true}
-              >
-                <Card className="form-section-card">
-                  <Card.Body>
-                    <Row className="g-3">
-                      <Col md={6}>
-                        <div className="position-relative">
-                          <InputFile
-                            name="thirdPartyInsurance"
-                            label={t("Third Party Insurance")}
-                            id="thirdPartyInsurance"
-                            register={register("thirdPartyInsurance", {
-                              required: !fileStates.thirdPartyInsurance && t("Third Party Insurance is required"),
-                            })}
-                            errors={errors}
-                            required={!fileStates.thirdPartyInsurance}
-                            clearErrors={clearErrors}
-                            onChange={(e) => handleFileChange(e, "thirdPartyInsurance")}
-                          />
-                          {fileStates.thirdPartyInsurance && (
-                            <div className="d-flex align-items-center mt-2">
-                              <small className="text-success me-2">✓ {fileStates.thirdPartyInsurance.name}</small>
-                              <button
-                                type="button"
-                                className="btn btn-sm btn-primary rounded-circle d-flex align-items-center justify-content-center"
-                                onClick={() => handleFileDownload(
-                                  fileStates.thirdPartyInsurance.fileStoreId,
-                                  fileStates.thirdPartyInsurance.name,
-                                  fileStates.thirdPartyInsurance.originalName
-                                )}
-                                title="Download file"
-                                style={{ width: '24px', height: '24px', padding: '0' }}
-                              >
-                                <FaDownload size={10} />
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      </Col>
-                      <Col md={6}>
-                        <div className="position-relative">
-                          <InputFile
-                            name="builderCertificate"
-                            label={t("Builder's Certificate")}
-                            id="builderCertificate"
-                            register={register("builderCertificate", {
-                              required: !fileStates.builderCertificate && t("Builder's Certificate is required"),
-                            })}
-                            errors={errors}
-                            required={!fileStates.builderCertificate}
-                            clearErrors={clearErrors}
-                            onChange={(e) => handleFileChange(e, "builderCertificate")}
-                          />
-                          {fileStates.builderCertificate && (
-                            <div className="d-flex align-items-center mt-2">
-                              <small className="text-success me-2">✓ {fileStates.builderCertificate.name}</small>
-                              <button
-                                type="button"
-                                className="btn btn-sm btn-primary rounded-circle d-flex align-items-center justify-content-center"
-                                onClick={() => handleFileDownload(
-                                  fileStates.builderCertificate.fileStoreId,
-                                  fileStates.builderCertificate.name,
-                                  fileStates.builderCertificate.originalName
-                                )}
-                                title="Download file"
-                                style={{ width: '24px', height: '24px', padding: '0' }}
-                              >
-                                <FaDownload size={10} />
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      </Col>
-                      <Col md={6}>
-                        <div className="position-relative">
-                          <InputFile
-                            name="instrumentOfSale"
-                            label={t("Instrument of Sale")}
-                            id="instrumentOfSale"
-                            register={register("instrumentOfSale", {
-                              required: !fileStates.instrumentOfSale && t("Instrument of Sale is required"),
-                            })}
-                            errors={errors}
-                            required={!fileStates.instrumentOfSale}
-                            clearErrors={clearErrors}
-                            onChange={(e) => handleFileChange(e, "instrumentOfSale")}
-                          />
-                          {fileStates.instrumentOfSale && (
-                            <div className="d-flex align-items-center mt-2">
-                              <small className="text-success me-2">✓ {fileStates.instrumentOfSale.name}</small>
-                              <button
-                                type="button"
-                                className="btn btn-sm btn-primary rounded-circle d-flex align-items-center justify-content-center"
-                                onClick={() => handleFileDownload(
-                                  fileStates.instrumentOfSale.fileStoreId,
-                                  fileStates.instrumentOfSale.name,
-                                  fileStates.instrumentOfSale.originalName
-                                )}
-                                title="Download file"
-                                style={{ width: '24px', height: '24px', padding: '0' }}
-                              >
-                                <FaDownload size={10} />
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      </Col>
-                      <Col md={6}>
-                        <div className="position-relative">
-                          <InputFile
-                            name="mortgageDetails"
-                            label={t("Mortgage Details")}
-                            id="mortgageDetails"
-                            register={register("mortgageDetails", {
-                              required: !fileStates.mortgageDetails && t("Mortgage Details is required"),
-                            })}
-                            errors={errors}
-                            required={!fileStates.mortgageDetails}
-                            clearErrors={clearErrors}
-                            onChange={(e) => handleFileChange(e, "mortgageDetails")}
-                          />
-                          {fileStates.mortgageDetails && (
-                            <div className="d-flex align-items-center mt-2">
-                              <small className="text-success me-2">✓ {fileStates.mortgageDetails.name}</small>
-                              <button
-                                type="button"
-                                className="btn btn-sm btn-primary rounded-circle d-flex align-items-center justify-content-center"
-                                onClick={() => handleFileDownload(
-                                  fileStates.mortgageDetails.fileStoreId,
-                                  fileStates.mortgageDetails.name,
-                                  fileStates.mortgageDetails.originalName
-                                )}
-                                title="Download file"
-                                style={{ width: '24px', height: '24px', padding: '0' }}
-                              >
-                                <FaDownload size={10} />
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      </Col>
-                      <Col md={6}>
-                        <div className="position-relative">
-                          <InputFile
-                            name="pniInsurance"
-                            label={t("Protection & Indemnity Insurance No.")}
-                            id="pniInsurance"
-                            register={register("pniInsurance", {
-                              required: !fileStates.pniInsurance && t("PNI Insurance No. is required"),
-                            })}
-                            errors={errors}
-                            required={!fileStates.pniInsurance}
-                            clearErrors={clearErrors}
-                            onChange={(e) => handleFileChange(e, "pniInsurance")}
-                          />
-                          {fileStates.pniInsurance && (
-                            <div className="d-flex align-items-center mt-2">
-                              <small className="text-success me-2">✓ {fileStates.pniInsurance.name}</small>
-                              <button
-                                type="button"
-                                className="btn btn-sm btn-primary rounded-circle d-flex align-items-center justify-content-center"
-                                onClick={() => handleFileDownload(
-                                  fileStates.pniInsurance.fileStoreId,
-                                  fileStates.pniInsurance.name,
-                                  fileStates.pniInsurance.originalName
-                                )}
-                                title="Download file"
-                                style={{ width: '24px', height: '24px', padding: '0' }}
-                              >
-                                <FaDownload size={10} />
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      </Col>
-                      <Col md={6}>
-                        <div className="position-relative">
-                          <InputFile
-                            name="declarationOfOwnership"
-                            label={t("Declaration of Ownership")}
-                            id="declarationOfOwnership"
-                            register={register("declarationOfOwnership", {
-                              required: !fileStates.declarationOfOwnership && t("Declaration of Ownership is required"),
-                            })}
-                            errors={errors}
-                            required={!fileStates.declarationOfOwnership}
-                            clearErrors={clearErrors}
-                            onChange={(e) => handleFileChange(e, "declarationOfOwnership")}
-                          />
-                          {fileStates.declarationOfOwnership && (
-                            <div className="d-flex align-items-center mt-2">
-                              <small className="text-success me-2">✓ {fileStates.declarationOfOwnership.name}</small>
-                              <button
-                                type="button"
-                                className="btn btn-sm btn-primary rounded-circle d-flex align-items-center justify-content-center"
-                                onClick={() => handleFileDownload(
-                                  fileStates.declarationOfOwnership.fileStoreId,
-                                  fileStates.declarationOfOwnership.name,
-                                  fileStates.declarationOfOwnership.originalName
-                                )}
-                                title="Download file"
-                                style={{ width: '24px', height: '24px', padding: '0' }}
-                              >
-                                <FaDownload size={10} />
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      </Col>
-                      <Col md={6}>
-                        <div className="position-relative">
-                          <InputFile
-                            name="challan"
-                            label={t("Challan")}
-                            id="challan"
-                            register={register("challan", {
-                              required: !fileStates.challan && t("Challan is required"),
-                            })}
-                            errors={errors}
-                            required={!fileStates.challan}
-                            clearErrors={clearErrors}
-                            onChange={(e) => handleFileChange(e, "challan")}
-                          />
-                          {fileStates.challan && (
-                            <div className="d-flex align-items-center mt-2">
-                              <small className="text-success me-2">✓ {fileStates.challan.name}</small>
-                              <button
-                                type="button"
-                                className="btn btn-sm btn-primary rounded-circle d-flex align-items-center justify-content-center"
-                                onClick={() => handleFileDownload(
-                                  fileStates.challan.fileStoreId,
-                                  fileStates.challan.name,
-                                  fileStates.challan.originalName
-                                )}
-                                title="Download file"
-                                style={{ width: '24px', height: '24px', padding: '0' }}
-                              >
-                                <FaDownload size={10} />
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      </Col>
-                    </Row>
-                  </Card.Body>
-                </Card>
-              </Collapsible>
-
-            </form>
-          </Card.Body>
-        </Card>
-      </Container>
-    </>
+        {isOfficerLogin && isViewMode && (
+          <ApprovalModal
+            show={showApprovalModal}
+            handleClose={handleCloseModal}
+            handleSubmitData={workflowApplicationSubmit}
+            selectedAction={selectedAction}
+          />
+        )}
+        <InvoiceModal
+          show={showInvoiceModal}
+          onHide={() => setShowInvoiceModal(false)}
+          paymentData={paymentData}
+          onProceedToPay={handleProceedToPay}
+          applicationNumber={id}
+        />
+      </>
+    </Box>
   );
-});
+};
 
-export default RegistrationApplicationForm;
+export default VesselReportsAndDocs;
+
+{
+    "responseStatus": {
+        "status": "Registration details fetched successfully",
+        "message": "Operation completed successfully."
+    },
+    "data": [
+        {
+            "id": "139f183c-547d-4c12-81c0-f5aa16871d2e",
+            "applicationNumber": "WB-REG-2025-694540",
+            "basicDetails": {
+                "id": "139f183c-547d-4c12-81c0-f5aa16871d2e",
+                "applicationNumber": "WB-REG-2025-694540",
+                "status": "INWORKFLOW APPLICATION APPROVAL",
+                "ownerDetails": {
+                    "id": "01245a20-4c1d-49bb-acd3-fdc1fddb5e37",
+                    "categoryOfOwner": "A",
+                    "ownerCompanyName": "fhhfhf",
+                    "emailId": "owner@owner.com",
+                    "phoneNumber": "7654545454",
+                    "panNo": "GFDSY0987E",
+                    "gstNo": "27ABCDE1234F1Z5",
+                    "addressLine1": "FDFDFD",
+                    "addressLine2": "",
+                    "pin": 700155,
+                    "district": "24 PARAGANAS NORTH",
+                    "state": "WEST BENGAL",
+                    "country": "India",
+                    "authorisedFname": "SADASD",
+                    "authorisedLname": "sadasda",
+                    "authorisedMob": "8765255252",
+                    "authorisedEmail": "dsdsdf@gmail.com",
+                    "loaReferenceId": "",
+                    "panReferenceId": "",
+                    "gstCertReferenceId": "",
+                    "addressReferenceId": "",
+                    "companyCertReferenceId": "",
+                    "cinNo": "U12345MH2025PTC999999",
+                    "dinNo": "12345678",
+                    "moaCertificateReferenceId": "",
+                    "aoaCertificateReferenceId": "",
+                    "userMIdFk": "",
+                    "aadharNumber": "123456789012",
+                    "tradeLicenseNumber": "TLN-2025-IND-004123",
+                    "fileStoreMap": [
+                        {
+                            "fileStoreId": "9e7d8617-14db-4e05-bbb2-d85380b02772",
+                            "alfrescoId": "e1ef29f2-61d6-490c-af29-f261d6890c92",
+                            "registrationNumber": "01245a20-4c1d-49bb-acd3-fdc1fddb5e37",
+                            "fileName": "dummy.pdf",
+                            "module": "iwt.upload",
+                            "tenantId": "iwt.wb",
+                            "tag": null,
+                            "fieldName": "owner_details_dummy",
+                            "auditDetails": null,
+                            "downLoadFile": "http://3.111.175.246:7073/filestore/v1/files/id?fileStoreId=9e7d8617-14db-4e05-bbb2-d85380b02772"
+                        }
+                    ],
+                    "auditDetails": {
+                        "createdBy": "01245a20-4c1d-49bb-acd3-fdc1fddb5e37",
+                        "createdOn": null,
+                        "updatedBy": "01245a20-4c1d-49bb-acd3-fdc1fddb5e37",
+                        "updatedOn": null
+                    }
+                },
+                "builderDetails": {
+                    "id": "182be8ce-cf67-48eb-a486-4a5f7182c008",
+                    "builderName": "Titan Dockyards India Ltd.",
+                    "emailId": "spark7@builder.com",
+                    "phone": "7894561230",
+                    "panNo": "ABCDE1234F",
+                    "gstNo": "27ABCDE1234F1Z5",
+                    "addressLine1": "Plot 15, Dockyard Lane",
+                    "addressLine2": "Sector 3, Industrial Area",
+                    "pin": "400001",
+                    "district": "Mumbai",
+                    "state": "Maharashtra",
+                    "country": "India",
+                    "panReferenceId": "doc123_pan",
+                    "gstCertificateReferenceId": "doc456_gst",
+                    "addressReferenceId": "doc789_address",
+                    "userId": "",
+                    "aadharNumber": "123456789012",
+                    "tradeLicenseNumber": "TLN-2025-IND-000123",
+                    "fileStoreMap": [
+                        {
+                            "fileStoreId": "547f077a-4a72-4b0b-ba9d-f3a52cc22009",
+                            "alfrescoId": "1e10c853-2cc6-447a-90c8-532cc6547a23",
+                            "registrationNumber": "182be8ce-cf67-48eb-a486-4a5f7182c008",
+                            "fileName": "Screenshot (2).png",
+                            "module": "iwt.upload",
+                            "tenantId": "iwt.wb",
+                            "tag": null,
+                            "fieldName": "builder_details_Screenshot (2)",
+                            "auditDetails": null,
+                            "downLoadFile": "http://3.111.175.246:7073/filestore/v1/files/id?fileStoreId=547f077a-4a72-4b0b-ba9d-f3a52cc22009"
+                        }
+                    ],
+                    "auditDetails": {
+                        "createdBy": "182be8ce-cf67-48eb-a486-4a5f7182c008",
+                        "createdOn": null,
+                        "updatedBy": "182be8ce-cf67-48eb-a486-4a5f7182c008",
+                        "updatedOn": null
+                    }
+                },
+                "builderAuthorization": "APPROVED",
+                "authorizationLetter": {
+                    "id": "c1d44e53-9feb-441d-bd9a-292469a57f94",
+                    "documentName": "Authorization_Letter.pdf",
+                    "documentType": "AUTHORIZATION_LETTER",
+                    "applicationNumber": "WB-REG-2025-694540",
+                    "fileStoreId": "a89da43b-ad67-4daf-a693-5318a055d8bc",
+                    "documentSource": "AUTHORIZATION_LETTER",
+                    "description": "",
+                    "auditDetails": {
+                        "createdBy": null,
+                        "createdOn": null,
+                        "updatedBy": "143d530f-12ff-435f-84d0-6ab35f3783d2",
+                        "updatedOn": "2025-08-12T20:30:51.352090577"
+                    },
+                    "active": true
+                },
+                "constructedBy": "2",
+                "occupation": "",
+                "originalPlaceBusiness": "",
+                "isDrawingFee": true,
+                "isSupervisionFee": true,
+                "isApplicationRegistrationFee": true,
+                "isProvisionaCertificate": false,
+                "isEditable": true,
+                "enableReportUpload": false,
+                "isReportUploadCompleted": false,
+                "isCmnGenerated": false,
+                "enableAppRegistration": false,
+                "currentWorkflowState": "APPLICATIONCHARGE",
+                "auditDetails": {
+                    "createdBy": "139f183c-547d-4c12-81c0-f5aa16871d2e",
+                    "createdOn": "2025-08-12T20:11:19.402669683",
+                    "updatedBy": "01245a20-4c1d-49bb-acd3-fdc1fddb5e37",
+                    "updatedOn": "1755010856221"
+                }
+            },
+            "vesselDetails": {
+                "id": "7b5f3fde-c2be-444c-8573-005887798879",
+                "typeOfVessel": "Non Passenger",
+                "categoryOfVessel": "Category A",
+                "zone": "ZONE 1",
+                "grossTonnage": 2332,
+                "workOrderValue": "23",
+                "purchaseType": "New",
+                "supervisionAuthority": "Classification Society",
+                "nameOfMaster": "test",
+                "certficateNumber": "cert-22",
+                "nameOfRegistry": "test0name",
+                "registrationNumber": "WBI0012",
+                "vesselName": "test-vessel1",
+                "kindOfVessel": "Non Propelled Vessel",
+                "mortgage": "yes",
+                "placeOfBuild": "kolkata",
+                "insuranceDetails": "test-insurance",
+                "yearOfBuild": 2025,
+                "pniClubNo": "club0393",
+                "pniClubName": "protetion test",
+                "applicationNo": "WB-REG-2025-694540",
+                "nameOfClassificationSociety": "",
+                "iwtVesselBasicDetailsTFk": "139f183c-547d-4c12-81c0-f5aa16871d2e",
+                "insuranceValidDate": "2027",
+                "auditDetails": {
+                    "createdBy": "7b5f3fde-c2be-444c-8573-005887798879",
+                    "createdOn": "2025-08-12T20:11:19.518961546",
+                    "updatedBy": "7b5f3fde-c2be-444c-8573-005887798879",
+                    "updatedOn": "2025-08-12T20:30:51.330530410"
+                }
+            },
+            "documents": [
+                {
+                    "id": "c1d44e53-9feb-441d-bd9a-292469a57f94",
+                    "documentName": "Authorization_Letter.pdf",
+                    "documentType": "AUTHORIZATION_LETTER",
+                    "applicationNumber": "WB-REG-2025-694540",
+                    "fileStoreId": "a89da43b-ad67-4daf-a693-5318a055d8bc",
+                    "documentSource": "AUTHORIZATION_LETTER",
+                    "description": "",
+                    "auditDetails": {
+                        "createdBy": null,
+                        "createdOn": null,
+                        "updatedBy": "143d530f-12ff-435f-84d0-6ab35f3783d2",
+                        "updatedOn": "2025-08-12T20:30:51.352090577"
+                    },
+                    "active": true
+                },
+                {
+                    "id": "956b41df-7d88-49b2-93a0-0824a09a3f70",
+                    "documentName": "Tonnage Booklets.pdf",
+                    "documentType": "TONNAGE_BOOKLETS",
+                    "applicationNumber": "WB-REG-2025-694540",
+                    "fileStoreId": "9a38de0e-a003-4ad3-a90e-11ae09b485e7",
+                    "documentSource": "TONNAGE_BOOKLETS",
+                    "description": "Tonnage document",
+                    "auditDetails": {
+                        "createdBy": null,
+                        "createdOn": null,
+                        "updatedBy": "143d530f-12ff-435f-84d0-6ab35f3783d2",
+                        "updatedOn": "2025-08-12T20:30:51.354715479"
+                    },
+                    "active": true
+                },
+                {
+                    "id": "77fbc0be-c3d0-41f3-bbcc-374f8e1c0069",
+                    "documentName": "WORK_ORDER_01.pdf",
+                    "documentType": "WORK_ORDER",
+                    "applicationNumber": "WB-REG-2025-694540",
+                    "fileStoreId": "9391637e-157a-4dd6-9ba1-49e8138425b7",
+                    "documentSource": "WORK_ORDER",
+                    "description": "",
+                    "auditDetails": {
+                        "createdBy": null,
+                        "createdOn": null,
+                        "updatedBy": "143d530f-12ff-435f-84d0-6ab35f3783d2",
+                        "updatedOn": "2025-08-12T20:30:51.358553337"
+                    },
+                    "active": true
+                },
+                {
+                    "id": "b22a0fd8-a6cc-49ba-ae2d-0237e2bef0b4",
+                    "documentName": "WORK_ORDER_02.pdf",
+                    "documentType": "WORK_ORDER",
+                    "applicationNumber": "WB-REG-2025-694540",
+                    "fileStoreId": "a7fe6324-7f45-41e6-8bcd-0d6dabbb5f70",
+                    "documentSource": "WORK_ORDER",
+                    "description": "",
+                    "auditDetails": {
+                        "createdBy": null,
+                        "createdOn": null,
+                        "updatedBy": "143d530f-12ff-435f-84d0-6ab35f3783d2",
+                        "updatedOn": "2025-08-12T20:30:51.357325410"
+                    },
+                    "active": true
+                },
+                {
+                    "id": "ea5d6f56-c2ad-4bc3-a9ac-4d7985138536",
+                    "documentName": "DRAWINGS_01.pdf",
+                    "documentType": "DRAWINGS",
+                    "applicationNumber": "WB-REG-2025-694540",
+                    "fileStoreId": "51d0f17f-7229-47df-b0df-7f6860ed5601",
+                    "documentSource": "DRAWINGS",
+                    "description": "",
+                    "auditDetails": {
+                        "createdBy": null,
+                        "createdOn": null,
+                        "updatedBy": "143d530f-12ff-435f-84d0-6ab35f3783d2",
+                        "updatedOn": "2025-08-12T20:30:51.353411119"
+                    },
+                    "active": true
+                },
+                {
+                    "id": "b627a621-c728-44a7-8a69-aebd005a86d0",
+                    "documentName": "Stability Booklets.pdf",
+                    "documentType": "STABILITY_BOOKLETS",
+                    "applicationNumber": "WB-REG-2025-694540",
+                    "fileStoreId": "b2f0d6bf-a249-4767-8474-c1ae61de03e7",
+                    "documentSource": "STABILITY_BOOKLETS",
+                    "description": "Stability document",
+                    "auditDetails": {
+                        "createdBy": null,
+                        "createdOn": null,
+                        "updatedBy": "143d530f-12ff-435f-84d0-6ab35f3783d2",
+                        "updatedOn": "2025-08-12T20:30:51.356062782"
+                    },
+                    "active": true
+                }
+            ],
+            "reports": {
+                "materialTestReports": [
+                    {
+                        "id": "f82efa96-70a1-4c31-8e20-2e54a69dac52",
+                        "documentName": "Material Test Report",
+                        "documentType": "MATERIAL_TEST_REPORT",
+                        "applicationNumber": "WB-REG-2025-694540",
+                        "fileStoreId": "d2c70289-89ca-4105-b557-c86dd5caaebe",
+                        "documentSource": "MATERIAL_TEST_REPORT",
+                        "description": "test",
+                        "auditDetails": {
+                            "createdBy": null,
+                            "createdOn": null,
+                            "updatedBy": "f82efa96-70a1-4c31-8e20-2e54a69dac52",
+                            "updatedOn": "2025-08-12T20:27:08.636526058"
+                        },
+                        "active": true
+                    },
+                    {
+                        "id": "937c984e-3477-41ea-80f6-67df0caf32b2",
+                        "documentName": "Material Test Report",
+                        "documentType": "MATERIAL_TEST_REPORT",
+                        "applicationNumber": "WB-REG-2025-694540",
+                        "fileStoreId": "ea62397d-d884-4279-ac42-73c9d4b97be6",
+                        "documentSource": "MATERIAL_TEST_REPORT",
+                        "description": "",
+                        "auditDetails": {
+                            "createdBy": null,
+                            "createdOn": null,
+                            "updatedBy": "937c984e-3477-41ea-80f6-67df0caf32b2",
+                            "updatedOn": "2025-08-12T20:26:57.547782311"
+                        },
+                        "active": true
+                    }
+                ],
+                "radiographyReports": [
+                    {
+                        "id": "42ebfae1-d613-4957-a541-db076b1d821c",
+                        "documentName": "Radiography Report",
+                        "documentType": "RADIOGRAPHY_REPORT",
+                        "applicationNumber": "WB-REG-2025-694540",
+                        "fileStoreId": "da0534fe-0af3-4052-bdfe-6f38834ca6e4",
+                        "documentSource": "RADIOGRAPHY_REPORT",
+                        "description": "test",
+                        "auditDetails": {
+                            "createdBy": null,
+                            "createdOn": null,
+                            "updatedBy": "42ebfae1-d613-4957-a541-db076b1d821c",
+                            "updatedOn": "2025-08-12T20:27:20.334919310"
+                        },
+                        "active": true
+                    }
+                ],
+                "inspectionReports": [
+                    {
+                        "id": "ff5d70c7-aaae-4ed6-b8ac-f8d228c7bda6",
+                        "documentName": "Inspection Report",
+                        "documentType": "INSPECTION_REPORT",
+                        "applicationNumber": "WB-REG-2025-694540",
+                        "fileStoreId": "3d33161b-8be0-4336-a7c4-65726e27bad3",
+                        "documentSource": "INSPECTION_REPORT",
+                        "description": "test-inspection",
+                        "auditDetails": {
+                            "createdBy": null,
+                            "createdOn": null,
+                            "updatedBy": "ff5d70c7-aaae-4ed6-b8ac-f8d228c7bda6",
+                            "updatedOn": "2025-08-12T20:27:36.413642742"
+                        },
+                        "active": true
+                    }
+                ],
+                "otherReports": [
+                    {
+                        "id": "250d2da3-32ce-4441-a06b-9f94746f3630",
+                        "documentName": "Other Report",
+                        "documentType": "OTHER_REPORT",
+                        "applicationNumber": "WB-REG-2025-694540",
+                        "fileStoreId": "94217f23-e18c-4ef3-80d9-e3a4112ef401",
+                        "documentSource": "OTHER_REPORT",
+                        "description": "test-other",
+                        "auditDetails": {
+                            "createdBy": null,
+                            "createdOn": null,
+                            "updatedBy": "250d2da3-32ce-4441-a06b-9f94746f3630",
+                            "updatedOn": "2025-08-12T20:27:51.802834545"
+                        },
+                        "active": true
+                    }
+                ]
+            },
+            "engineDetails": {
+                "id": "813e021f-1cb3-4b2d-81b8-70222dfe3b8c",
+                "yearOfBuild": "2025",
+                "engineType": "test-engine",
+                "engineMake": "test-engine",
+                "makerAddress": "test-engine make",
+                "pin": "700155",
+                "mobile": "8765424242",
+                "email": "testengine@gmail.com",
+                "horsepower": 200.00,
+                "speed": 200.00,
+                "yearOfMake": "2025",
+                "applRegistrationTFk": "139f183c-547d-4c12-81c0-f5aa16871d2e",
+                "auditDetails": {
+                    "createdBy": "813e021f-1cb3-4b2d-81b8-70222dfe3b8c",
+                    "createdOn": "2025-08-12T20:30:51.359802784",
+                    "updatedBy": "813e021f-1cb3-4b2d-81b8-70222dfe3b8c",
+                    "updatedOn": "2025-08-12T20:30:51.359808985"
+                }
+            },
+            "enclosers": [
+                {
+                    "id": "f2c02923-76c1-4da4-a57f-eba184f74410",
+                    "documentName": "Builder Certificate.pdf",
+                    "documentType": "BUILDERS_CERTIFICATE",
+                    "applicationNumber": "WB-REG-2025-694540",
+                    "fileStoreId": "3cb06719-b3db-4433-8909-d0ea4e6cb82d",
+                    "documentSource": "BUILDERS_CERTIFICATE",
+                    "description": "Builder Certificate document",
+                    "auditDetails": {
+                        "createdBy": null,
+                        "createdOn": null,
+                        "updatedBy": "f2c02923-76c1-4da4-a57f-eba184f74410",
+                        "updatedOn": "2025-08-12T20:30:51.362822328"
+                    },
+                    "active": true
+                },
+                {
+                    "id": "775c3875-2ec7-4866-85b7-e304ab5472bd",
+                    "documentName": "Protection and Indemnity Insurance.pdf",
+                    "documentType": "PREOTECTION_AND_INDEMNITY_INSURANCE_NO",
+                    "applicationNumber": "WB-REG-2025-694540",
+                    "fileStoreId": "e7abb364-4044-4ee1-b00b-a91c38f264a9",
+                    "documentSource": "PREOTECTION_AND_INDEMNITY_INSURANCE_NO",
+                    "description": "Protection and Indemnity Insurance document",
+                    "auditDetails": {
+                        "createdBy": null,
+                        "createdOn": null,
+                        "updatedBy": "775c3875-2ec7-4866-85b7-e304ab5472bd",
+                        "updatedOn": "2025-08-12T20:30:51.366710818"
+                    },
+                    "active": true
+                },
+                {
+                    "id": "338179e0-5aaf-4558-a92e-c5facf200095",
+                    "documentName": "Instrument of Sale.pdf",
+                    "documentType": "INSTRUMENT_OF_SALE",
+                    "applicationNumber": "WB-REG-2025-694540",
+                    "fileStoreId": "368d8a5e-ba92-42a2-b45e-0c4a60f1d7d6",
+                    "documentSource": "INSTRUMENT_OF_SALE",
+                    "description": "Instrument of Sale document",
+                    "auditDetails": {
+                        "createdBy": null,
+                        "createdOn": null,
+                        "updatedBy": "338179e0-5aaf-4558-a92e-c5facf200095",
+                        "updatedOn": "2025-08-12T20:30:51.364036094"
+                    },
+                    "active": true
+                },
+                {
+                    "id": "25f04670-6e86-4453-9f44-17816d67b1ab",
+                    "documentName": "Mortgage Details.pdf",
+                    "documentType": "MORTGAGE_DETAILS",
+                    "applicationNumber": "WB-REG-2025-694540",
+                    "fileStoreId": "5edc114f-0ad1-4cfa-bbc2-4e6b0570a0ee",
+                    "documentSource": "MORTGAGE_DETAILS",
+                    "description": "Mortgage Details document",
+                    "auditDetails": {
+                        "createdBy": null,
+                        "createdOn": null,
+                        "updatedBy": "25f04670-6e86-4453-9f44-17816d67b1ab",
+                        "updatedOn": "2025-08-12T20:30:51.365401247"
+                    },
+                    "active": true
+                },
+                {
+                    "id": "374c3736-1c70-4707-b963-a4e9baddfa54",
+                    "documentName": "Challan.pdf",
+                    "documentType": "CHALLAN",
+                    "applicationNumber": "WB-REG-2025-694540",
+                    "fileStoreId": "25864146-0758-4d00-b318-bc5a77d5c454",
+                    "documentSource": "CHALLAN",
+                    "description": "Challan document",
+                    "auditDetails": {
+                        "createdBy": null,
+                        "createdOn": null,
+                        "updatedBy": "374c3736-1c70-4707-b963-a4e9baddfa54",
+                        "updatedOn": "2025-08-12T20:30:51.369349711"
+                    },
+                    "active": true
+                },
+                {
+                    "id": "b091f611-8d40-492f-a42a-dc5379915178",
+                    "documentName": "Third Party Insurance.pdf",
+                    "documentType": "THIRD_PARTY_INSURANCE",
+                    "applicationNumber": "WB-REG-2025-694540",
+                    "fileStoreId": "b73d63a4-fd51-4b6f-9aa3-c7e776f1d0db",
+                    "documentSource": "THIRD_PARTY_INSURANCE",
+                    "description": "Third Party Insurance document",
+                    "auditDetails": {
+                        "createdBy": null,
+                        "createdOn": null,
+                        "updatedBy": "b091f611-8d40-492f-a42a-dc5379915178",
+                        "updatedOn": "2025-08-12T20:30:51.361370399"
+                    },
+                    "active": true
+                },
+                {
+                    "id": "932a44c9-85c1-4e85-9eda-d2e0ed19b201",
+                    "documentName": "Declaration of Ownership.pdf",
+                    "documentType": "DECLARATION_OF_OWNERSHIP",
+                    "applicationNumber": "WB-REG-2025-694540",
+                    "fileStoreId": "e547278f-b15f-4c1b-b0b8-18eaddf3a4d3",
+                    "documentSource": "DECLARATION_OF_OWNERSHIP",
+                    "description": "Declaration of Ownership document",
+                    "auditDetails": {
+                        "createdBy": null,
+                        "createdOn": null,
+                        "updatedBy": "932a44c9-85c1-4e85-9eda-d2e0ed19b201",
+                        "updatedOn": "2025-08-12T20:30:51.368031860"
+                    },
+                    "active": true
+                }
+            ],
+            "processActionMapResponce": [
+                {
+                    "processs": [
+                        {
+                            "processId": 15,
+                            "processName": "APPLICATIONCHARGE",
+                            "actions": [
+                                {
+                                    "statusId": 45,
+                                    "statusName": "Ship surveyor returns application to Junior Engineer",
+                                    "statusDescription": "Ship Surveyor returns application",
+                                    "roleId": 4,
+                                    "roleName": "ENGINEER-CUM-SHIP SURVEYOR",
+                                    "actionId": 59,
+                                    "actionName": "Ship SUrveyor returns application to Junior Engineer",
+                                    "actionDescription": "Return"
+                                },
+                                {
+                                    "statusId": 46,
+                                    "statusName": "Ship surveyor approves application",
+                                    "statusDescription": "Ship surveyor approves application",
+                                    "roleId": 4,
+                                    "roleName": "ENGINEER-CUM-SHIP SURVEYOR",
+                                    "actionId": 60,
+                                    "actionName": "Ship SUrveyor Approves Application",
+                                    "actionDescription": "Approve"
+                                },
+                                {
+                                    "statusId": 47,
+                                    "statusName": "Ship surveyor generates CMN",
+                                    "statusDescription": "Ship surveyor Generates CMN",
+                                    "roleId": 4,
+                                    "roleName": "ENGINEER-CUM-SHIP SURVEYOR",
+                                    "actionId": 61,
+                                    "actionName": "Ship Surveyor Generates CMN",
+                                    "actionDescription": "Generate CMN"
+                                },
+                                {
+                                    "statusId": 48,
+                                    "statusName": "Surveyor forwards application to director",
+                                    "statusDescription": "Ship Surveyor forwards application to director",
+                                    "roleId": 4,
+                                    "roleName": "ENGINEER-CUM-SHIP SURVEYOR",
+                                    "actionId": 62,
+                                    "actionName": "Ship Surveyor Forwards application to Director",
+                                    "actionDescription": "Forward"
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        }
+    ],
+    "errors": null,
+    "timestamp": 1755020710.379560205,
+    "pagination": null
+}
+
+ import React, { useEffect } from "react";
+import { Dropdown, ButtonGroup, Button } from "react-bootstrap";
+import "../common/styles/ActionDropdown.css";
+
+import {
+  FaCheck,
+  FaTimes,
+  FaEdit,
+  FaTrash,
+  FaEye,
+  FaDownload,
+  FaInfoCircle,
+  FaArrowCircleLeft,
+  FaArrowCircleRight,
+} from "react-icons/fa";
+
+const getIconForAction = (action) => {
+  if (!action) return <FaInfoCircle className="drop-icon" />;
+  const act = action?.toLowerCase();
+  switch (true) {
+    case act?.includes("approve"):
+      return <FaCheck className="drop-icon" />;
+    case act?.includes("reject") || act?.includes("decline"):
+      return <FaTimes className="drop-icon" />;
+    case act?.includes("edit") || act?.includes("update"):
+      return <FaEdit className="drop-icon" />;
+    case act?.includes("delete") || act?.includes("remove"):
+      return <FaTrash className="drop-icon" />;
+    case act?.includes("view") || act?.includes("details"):
+      return <FaEye className="drop-icon" />;
+    case act?.includes("download"):
+      return <FaDownload className="drop-icon" />;
+    case act?.includes("info") || act?.includes("more"):
+      return <FaInfoCircle className="drop-icon" />;
+    case act?.includes("sendback") || act?.includes("back"):
+      return <FaArrowCircleLeft className="drop-icon" />;
+    case act?.includes("forward") || act?.includes("next"):
+      return <FaArrowCircleRight className="drop-icon" />;
+    default:
+      return <FaInfoCircle className="drop-icon" />;
+  }
+};
+const ActionDropdown = ({ actions, onActionClick }) => {
+  return (
+    <Dropdown as={ButtonGroup}>
+      <Button variant="dd-primary">Take Action</Button>
+      <Dropdown.Toggle
+        split
+        variant="dd-primary"
+        id="dropdown-split-basic"
+      />
+
+      <Dropdown.Menu className="dd-primary-menu show-fade">
+        {actions?.map((action, idx) => (
+          <Dropdown.Item
+            key={idx}
+            className="dd-primary-item"
+            onClick={() => onActionClick(action)}
+          >
+            
+            {getIconForAction(action?.actionName)} {action?.actionName}
+          </Dropdown.Item>
+        ))}
+      </Dropdown.Menu>
+    </Dropdown>
+  );
+};
+
+export default ActionDropdown;
+fetchRegistrationDetails
+depend on response 
+ "statusName": "Ship surveyor generates CMN
+ in action model
+ this action click please open 
+CurvingMarkingNote & CurvingMarkingNoteL5
+when have L3 AND L4 THAN OPEN  CurvingMarkingNote
+COMPONENT AND WHEN OFFICER_L5THAN OPEN  CurvingMarkingNoteL5
+PLEASE WRITE FULL CODE
