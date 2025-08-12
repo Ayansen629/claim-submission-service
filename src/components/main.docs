@@ -25,6 +25,7 @@ import { OFFICER_ROLES, USER_ROLES } from "../../../../../utils/constants.ts";
 import { handleErrorMessage } from "../../../../../utils/errorMessageHandler.js";
 import CurvingMarkingNote from "../../new-vessel/common/CurvingMarkingNote.js";
 import CurvingMarkingNoteL5 from "../../new-vessel/common/CurvingMarkingNoteL5.js";
+
 const VesselReportsAndDocs = () => {
   const { t } = useTranslation();
   const { id } = useParams();
@@ -41,7 +42,6 @@ const VesselReportsAndDocs = () => {
   const methods = useForm({ mode: "onTouched" });
   const { trigger, getValues, setValue } = methods;
 
-  // const [isLoading, setIsLoading] = useState(false);
   const [showApprovalModal, setShowApprovalModal] = useState(false);
   const [selectedAction, setSelectedAction] = useState("");
   const [registrationData, setRegistrationData] = useState(null);
@@ -52,6 +52,7 @@ const VesselReportsAndDocs = () => {
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
   const [paymentData, setPaymentData] = useState(null);
   const [fullPaymentData, setFullPaymentData] = useState({});
+  const [showCMNModal, setShowCMNModal] = useState(false);
 
   const userRole = getFromLocalStorage("userRole") || "";
   const userDetails = getFromLocalStorage("userDetails") || {};
@@ -136,7 +137,6 @@ const VesselReportsAndDocs = () => {
       const { status, data } = await postData(apiUrl, payload);
 
       const resData = data?.data[0] ?? {};
-      // const statusMessage = res?.responseStatus?.status;
 
       if (status !== 200) {
         toast.error("Unable to fetch registration details.");
@@ -338,54 +338,30 @@ const VesselReportsAndDocs = () => {
         );
       }
 
-      // //  Curving & Marking Note step for L3 and L4 officers
-      // if (
-      //   userRole === USER_ROLES.OFFICER_L3 ||
-      //   userRole === USER_ROLES.OFFICER_L4
-      // ) {
-      //   stepsList.push(
-      //     createStep(
-      //       "Curving & Marking Note",
-      //       <CurvingMarkingNote registrationData={registrationData} />
-      //     )
-      //   );
-      // }
-
-      // //  Director Review step for L5 officers
-      // if (userRole === USER_ROLES.OFFICER_L5) {
-      //   stepsList.push(
-      //     createStep(
-      //       "Director Review",
-      //       <CurvingMarkingNoteL5 registrationData={registrationData} />
-      //     )
-      //   );
-      // }
-
-        
-            if (registrationData?.basicDetails?.isCmnGenerated) {
-              if (userRole === USER_ROLES.OFFICER_L5) {
-                stepsList.push(
-                  createStep(
-                    "Director Review",
-                    <CurvingMarkingNoteL5
-                      registrationData={registrationData}
-                    />
-                  )
-                );
-              } else if (
-                userRole === USER_ROLES.OFFICER_L3 ||
-                userRole === USER_ROLES.OFFICER_L4
-              ) {
-                stepsList.push(
-                  createStep(
-                    "Curving & Marking Note",
-                    <CurvingMarkingNote
-                      registrationData={registrationData}
-                    />
-                  )
-                );
-              }
-            }
+      if (registrationData?.basicDetails?.isCmnGenerated) {
+        if (userRole === USER_ROLES.OFFICER_L5) {
+          stepsList.push(
+            createStep(
+              "Director Review",
+              <CurvingMarkingNoteL5
+                registrationData={registrationData}
+              />
+            )
+          );
+        } else if (
+          userRole === USER_ROLES.OFFICER_L3 ||
+          userRole === USER_ROLES.OFFICER_L4
+        ) {
+          stepsList.push(
+            createStep(
+              "Curving & Marking Note",
+              <CurvingMarkingNote
+                registrationData={registrationData}
+              />
+            )
+          );
+        }
+      }
 
       setSteps(stepsList);
     } else {
@@ -455,8 +431,61 @@ const VesselReportsAndDocs = () => {
   ]);
 
   const handleActionClick = (action) => {
+    // Check if the action is "Ship surveyor generates CMN"
+    if (action?.statusName?.includes("Ship surveyor generates CMN")) {
+      setShowCMNModal(true);
+      return;
+    }
+    
     setSelectedAction(action);
     setShowApprovalModal(true);
+  };
+
+  const handleCMNGeneration = async (modalFormData) => {
+    try {
+      loaderRef?.current?.show();
+
+      // First generate CMN
+      const cmnPayload = {
+        applicationNo: registrationData?.applicationNumber,
+        processId: registrationData?.processActionMapResponce[0]?.processs?.[0]?.processId,
+        actionId: selectedAction?.actionId,
+        assignerRole: userRole,
+        assignerName: userDetails?.userName || getFromLocalStorage("userDetails")?.userName || "",
+        fileId: modalFormData?.document?.url || "",
+        remarks: modalFormData?.reason,
+      };
+
+      const URL = SERVICE_BASE.IWT_WORKFLOW + URLS_ENDPOINT.WORK_FLOW_SERVICE.WORKFLOW_ACTION;
+      const response = await postData(URL, cmnPayload);
+
+      if (response && response?.status === 200 && response?.data?.responseStatus?.status === "200") {
+        // Update registration data to mark CMN as generated
+        const updatedRegistrationData = {
+          ...registrationData,
+          basicDetails: {
+            ...registrationData.basicDetails,
+            isCmnGenerated: true
+          }
+        };
+        setRegistrationData(updatedRegistrationData);
+
+        toast.success("CMN generated successfully");
+        setShowCMNModal(false);
+        
+        // Refresh the page to show the new step
+        setTimeout(() => {
+          window.location.reload();
+        }, 1000);
+      } else {
+        toast.info(response?.data?.responseStatus?.message || "Something went wrong..");
+      }
+    } catch (err) {
+      console.log(err);
+      handleErrorMessage(err?.response?.data);
+    } finally {
+      loaderRef?.current?.hide();
+    }
   };
 
   const workflowApplicationSubmit = async (modalFormData) => {
@@ -513,7 +542,17 @@ const VesselReportsAndDocs = () => {
 
   const handleCloseModal = () => {
     setShowApprovalModal(false);
+    setShowCMNModal(false);
     setSelectedAction("");
+  };
+
+  const renderCMNComponent = () => {
+    if (userRole === USER_ROLES.OFFICER_L5) {
+      return <CurvingMarkingNoteL5 registrationData={registrationData} />;
+    } else if (userRole === USER_ROLES.OFFICER_L3 || userRole === USER_ROLES.OFFICER_L4) {
+      return <CurvingMarkingNote registrationData={registrationData} />;
+    }
+    return null;
   };
 
   const handleFormSubmit = async (stepInfo) => {
@@ -912,7 +951,6 @@ const VesselReportsAndDocs = () => {
 
   const handleSubmit = async () => {
     try {
-      // setIsLoading(true);
       loaderRef.current?.show();
 
       const formData = methods.getValues();
@@ -928,17 +966,12 @@ const VesselReportsAndDocs = () => {
       const response = await postData(apiUrl, payload);
 
       if (response?.status === 200 && response?.data?.responseStatus) {
-      // if (response?.status === 200 && response?.data?.responseStatus?.status === "Data Created Successfully") {
-
         toast.success(
           response?.data?.responseStatus?.message ||
             "Registration submitted successfully!"
         );
         setDisableSubmit(true);
         setInitialStep(steps.length - 1);
-        // setTimeout(() => {
-        // navigate("/dashboard");
-        // }, 1500);
       } else {
         toast.error(
           response?.data?.responseStatus?.message ||
@@ -949,7 +982,6 @@ const VesselReportsAndDocs = () => {
       console.error("Submission error:", error);
       toast.error("Failed to submit form. Please try again.");
     } finally {
-      // setIsLoading(false);
       loaderRef.current?.hide();
     }
   };
@@ -1062,12 +1094,23 @@ const VesselReportsAndDocs = () => {
           />
         )}
         {isOfficerLogin && isViewMode && (
-          <ApprovalModal
-            show={showApprovalModal}
-            handleClose={handleCloseModal}
-            handleSubmitData={workflowApplicationSubmit}
-            selectedAction={selectedAction}
-          />
+          <>
+            <ApprovalModal
+              show={showApprovalModal}
+              handleClose={handleCloseModal}
+              handleSubmitData={workflowApplicationSubmit}
+              selectedAction={selectedAction}
+            />
+            
+            {/* CMN Generation Modal */}
+            <ApprovalModal
+              show={showCMNModal}
+              handleClose={handleCloseModal}
+              handleSubmitData={handleCMNGeneration}
+              selectedAction={{ actionName: "Generate CMN" }}
+              title="Generate Curving & Marking Note"
+            />
+          </>
         )}
         <InvoiceModal
           show={showInvoiceModal}
@@ -1082,636 +1125,3 @@ const VesselReportsAndDocs = () => {
 };
 
 export default VesselReportsAndDocs;
-
-{
-    "responseStatus": {
-        "status": "Registration details fetched successfully",
-        "message": "Operation completed successfully."
-    },
-    "data": [
-        {
-            "id": "139f183c-547d-4c12-81c0-f5aa16871d2e",
-            "applicationNumber": "WB-REG-2025-694540",
-            "basicDetails": {
-                "id": "139f183c-547d-4c12-81c0-f5aa16871d2e",
-                "applicationNumber": "WB-REG-2025-694540",
-                "status": "INWORKFLOW APPLICATION APPROVAL",
-                "ownerDetails": {
-                    "id": "01245a20-4c1d-49bb-acd3-fdc1fddb5e37",
-                    "categoryOfOwner": "A",
-                    "ownerCompanyName": "fhhfhf",
-                    "emailId": "owner@owner.com",
-                    "phoneNumber": "7654545454",
-                    "panNo": "GFDSY0987E",
-                    "gstNo": "27ABCDE1234F1Z5",
-                    "addressLine1": "FDFDFD",
-                    "addressLine2": "",
-                    "pin": 700155,
-                    "district": "24 PARAGANAS NORTH",
-                    "state": "WEST BENGAL",
-                    "country": "India",
-                    "authorisedFname": "SADASD",
-                    "authorisedLname": "sadasda",
-                    "authorisedMob": "8765255252",
-                    "authorisedEmail": "dsdsdf@gmail.com",
-                    "loaReferenceId": "",
-                    "panReferenceId": "",
-                    "gstCertReferenceId": "",
-                    "addressReferenceId": "",
-                    "companyCertReferenceId": "",
-                    "cinNo": "U12345MH2025PTC999999",
-                    "dinNo": "12345678",
-                    "moaCertificateReferenceId": "",
-                    "aoaCertificateReferenceId": "",
-                    "userMIdFk": "",
-                    "aadharNumber": "123456789012",
-                    "tradeLicenseNumber": "TLN-2025-IND-004123",
-                    "fileStoreMap": [
-                        {
-                            "fileStoreId": "9e7d8617-14db-4e05-bbb2-d85380b02772",
-                            "alfrescoId": "e1ef29f2-61d6-490c-af29-f261d6890c92",
-                            "registrationNumber": "01245a20-4c1d-49bb-acd3-fdc1fddb5e37",
-                            "fileName": "dummy.pdf",
-                            "module": "iwt.upload",
-                            "tenantId": "iwt.wb",
-                            "tag": null,
-                            "fieldName": "owner_details_dummy",
-                            "auditDetails": null,
-                            "downLoadFile": "http://3.111.175.246:7073/filestore/v1/files/id?fileStoreId=9e7d8617-14db-4e05-bbb2-d85380b02772"
-                        }
-                    ],
-                    "auditDetails": {
-                        "createdBy": "01245a20-4c1d-49bb-acd3-fdc1fddb5e37",
-                        "createdOn": null,
-                        "updatedBy": "01245a20-4c1d-49bb-acd3-fdc1fddb5e37",
-                        "updatedOn": null
-                    }
-                },
-                "builderDetails": {
-                    "id": "182be8ce-cf67-48eb-a486-4a5f7182c008",
-                    "builderName": "Titan Dockyards India Ltd.",
-                    "emailId": "spark7@builder.com",
-                    "phone": "7894561230",
-                    "panNo": "ABCDE1234F",
-                    "gstNo": "27ABCDE1234F1Z5",
-                    "addressLine1": "Plot 15, Dockyard Lane",
-                    "addressLine2": "Sector 3, Industrial Area",
-                    "pin": "400001",
-                    "district": "Mumbai",
-                    "state": "Maharashtra",
-                    "country": "India",
-                    "panReferenceId": "doc123_pan",
-                    "gstCertificateReferenceId": "doc456_gst",
-                    "addressReferenceId": "doc789_address",
-                    "userId": "",
-                    "aadharNumber": "123456789012",
-                    "tradeLicenseNumber": "TLN-2025-IND-000123",
-                    "fileStoreMap": [
-                        {
-                            "fileStoreId": "547f077a-4a72-4b0b-ba9d-f3a52cc22009",
-                            "alfrescoId": "1e10c853-2cc6-447a-90c8-532cc6547a23",
-                            "registrationNumber": "182be8ce-cf67-48eb-a486-4a5f7182c008",
-                            "fileName": "Screenshot (2).png",
-                            "module": "iwt.upload",
-                            "tenantId": "iwt.wb",
-                            "tag": null,
-                            "fieldName": "builder_details_Screenshot (2)",
-                            "auditDetails": null,
-                            "downLoadFile": "http://3.111.175.246:7073/filestore/v1/files/id?fileStoreId=547f077a-4a72-4b0b-ba9d-f3a52cc22009"
-                        }
-                    ],
-                    "auditDetails": {
-                        "createdBy": "182be8ce-cf67-48eb-a486-4a5f7182c008",
-                        "createdOn": null,
-                        "updatedBy": "182be8ce-cf67-48eb-a486-4a5f7182c008",
-                        "updatedOn": null
-                    }
-                },
-                "builderAuthorization": "APPROVED",
-                "authorizationLetter": {
-                    "id": "c1d44e53-9feb-441d-bd9a-292469a57f94",
-                    "documentName": "Authorization_Letter.pdf",
-                    "documentType": "AUTHORIZATION_LETTER",
-                    "applicationNumber": "WB-REG-2025-694540",
-                    "fileStoreId": "a89da43b-ad67-4daf-a693-5318a055d8bc",
-                    "documentSource": "AUTHORIZATION_LETTER",
-                    "description": "",
-                    "auditDetails": {
-                        "createdBy": null,
-                        "createdOn": null,
-                        "updatedBy": "143d530f-12ff-435f-84d0-6ab35f3783d2",
-                        "updatedOn": "2025-08-12T20:30:51.352090577"
-                    },
-                    "active": true
-                },
-                "constructedBy": "2",
-                "occupation": "",
-                "originalPlaceBusiness": "",
-                "isDrawingFee": true,
-                "isSupervisionFee": true,
-                "isApplicationRegistrationFee": true,
-                "isProvisionaCertificate": false,
-                "isEditable": true,
-                "enableReportUpload": false,
-                "isReportUploadCompleted": false,
-                "isCmnGenerated": false,
-                "enableAppRegistration": false,
-                "currentWorkflowState": "APPLICATIONCHARGE",
-                "auditDetails": {
-                    "createdBy": "139f183c-547d-4c12-81c0-f5aa16871d2e",
-                    "createdOn": "2025-08-12T20:11:19.402669683",
-                    "updatedBy": "01245a20-4c1d-49bb-acd3-fdc1fddb5e37",
-                    "updatedOn": "1755010856221"
-                }
-            },
-            "vesselDetails": {
-                "id": "7b5f3fde-c2be-444c-8573-005887798879",
-                "typeOfVessel": "Non Passenger",
-                "categoryOfVessel": "Category A",
-                "zone": "ZONE 1",
-                "grossTonnage": 2332,
-                "workOrderValue": "23",
-                "purchaseType": "New",
-                "supervisionAuthority": "Classification Society",
-                "nameOfMaster": "test",
-                "certficateNumber": "cert-22",
-                "nameOfRegistry": "test0name",
-                "registrationNumber": "WBI0012",
-                "vesselName": "test-vessel1",
-                "kindOfVessel": "Non Propelled Vessel",
-                "mortgage": "yes",
-                "placeOfBuild": "kolkata",
-                "insuranceDetails": "test-insurance",
-                "yearOfBuild": 2025,
-                "pniClubNo": "club0393",
-                "pniClubName": "protetion test",
-                "applicationNo": "WB-REG-2025-694540",
-                "nameOfClassificationSociety": "",
-                "iwtVesselBasicDetailsTFk": "139f183c-547d-4c12-81c0-f5aa16871d2e",
-                "insuranceValidDate": "2027",
-                "auditDetails": {
-                    "createdBy": "7b5f3fde-c2be-444c-8573-005887798879",
-                    "createdOn": "2025-08-12T20:11:19.518961546",
-                    "updatedBy": "7b5f3fde-c2be-444c-8573-005887798879",
-                    "updatedOn": "2025-08-12T20:30:51.330530410"
-                }
-            },
-            "documents": [
-                {
-                    "id": "c1d44e53-9feb-441d-bd9a-292469a57f94",
-                    "documentName": "Authorization_Letter.pdf",
-                    "documentType": "AUTHORIZATION_LETTER",
-                    "applicationNumber": "WB-REG-2025-694540",
-                    "fileStoreId": "a89da43b-ad67-4daf-a693-5318a055d8bc",
-                    "documentSource": "AUTHORIZATION_LETTER",
-                    "description": "",
-                    "auditDetails": {
-                        "createdBy": null,
-                        "createdOn": null,
-                        "updatedBy": "143d530f-12ff-435f-84d0-6ab35f3783d2",
-                        "updatedOn": "2025-08-12T20:30:51.352090577"
-                    },
-                    "active": true
-                },
-                {
-                    "id": "956b41df-7d88-49b2-93a0-0824a09a3f70",
-                    "documentName": "Tonnage Booklets.pdf",
-                    "documentType": "TONNAGE_BOOKLETS",
-                    "applicationNumber": "WB-REG-2025-694540",
-                    "fileStoreId": "9a38de0e-a003-4ad3-a90e-11ae09b485e7",
-                    "documentSource": "TONNAGE_BOOKLETS",
-                    "description": "Tonnage document",
-                    "auditDetails": {
-                        "createdBy": null,
-                        "createdOn": null,
-                        "updatedBy": "143d530f-12ff-435f-84d0-6ab35f3783d2",
-                        "updatedOn": "2025-08-12T20:30:51.354715479"
-                    },
-                    "active": true
-                },
-                {
-                    "id": "77fbc0be-c3d0-41f3-bbcc-374f8e1c0069",
-                    "documentName": "WORK_ORDER_01.pdf",
-                    "documentType": "WORK_ORDER",
-                    "applicationNumber": "WB-REG-2025-694540",
-                    "fileStoreId": "9391637e-157a-4dd6-9ba1-49e8138425b7",
-                    "documentSource": "WORK_ORDER",
-                    "description": "",
-                    "auditDetails": {
-                        "createdBy": null,
-                        "createdOn": null,
-                        "updatedBy": "143d530f-12ff-435f-84d0-6ab35f3783d2",
-                        "updatedOn": "2025-08-12T20:30:51.358553337"
-                    },
-                    "active": true
-                },
-                {
-                    "id": "b22a0fd8-a6cc-49ba-ae2d-0237e2bef0b4",
-                    "documentName": "WORK_ORDER_02.pdf",
-                    "documentType": "WORK_ORDER",
-                    "applicationNumber": "WB-REG-2025-694540",
-                    "fileStoreId": "a7fe6324-7f45-41e6-8bcd-0d6dabbb5f70",
-                    "documentSource": "WORK_ORDER",
-                    "description": "",
-                    "auditDetails": {
-                        "createdBy": null,
-                        "createdOn": null,
-                        "updatedBy": "143d530f-12ff-435f-84d0-6ab35f3783d2",
-                        "updatedOn": "2025-08-12T20:30:51.357325410"
-                    },
-                    "active": true
-                },
-                {
-                    "id": "ea5d6f56-c2ad-4bc3-a9ac-4d7985138536",
-                    "documentName": "DRAWINGS_01.pdf",
-                    "documentType": "DRAWINGS",
-                    "applicationNumber": "WB-REG-2025-694540",
-                    "fileStoreId": "51d0f17f-7229-47df-b0df-7f6860ed5601",
-                    "documentSource": "DRAWINGS",
-                    "description": "",
-                    "auditDetails": {
-                        "createdBy": null,
-                        "createdOn": null,
-                        "updatedBy": "143d530f-12ff-435f-84d0-6ab35f3783d2",
-                        "updatedOn": "2025-08-12T20:30:51.353411119"
-                    },
-                    "active": true
-                },
-                {
-                    "id": "b627a621-c728-44a7-8a69-aebd005a86d0",
-                    "documentName": "Stability Booklets.pdf",
-                    "documentType": "STABILITY_BOOKLETS",
-                    "applicationNumber": "WB-REG-2025-694540",
-                    "fileStoreId": "b2f0d6bf-a249-4767-8474-c1ae61de03e7",
-                    "documentSource": "STABILITY_BOOKLETS",
-                    "description": "Stability document",
-                    "auditDetails": {
-                        "createdBy": null,
-                        "createdOn": null,
-                        "updatedBy": "143d530f-12ff-435f-84d0-6ab35f3783d2",
-                        "updatedOn": "2025-08-12T20:30:51.356062782"
-                    },
-                    "active": true
-                }
-            ],
-            "reports": {
-                "materialTestReports": [
-                    {
-                        "id": "f82efa96-70a1-4c31-8e20-2e54a69dac52",
-                        "documentName": "Material Test Report",
-                        "documentType": "MATERIAL_TEST_REPORT",
-                        "applicationNumber": "WB-REG-2025-694540",
-                        "fileStoreId": "d2c70289-89ca-4105-b557-c86dd5caaebe",
-                        "documentSource": "MATERIAL_TEST_REPORT",
-                        "description": "test",
-                        "auditDetails": {
-                            "createdBy": null,
-                            "createdOn": null,
-                            "updatedBy": "f82efa96-70a1-4c31-8e20-2e54a69dac52",
-                            "updatedOn": "2025-08-12T20:27:08.636526058"
-                        },
-                        "active": true
-                    },
-                    {
-                        "id": "937c984e-3477-41ea-80f6-67df0caf32b2",
-                        "documentName": "Material Test Report",
-                        "documentType": "MATERIAL_TEST_REPORT",
-                        "applicationNumber": "WB-REG-2025-694540",
-                        "fileStoreId": "ea62397d-d884-4279-ac42-73c9d4b97be6",
-                        "documentSource": "MATERIAL_TEST_REPORT",
-                        "description": "",
-                        "auditDetails": {
-                            "createdBy": null,
-                            "createdOn": null,
-                            "updatedBy": "937c984e-3477-41ea-80f6-67df0caf32b2",
-                            "updatedOn": "2025-08-12T20:26:57.547782311"
-                        },
-                        "active": true
-                    }
-                ],
-                "radiographyReports": [
-                    {
-                        "id": "42ebfae1-d613-4957-a541-db076b1d821c",
-                        "documentName": "Radiography Report",
-                        "documentType": "RADIOGRAPHY_REPORT",
-                        "applicationNumber": "WB-REG-2025-694540",
-                        "fileStoreId": "da0534fe-0af3-4052-bdfe-6f38834ca6e4",
-                        "documentSource": "RADIOGRAPHY_REPORT",
-                        "description": "test",
-                        "auditDetails": {
-                            "createdBy": null,
-                            "createdOn": null,
-                            "updatedBy": "42ebfae1-d613-4957-a541-db076b1d821c",
-                            "updatedOn": "2025-08-12T20:27:20.334919310"
-                        },
-                        "active": true
-                    }
-                ],
-                "inspectionReports": [
-                    {
-                        "id": "ff5d70c7-aaae-4ed6-b8ac-f8d228c7bda6",
-                        "documentName": "Inspection Report",
-                        "documentType": "INSPECTION_REPORT",
-                        "applicationNumber": "WB-REG-2025-694540",
-                        "fileStoreId": "3d33161b-8be0-4336-a7c4-65726e27bad3",
-                        "documentSource": "INSPECTION_REPORT",
-                        "description": "test-inspection",
-                        "auditDetails": {
-                            "createdBy": null,
-                            "createdOn": null,
-                            "updatedBy": "ff5d70c7-aaae-4ed6-b8ac-f8d228c7bda6",
-                            "updatedOn": "2025-08-12T20:27:36.413642742"
-                        },
-                        "active": true
-                    }
-                ],
-                "otherReports": [
-                    {
-                        "id": "250d2da3-32ce-4441-a06b-9f94746f3630",
-                        "documentName": "Other Report",
-                        "documentType": "OTHER_REPORT",
-                        "applicationNumber": "WB-REG-2025-694540",
-                        "fileStoreId": "94217f23-e18c-4ef3-80d9-e3a4112ef401",
-                        "documentSource": "OTHER_REPORT",
-                        "description": "test-other",
-                        "auditDetails": {
-                            "createdBy": null,
-                            "createdOn": null,
-                            "updatedBy": "250d2da3-32ce-4441-a06b-9f94746f3630",
-                            "updatedOn": "2025-08-12T20:27:51.802834545"
-                        },
-                        "active": true
-                    }
-                ]
-            },
-            "engineDetails": {
-                "id": "813e021f-1cb3-4b2d-81b8-70222dfe3b8c",
-                "yearOfBuild": "2025",
-                "engineType": "test-engine",
-                "engineMake": "test-engine",
-                "makerAddress": "test-engine make",
-                "pin": "700155",
-                "mobile": "8765424242",
-                "email": "testengine@gmail.com",
-                "horsepower": 200.00,
-                "speed": 200.00,
-                "yearOfMake": "2025",
-                "applRegistrationTFk": "139f183c-547d-4c12-81c0-f5aa16871d2e",
-                "auditDetails": {
-                    "createdBy": "813e021f-1cb3-4b2d-81b8-70222dfe3b8c",
-                    "createdOn": "2025-08-12T20:30:51.359802784",
-                    "updatedBy": "813e021f-1cb3-4b2d-81b8-70222dfe3b8c",
-                    "updatedOn": "2025-08-12T20:30:51.359808985"
-                }
-            },
-            "enclosers": [
-                {
-                    "id": "f2c02923-76c1-4da4-a57f-eba184f74410",
-                    "documentName": "Builder Certificate.pdf",
-                    "documentType": "BUILDERS_CERTIFICATE",
-                    "applicationNumber": "WB-REG-2025-694540",
-                    "fileStoreId": "3cb06719-b3db-4433-8909-d0ea4e6cb82d",
-                    "documentSource": "BUILDERS_CERTIFICATE",
-                    "description": "Builder Certificate document",
-                    "auditDetails": {
-                        "createdBy": null,
-                        "createdOn": null,
-                        "updatedBy": "f2c02923-76c1-4da4-a57f-eba184f74410",
-                        "updatedOn": "2025-08-12T20:30:51.362822328"
-                    },
-                    "active": true
-                },
-                {
-                    "id": "775c3875-2ec7-4866-85b7-e304ab5472bd",
-                    "documentName": "Protection and Indemnity Insurance.pdf",
-                    "documentType": "PREOTECTION_AND_INDEMNITY_INSURANCE_NO",
-                    "applicationNumber": "WB-REG-2025-694540",
-                    "fileStoreId": "e7abb364-4044-4ee1-b00b-a91c38f264a9",
-                    "documentSource": "PREOTECTION_AND_INDEMNITY_INSURANCE_NO",
-                    "description": "Protection and Indemnity Insurance document",
-                    "auditDetails": {
-                        "createdBy": null,
-                        "createdOn": null,
-                        "updatedBy": "775c3875-2ec7-4866-85b7-e304ab5472bd",
-                        "updatedOn": "2025-08-12T20:30:51.366710818"
-                    },
-                    "active": true
-                },
-                {
-                    "id": "338179e0-5aaf-4558-a92e-c5facf200095",
-                    "documentName": "Instrument of Sale.pdf",
-                    "documentType": "INSTRUMENT_OF_SALE",
-                    "applicationNumber": "WB-REG-2025-694540",
-                    "fileStoreId": "368d8a5e-ba92-42a2-b45e-0c4a60f1d7d6",
-                    "documentSource": "INSTRUMENT_OF_SALE",
-                    "description": "Instrument of Sale document",
-                    "auditDetails": {
-                        "createdBy": null,
-                        "createdOn": null,
-                        "updatedBy": "338179e0-5aaf-4558-a92e-c5facf200095",
-                        "updatedOn": "2025-08-12T20:30:51.364036094"
-                    },
-                    "active": true
-                },
-                {
-                    "id": "25f04670-6e86-4453-9f44-17816d67b1ab",
-                    "documentName": "Mortgage Details.pdf",
-                    "documentType": "MORTGAGE_DETAILS",
-                    "applicationNumber": "WB-REG-2025-694540",
-                    "fileStoreId": "5edc114f-0ad1-4cfa-bbc2-4e6b0570a0ee",
-                    "documentSource": "MORTGAGE_DETAILS",
-                    "description": "Mortgage Details document",
-                    "auditDetails": {
-                        "createdBy": null,
-                        "createdOn": null,
-                        "updatedBy": "25f04670-6e86-4453-9f44-17816d67b1ab",
-                        "updatedOn": "2025-08-12T20:30:51.365401247"
-                    },
-                    "active": true
-                },
-                {
-                    "id": "374c3736-1c70-4707-b963-a4e9baddfa54",
-                    "documentName": "Challan.pdf",
-                    "documentType": "CHALLAN",
-                    "applicationNumber": "WB-REG-2025-694540",
-                    "fileStoreId": "25864146-0758-4d00-b318-bc5a77d5c454",
-                    "documentSource": "CHALLAN",
-                    "description": "Challan document",
-                    "auditDetails": {
-                        "createdBy": null,
-                        "createdOn": null,
-                        "updatedBy": "374c3736-1c70-4707-b963-a4e9baddfa54",
-                        "updatedOn": "2025-08-12T20:30:51.369349711"
-                    },
-                    "active": true
-                },
-                {
-                    "id": "b091f611-8d40-492f-a42a-dc5379915178",
-                    "documentName": "Third Party Insurance.pdf",
-                    "documentType": "THIRD_PARTY_INSURANCE",
-                    "applicationNumber": "WB-REG-2025-694540",
-                    "fileStoreId": "b73d63a4-fd51-4b6f-9aa3-c7e776f1d0db",
-                    "documentSource": "THIRD_PARTY_INSURANCE",
-                    "description": "Third Party Insurance document",
-                    "auditDetails": {
-                        "createdBy": null,
-                        "createdOn": null,
-                        "updatedBy": "b091f611-8d40-492f-a42a-dc5379915178",
-                        "updatedOn": "2025-08-12T20:30:51.361370399"
-                    },
-                    "active": true
-                },
-                {
-                    "id": "932a44c9-85c1-4e85-9eda-d2e0ed19b201",
-                    "documentName": "Declaration of Ownership.pdf",
-                    "documentType": "DECLARATION_OF_OWNERSHIP",
-                    "applicationNumber": "WB-REG-2025-694540",
-                    "fileStoreId": "e547278f-b15f-4c1b-b0b8-18eaddf3a4d3",
-                    "documentSource": "DECLARATION_OF_OWNERSHIP",
-                    "description": "Declaration of Ownership document",
-                    "auditDetails": {
-                        "createdBy": null,
-                        "createdOn": null,
-                        "updatedBy": "932a44c9-85c1-4e85-9eda-d2e0ed19b201",
-                        "updatedOn": "2025-08-12T20:30:51.368031860"
-                    },
-                    "active": true
-                }
-            ],
-            "processActionMapResponce": [
-                {
-                    "processs": [
-                        {
-                            "processId": 15,
-                            "processName": "APPLICATIONCHARGE",
-                            "actions": [
-                                {
-                                    "statusId": 45,
-                                    "statusName": "Ship surveyor returns application to Junior Engineer",
-                                    "statusDescription": "Ship Surveyor returns application",
-                                    "roleId": 4,
-                                    "roleName": "ENGINEER-CUM-SHIP SURVEYOR",
-                                    "actionId": 59,
-                                    "actionName": "Ship SUrveyor returns application to Junior Engineer",
-                                    "actionDescription": "Return"
-                                },
-                                {
-                                    "statusId": 46,
-                                    "statusName": "Ship surveyor approves application",
-                                    "statusDescription": "Ship surveyor approves application",
-                                    "roleId": 4,
-                                    "roleName": "ENGINEER-CUM-SHIP SURVEYOR",
-                                    "actionId": 60,
-                                    "actionName": "Ship SUrveyor Approves Application",
-                                    "actionDescription": "Approve"
-                                },
-                                {
-                                    "statusId": 47,
-                                    "statusName": "Ship surveyor generates CMN",
-                                    "statusDescription": "Ship surveyor Generates CMN",
-                                    "roleId": 4,
-                                    "roleName": "ENGINEER-CUM-SHIP SURVEYOR",
-                                    "actionId": 61,
-                                    "actionName": "Ship Surveyor Generates CMN",
-                                    "actionDescription": "Generate CMN"
-                                },
-                                {
-                                    "statusId": 48,
-                                    "statusName": "Surveyor forwards application to director",
-                                    "statusDescription": "Ship Surveyor forwards application to director",
-                                    "roleId": 4,
-                                    "roleName": "ENGINEER-CUM-SHIP SURVEYOR",
-                                    "actionId": 62,
-                                    "actionName": "Ship Surveyor Forwards application to Director",
-                                    "actionDescription": "Forward"
-                                }
-                            ]
-                        }
-                    ]
-                }
-            ]
-        }
-    ],
-    "errors": null,
-    "timestamp": 1755020710.379560205,
-    "pagination": null
-}
-
- import React, { useEffect } from "react";
-import { Dropdown, ButtonGroup, Button } from "react-bootstrap";
-import "../common/styles/ActionDropdown.css";
-
-import {
-  FaCheck,
-  FaTimes,
-  FaEdit,
-  FaTrash,
-  FaEye,
-  FaDownload,
-  FaInfoCircle,
-  FaArrowCircleLeft,
-  FaArrowCircleRight,
-} from "react-icons/fa";
-
-const getIconForAction = (action) => {
-  if (!action) return <FaInfoCircle className="drop-icon" />;
-  const act = action?.toLowerCase();
-  switch (true) {
-    case act?.includes("approve"):
-      return <FaCheck className="drop-icon" />;
-    case act?.includes("reject") || act?.includes("decline"):
-      return <FaTimes className="drop-icon" />;
-    case act?.includes("edit") || act?.includes("update"):
-      return <FaEdit className="drop-icon" />;
-    case act?.includes("delete") || act?.includes("remove"):
-      return <FaTrash className="drop-icon" />;
-    case act?.includes("view") || act?.includes("details"):
-      return <FaEye className="drop-icon" />;
-    case act?.includes("download"):
-      return <FaDownload className="drop-icon" />;
-    case act?.includes("info") || act?.includes("more"):
-      return <FaInfoCircle className="drop-icon" />;
-    case act?.includes("sendback") || act?.includes("back"):
-      return <FaArrowCircleLeft className="drop-icon" />;
-    case act?.includes("forward") || act?.includes("next"):
-      return <FaArrowCircleRight className="drop-icon" />;
-    default:
-      return <FaInfoCircle className="drop-icon" />;
-  }
-};
-const ActionDropdown = ({ actions, onActionClick }) => {
-  return (
-    <Dropdown as={ButtonGroup}>
-      <Button variant="dd-primary">Take Action</Button>
-      <Dropdown.Toggle
-        split
-        variant="dd-primary"
-        id="dropdown-split-basic"
-      />
-
-      <Dropdown.Menu className="dd-primary-menu show-fade">
-        {actions?.map((action, idx) => (
-          <Dropdown.Item
-            key={idx}
-            className="dd-primary-item"
-            onClick={() => onActionClick(action)}
-          >
-            
-            {getIconForAction(action?.actionName)} {action?.actionName}
-          </Dropdown.Item>
-        ))}
-      </Dropdown.Menu>
-    </Dropdown>
-  );
-};
-
-export default ActionDropdown;
-fetchRegistrationDetails
-depend on response 
- "statusName": "Ship surveyor generates CMN
- in action model
- this action click please open 
-CurvingMarkingNote & CurvingMarkingNoteL5
-when have L3 AND L4 THAN OPEN  CurvingMarkingNote
-COMPONENT AND WHEN OFFICER_L5THAN OPEN  CurvingMarkingNoteL5
-PLEASE WRITE FULL CODE
