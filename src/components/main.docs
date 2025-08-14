@@ -1,9 +1,1559 @@
+import React, { useState, useEffect, useRef } from "react";
+import { Box, Typography, Stack } from "@mui/material";
+import { useParams, useLocation, useNavigate } from "react-router-dom";
+import Stepper from "../../../../common/Stepper.jsx";
+import { useForm } from "react-hook-form";
+import ActionDropdown from "../../../../common/ActionDropdown";
+import ApprovalModal from "../../../../common/ApprovalModal";
+import { useTranslation } from "react-i18next";
+import { toast } from "react-toastify";
+import { postData } from "../../../../../services/http.service.ts";
+import {
+  SERVICE_BASE,
+  URLS_ENDPOINT,
+  BASE_IP,
+} from "../../../../../utils/urlsConstants.ts";
+import VesselBasicDetailsView from "./VesselBasicDetailsView.js";
+import ReportsDashboard from "./reports/reportsDashboard.js";
+import { Button } from "react-bootstrap";
+import { BsArrowLeft } from "react-icons/bs";
+import RegistrationApplicationForm from "./RegistrationApplicationForm.jsx";
+import NewLoader from "../../../../common/NewLoader.js";
+import InvoiceModal from "../../../../common/InvoiceModal.js";
+import { getFromLocalStorage } from "../../../../../utils/localStorageUtils.js";
+import { OFFICER_ROLES, USER_ROLES } from "../../../../../utils/constants.ts";
+import { handleErrorMessage } from "../../../../../utils/errorMessageHandler.js";
+import CurvingMarkingNote from "../../new-vessel/common/CurvingMarkingNote.js";
+import CurvingMarkingNoteL5 from "../../new-vessel/common/CurvingMarkingNoteL5.js";
+
+const VesselReportsAndDocs = () => {
+  const { t } = useTranslation();
+  const { id } = useParams();
+  const location = useLocation();
+  const navigate = useNavigate();
+  let isEditMode = !!id && location.pathname.includes("/edit/");
+  let isViewMode = !!id && location.pathname.includes("/view/");
+  const { rowData, pageName } = location?.state || {};
+  const [actionsFromAPI, setActionsFromAPI] = useState([]);
+
+  const stepperRef = useRef();
+  const registrationFormRef = useRef();
+
+  const methods = useForm({ mode: "onTouched" });
+  const { trigger, getValues, setValue } = methods;
+  // const [isLoading, setIsLoading] = useState(false);
+  const [showApprovalModal, setShowApprovalModal] = useState(false);
+  const [selectedAction, setSelectedAction] = useState("");
+  const [registrationData, setRegistrationData] = useState(null);
+  const [steps, setSteps] = useState([]);
+  const [disableSubmit, setDisableSubmit] = useState(false);
+  const [initialStep, setInitialStep] = useState(0);
+  const loaderRef = useRef();
+  const [showInvoiceModal, setShowInvoiceModal] = useState(false);
+  const [paymentData, setPaymentData] = useState(null);
+  const [fullPaymentData, setFullPaymentData] = useState({});
+  const [showCmnStepper, setShowCmnStepper] = useState(false);
+
+  const userRole = getFromLocalStorage("userRole") || "";
+  const userDetails = getFromLocalStorage("userDetails") || {};
+  const isOfficerLogin = OFFICER_ROLES.includes(userRole) || false;
+  if (isOfficerLogin) {
+    isViewMode = true;
+  }
+
+  const fetchPaymentDetails = async () => {
+    try {
+      const payload = {
+        category: "REGISTRATION",
+        paymentProcess: "APPLICATIONCHARGE",
+        application_no: id ?? "",
+      };
+
+      loaderRef.current?.show();
+      const apiUrl = `${SERVICE_BASE.IWT_REGISTRATION}${URLS_ENDPOINT.VESSEL_SERVICE.PAYMENT_GENERATE}`;
+      const { status, data } = await postData(apiUrl, payload);
+      if (
+        status !== 200 ||
+        data?.responseStatus?.status !== "FeeSlab found successfully"
+      ) {
+        console.warn(
+          "Payment details not found or API response status mismatch."
+        );
+        return;
+      }
+
+      loaderRef.current?.hide();
+      const apiData = data?.data ?? {};
+
+      const invoiceBreakupInfo = (apiData?.feesDetailsl ?? []).map(
+        (fee, index) => ({
+          id: fee?.id ?? index.toString(),
+          label: fee?.category_description ?? fee?.category_name ?? "N/A",
+          amount: fee?.totalCalucation ?? fee?.old_data ?? 0,
+          categoryHeader: fee?.catHeaderName ?? "",
+        })
+      );
+
+      const summary = {
+        subTotal: apiData.totalAmount ?? 0,
+        cgst: apiData.cgst ?? 0,
+        sgst: apiData.sgst ?? 0,
+        igst: apiData.igst ?? 0,
+        totalPayable: apiData.totalAmountAtergst ?? 0,
+      };
+      console.log("Payment Data:", invoiceBreakupInfo, summary);
+      setPaymentData({ invoiceBreakupInfo, summary });
+      setFullPaymentData(data ?? {});
+    } catch (error) {
+      loaderRef.current?.hide();
+      console.error("Error fetching payment details:", error?.message || error);
+    }
+  };
+
+  const handleGetInvoice = async () => {
+    await fetchPaymentDetails();
+    setShowInvoiceModal(true);
+  };
+
+  const handleProceedToPay = () => {
+    setShowInvoiceModal(false);
+    if (paymentData && id) {
+      navigate(`/payment/${id}`, {
+        state: {
+          paymentData,
+          applicationNumber: id,
+          fullPaymentData,
+        },
+      });
+    }
+  };
+
+  const fetchRegistrationDetails = async () => {
+    loaderRef.current?.show();
+
+    try {
+      const payload = { applicationNumbers: [id ?? ""] };
+      const apiUrl = `${SERVICE_BASE.IWT_REGISTRATION}${URLS_ENDPOINT.USER_SERVICE.REGISTRATION_SEARCH_BY_ID}`;
+      const { status, data } = await postData(apiUrl, payload);
+
+      const resData = data?.data[0] ?? {};
+         // const statusMessage = res?.responseStatus?.status;
+
+      if (status !== 200) {
+        toast.error("Unable to fetch registration details.");
+        return;
+      }
+
+      setRegistrationData(resData);
+
+      const batchSetValues = (valuesObj) => {
+        Object.entries(valuesObj).forEach(([key, value]) => {
+          setValue(key, value ?? "");
+        });
+      };
+
+      const {
+        basicDetails = {},
+        vesselDetails = {},
+        engineDetails = {},
+        processActionMapResponce = [],
+      } = resData;
+
+      const owner = basicDetails?.ownerDetails ?? {};
+      batchSetValues({
+        ownerName: owner?.ownerCompanyName ?? "",
+        ownerAddress: `${owner?.addressLine1 ?? ""}, ${
+          owner?.addressLine2 ?? ""
+        }`,
+        mobile: owner?.phoneNumber ?? "",
+        email: owner?.emailId ?? "",
+        pan: owner?.panNo ?? "",
+        gst: owner?.gstNo ?? "",
+        aadhar: owner?.aadharNumber ?? "",
+        tradeLicence: owner?.tradeLicenseNumber ?? "",
+      });
+
+      batchSetValues({
+        grt: vesselDetails?.grossTonnage ?? "",
+        workOrderValue: vesselDetails?.workOrderValue ?? "",
+        vesselType: vesselDetails?.typeOfVessel ?? "",
+        category: vesselDetails?.categoryOfVessel ?? "",
+        zone: vesselDetails?.zone ?? "",
+        purchaseType: vesselDetails?.purchaseType ?? "",
+        supervisionAuthority: vesselDetails?.supervisionAuthority ?? "",
+        classificationSociety: vesselDetails?.nameOfClassificationSociety ?? "",
+        nameOfMaster: vesselDetails?.nameOfMaster ?? "",
+        certificateNo: vesselDetails?.certficateNumber ?? "",
+        nameOfRegistry: vesselDetails?.nameOfRegistry ?? "",
+        registrationNo: vesselDetails?.registrationNumber ?? "",
+        vesselName: vesselDetails?.vesselName ?? "",
+        kindOfVessel: vesselDetails?.kindOfVessel ?? "",
+        categoryOfVessel: vesselDetails?.categoryOfVessel ?? "",
+        mortgage: vesselDetails?.mortgage ?? "",
+        placeOfBuild: vesselDetails?.placeOfBuild ?? "",
+        detailsOfInsurance: vesselDetails?.insuranceDetails ?? "",
+        vesselyearOfBuild: vesselDetails?.yearOfBuild?.toString() ?? "",
+        protectionAndIndemnityClubNo: vesselDetails?.pniClubNo ?? "",
+        protectionAndIndemnityClubName: vesselDetails?.pniClubName ?? "",
+        insuranceValidUpto: vesselDetails?.insuranceValidDate ?? "",
+      });
+
+      const builder = basicDetails?.builderDetails ?? {};
+      batchSetValues({
+        constructedBy: basicDetails?.constructedBy ?? "2",
+        builderName: builder?.builderName,
+        builderAddress: `${builder?.addressLine1 ?? ""}, ${
+          builder.addressLine2 ?? ""
+        }`,
+        builderEmail: builder?.emailId ?? "",
+        builderMobile: builder?.phone ?? "",
+        builderGST: builder?.gstNo ?? "",
+        builderTradeLicence: builder?.tradeLicenseNumber ?? "",
+        builderAuth: basicDetails?.builderAuthorization ?? "",
+      });
+
+      batchSetValues({
+        yearOfBuild: engineDetails?.yearOfBuild ?? "",
+        typeOfEngine: engineDetails?.engineType ?? "",
+        engineMake: engineDetails?.engineMake ?? "",
+        engineMakerAddress: engineDetails?.makerAddress ?? "",
+        enginepin: engineDetails?.pin ?? "",
+        enginephoneNumber: engineDetails?.mobile ?? "",
+        engineemail: engineDetails?.email ?? "",
+        horsepower: engineDetails?.horsepower?.toString() ?? "",
+        speed: engineDetails?.speed?.toString() ?? "",
+        yearOfMake: engineDetails?.yearOfMake ?? "",
+      });
+
+      batchSetValues({
+        occupation: basicDetails?.occupation,
+        originalPlaceOfBusiness: basicDetails?.originalPlaceBusiness,
+      });
+
+      if (isOfficerLogin) {
+        setActionsFromAPI(
+          processActionMapResponce[0]?.processs[0]?.actions || []
+        );
+      }
+    } catch (err) {
+      console.error("Failed to fetch registration details:", err);
+      toast.error("Failed to fetch registration details.");
+    } finally {
+      loaderRef.current?.hide();
+    }
+  };
+
+  useEffect(() => {
+    if (id) {
+      fetchRegistrationDetails();
+    }
+  }, []);
+
+const handleSubmitAppointments = async (appointmentSlots) => {
+  try {
+    loaderRef.current?.show();
+    
+    const payload = {
+      ...createRegistrationPayload(methods.getValues(), {}),
+      appointmentSlots
+    };
+
+    const apiUrl = SERVICE_BASE.IWT_REGISTRATION + URLS_ENDPOINT.VESSEL_SERVICE.CREATE;
+    const response = await postData(apiUrl, payload);
+
+    if (response?.status === 200 && response?.data?.responseStatus) {
+      toast.success(
+        response?.data?.responseStatus?.message ||
+        "Appointment slots submitted successfully!"
+      );
+      setShowCmnStepper(false);
+      setTimeout(() => {
+        navigate("/dashboard");
+      }, 1500);
+    } else {
+      toast.error(
+        response?.data?.responseStatus?.message ||
+        "Failed to submit appointment slots"
+      );
+    }
+  } catch (error) {
+    console.error("Appointment submission error:", error);
+    toast.error("Failed to submit appointment slots. Please try again.");
+  } finally {
+    loaderRef.current?.hide();
+  }
+};
+
+  useEffect(() => {
+    if (!registrationData) return;
+
+    const createStep = (
+      label,
+      component,
+      validate = null,
+      noValidation = true
+    ) => ({
+      label,
+      component,
+      getFormData: () => methods?.getValues(),
+      validate,
+      goToNextStepNoValidtion: noValidation,
+    });
+
+    if (isOfficerLogin && isViewMode) {
+      const stepsList = [];
+      const hasBasicDetails =
+        registrationData?.basicDetails && registrationData?.vesselDetails;
+      if (hasBasicDetails) {
+        stepsList.push(
+          createStep(
+            "Basic Details",
+            <VesselBasicDetailsView
+              formMethods={methods}
+              isPreview
+              formData={getValues()}
+              registrationData={registrationData}
+              ref={loaderRef}
+              BASE_IP={BASE_IP}
+            />
+          )
+        );
+      }
+
+      const hasReports =
+        registrationData?.reports &&
+        ((registrationData.reports?.materialTestReports &&
+          registrationData.reports.materialTestReports?.length > 0) ||
+          (registrationData.reports?.radiographyReports &&
+            registrationData.reports?.radiographyReports?.length > 0) ||
+          (registrationData.reports?.inspectionReports &&
+            registrationData.reports?.inspectionReports?.length > 0) ||
+          (registrationData.reports?.otherReports &&
+            registrationData.reports.otherReports?.length > 0));
+      if (hasReports) {
+        stepsList.push(
+          createStep(
+            "Reports & Documents",
+            <ReportsDashboard
+              formMethods={methods}
+              viewMode={isViewMode}
+              isUploadOnly
+              applicationNumber={registrationData?.applicationNumber}
+              additionalData={registrationData}
+              pageName={pageName}
+              ref={loaderRef}
+            />
+          )
+        );
+      }
+
+      const hasEngineDetails =
+        registrationData?.engineDetails &&
+        registrationData.engineDetails !== null &&
+        Object.keys(registrationData.engineDetails).length > 0;
+      const hasEnclosers =
+        registrationData?.enclosers && registrationData.enclosers.length > 0;
+
+      if (hasEngineDetails || hasEnclosers) {
+        stepsList.push(
+          createStep(
+            "Application for Registration",
+            <RegistrationApplicationForm
+              ref={registrationFormRef}
+              registrationData={registrationData}
+              isViewMode={isViewMode}
+            />,
+            async () => {
+              if (registrationFormRef.current?.validateForm) {
+                return await registrationFormRef.current.validateForm();
+              }
+              return true;
+            },
+            false
+          )
+        );
+      }
+       // //  Curving & Marking Note step for L3 and L4 officers
+      // if (
+      //   userRole === USER_ROLES.OFFICER_L3 ||
+      //   userRole === USER_ROLES.OFFICER_L4
+      // ) {
+      //   stepsList.push(
+      //     createStep(
+      //       "Curving & Marking Note",
+      //       <CurvingMarkingNote registrationData={registrationData} />
+      //     )
+      //   );
+      // }
+
+      // //  Director Review step for L5 officers
+      // if (userRole === USER_ROLES.OFFICER_L5) {
+      //   stepsList.push(
+      //     createStep(
+      //       "Director Review",
+      //       <CurvingMarkingNoteL5 registrationData={registrationData} />
+      //     )
+      //   );
+      // }
+
+
+     
+      if (registrationData?.basicDetails?.isCmnGenerated || showCmnStepper) {
+        if (userRole === USER_ROLES.OFFICER_L5) {
+          stepsList.push(
+            createStep(
+              "Director Review",
+              <CurvingMarkingNoteL5
+                registrationData={registrationData}
+              />
+            )
+          );
+        } else if (
+        //  else if (isOfficerLogin) {
+          userRole === USER_ROLES.OFFICER_L3 ||
+          userRole === USER_ROLES.OFFICER_L4
+        ) {
+          stepsList.push(
+            createStep(
+              "Curving & Marking Note",
+              <CurvingMarkingNote
+                registrationData={registrationData}
+                onSubmitAppointments={handleSubmitAppointments}
+              />
+            )
+          );
+        }
+      }
+
+      setSteps(stepsList);
+    } else {
+      const stepsList = [
+        createStep(
+          "Basic Details",
+          <VesselBasicDetailsView
+            formMethods={methods}
+            isPreview
+            formData={getValues()}
+            registrationData={registrationData}
+            ref={loaderRef}
+            BASE_IP={BASE_IP}
+          />
+        ),
+      ];
+
+      const reportsDashboardStep = createStep(
+        "Reports & Documents",
+        <ReportsDashboard
+          formMethods={methods}
+          viewMode={isViewMode}
+          isUploadOnly
+          applicationNumber={rowData?.applicationNumber}
+          additionalData={rowData}
+          pageName={pageName}
+          ref={loaderRef}
+        />
+      );
+
+      if (pageName === "uploadReports" && !isViewMode) {
+        stepsList.push(reportsDashboardStep);
+      }
+
+      if (pageName === "vesselRegistration") {
+        if (!isViewMode) {
+          stepsList.push(reportsDashboardStep);
+        }
+        stepsList.push(
+          createStep(
+            "Application for Registration",
+            <RegistrationApplicationForm
+              ref={registrationFormRef}
+              registrationData={registrationData}
+            />,
+            async () => {
+              if (registrationFormRef.current?.validateForm) {
+                return await registrationFormRef.current.validateForm();
+              }
+              return true;
+            },
+            false
+          )
+        );
+      }
+
+      setSteps(stepsList);
+    }
+  }, [
+    pageName,
+    rowData,
+    methods,
+    registrationData,
+    isViewMode,
+    isOfficerLogin,
+    userRole,
+    showCmnStepper,
+  ]);
+
+  const handleActionClick = (action) => {
+   
+    if (action?.actionName === "Ship Surveyor Generates CMN") {
+      setShowCmnStepper(true);
+      toast.success("CMN Generated successfully. Please proceed with the next step.");
+      return;
+    }
+    
+   
+    setSelectedAction(action);
+    setShowApprovalModal(true);
+  };
+
+  const workflowApplicationSubmit = async (modalFormData) => {
+    try {
+      const URL =
+        SERVICE_BASE.IWT_WORKFLOW +
+        URLS_ENDPOINT.WORK_FLOW_SERVICE.WORKFLOW_ACTION;
+      
+        loaderRef?.current?.show();
+
+      const payload = {
+        applicationNo: registrationData?.applicationNumber,
+        processId:
+          registrationData?.processActionMapResponce[0]?.processs?.[0]
+            ?.processId,
+        actionId: selectedAction?.actionId,
+        assignerRole: userRole,
+        assignerName:
+          userDetails?.userName ||
+          getFromLocalStorage("userDetails")?.userName ||
+          "",
+        fileId: modalFormData?.document?.url || "",
+        remarks: modalFormData?.reason,
+      };
+
+      const response = await postData(URL, payload);
+      if (
+        response &&
+        response?.status === 200 &&
+        response?.data?.responseStatus?.status === "200"
+      ) {
+        toast.success(
+          response?.data?.responseStatus?.message ||
+            "Action submitted successfully"
+        );
+        handleCloseModal();
+        loaderRef?.current?.hide();
+        setTimeout(() => {
+          navigate("/dashboard");
+        }, 1000);
+      } else {
+        loaderRef?.current?.hide();
+        toast.info(
+          response?.data?.responseStatus?.message || "Something went wrong..",
+          { position: "top-right" }
+        );
+      }
+    } catch (err) {
+      console.log(err);
+      loaderRef?.current?.hide();
+      handleErrorMessage(err?.response?.data);
+    }
+  };
+
+  const handleCloseModal = () => {
+    setShowApprovalModal(false);
+    setSelectedAction("");
+  };
+
+  const handleFormSubmit = async (stepInfo) => {
+    console.log("Current Step Info from Stepper:", stepInfo);
+  };
+
+  const handleFinalSubmit = () => {
+    const allFormData = methods.getValues();
+    toast.success("Form submitted successfully!");
+  };
+
+  const createRegistrationPayload = (formData, registrationFormData,appointmentSlots=[]) => {
+    return {
+      id: registrationData?.id || "",
+      applicationNumber: id || "",
+      basicDetails: {
+        id: registrationData?.basicDetails?.id || "",
+        applicationNumber: id || "",
+        status: registrationData?.basicDetails?.status || "",
+        constructedBy:
+          registrationData?.basicDetails?.constructedBy ||
+          registrationFormData?.builderName ||
+          "",
+        ownerDetails: {
+          id: registrationData?.basicDetails?.ownerDetails?.id || "",
+          ownerName:
+            registrationFormData?.ownerName ||
+            registrationData?.basicDetails?.ownerDetails?.ownerCompanyName ||
+            "",
+          ownerType:
+            registrationFormData?.ownerType ||
+            registrationData?.basicDetails?.ownerDetails?.categoryOfOwner ||
+            "",
+          email:
+            registrationFormData?.builderEmail ||
+            registrationData?.basicDetails?.ownerDetails?.emailId ||
+            "",
+          address:
+            registrationFormData?.address ||
+            registrationData?.basicDetails?.ownerDetails?.addressLine1 ||
+            "",
+        },
+        builderDetails: {
+          id: registrationData?.basicDetails?.builderDetails?.id || "",
+          builderName:
+            registrationFormData?.builderName ||
+            registrationData?.basicDetails?.builderDetails?.builderName ||
+            "",
+          registrationNumber:
+            registrationData?.basicDetails?.builderDetails
+              ?.registrationNumber || "",
+          address:
+            registrationFormData?.builderAddress ||
+            registrationData?.basicDetails?.builderDetails?.addressLine1 ||
+            "",
+          contactPerson:
+            registrationData?.basicDetails?.builderDetails?.contactPerson || "",
+          contactNumber:
+            registrationFormData?.builderphoneNumber ||
+            registrationData?.basicDetails?.builderDetails?.phone ||
+            "",
+        },
+        builderAuthorization:
+          registrationData?.basicDetails?.builderAuthorization || "",
+        authorizationLetter: registrationData?.basicDetails?.authorizationLetter
+          ? {
+              id: registrationData.basicDetails.authorizationLetter.id || "",
+              fileStoreId:
+                registrationData.basicDetails.authorizationLetter.fileStoreId ||
+                "",
+              documentName:
+                registrationData.basicDetails.authorizationLetter
+                  .documentName || "Authorization_Letter.pdf",
+              documentType:
+                registrationData.basicDetails.authorizationLetter
+                  .documentType || "AUTHORIZATION_LETTER",
+              documentSource:
+                registrationData.basicDetails.authorizationLetter
+                  .documentSource || "AUTHORIZATION_LETTER",
+              descriptions:
+                registrationData.basicDetails.authorizationLetter.description ||
+                "builder authorised letter",
+            }
+          : {
+              id: "",
+              fileStoreId: "",
+              documentName: "Authorization_Letter.pdf",
+              documentType: "AUTHORIZATION_LETTER",
+              documentSource: "AUTHORIZATION_LETTER",
+              descriptions: "builder authorised letter",
+            },
+        occupation:
+          registrationFormData?.occupation ||
+          registrationData?.basicDetails?.occupation ||
+          "",
+        originalPlaceBusiness:
+          registrationFormData?.originalPlaceOfBusiness ||
+          registrationData?.basicDetails?.originalPlaceBusiness ||
+          "",
+        isDrawingFee: registrationData?.basicDetails?.isDrawingFee || false,
+        isSupervisionFee:
+          registrationData?.basicDetails?.isSupervisionFee || false,
+        isApplicationRegistrationFee:
+          registrationData?.basicDetails?.isApplicationRegistrationFee || false,
+        isProvisionaCertificate:
+          registrationData?.basicDetails?.isProvisionaCertificate || false,
+        isEditable:
+          registrationData?.basicDetails?.isEditable !== undefined
+            ? registrationData.basicDetails.isEditable
+            : true,
+      },
+      vesselDetails: {
+        id: registrationData?.vesselDetails?.id || "",
+        typeOfVessel:
+          registrationFormData?.typeOfVessel ||
+          registrationData?.vesselDetails?.typeOfVessel ||
+          "",
+        categoryOfVessel:
+          registrationFormData?.categoryOfVessel ||
+          registrationData?.vesselDetails?.categoryOfVessel ||
+          "",
+        zone:
+          registrationFormData?.zone ||
+          registrationData?.vesselDetails?.zone ||
+          "",
+        grossTonnage:
+          parseInt(formData?.grt) ||
+          registrationData?.vesselDetails?.grossTonnage ||
+          0,
+        workOrderValue:
+          formData?.workOrderValue ||
+          registrationData?.vesselDetails?.workOrderValue ||
+          "",
+        purchaseType:
+          formData?.purchaseType ||
+          registrationData?.vesselDetails?.purchaseType ||
+          "",
+        supervisionAuthority:
+          formData?.supervisionAuthority ||
+          registrationData?.vesselDetails?.supervisionAuthority ||
+          "",
+        nameOfMaster:
+          registrationFormData?.nameOfMaster ||
+          registrationData?.vesselDetails?.nameOfMaster ||
+          "",
+        certficateNumber:
+          registrationFormData?.certificateNo ||
+          registrationData?.vesselDetails?.certficateNumber ||
+          "",
+        nameOfRegistry:
+          registrationFormData?.nameOfRegistry ||
+          registrationData?.vesselDetails?.nameOfRegistry ||
+          "",
+        registrationNumber:
+          registrationFormData?.registrationNo ||
+          registrationData?.vesselDetails?.registrationNumber ||
+          "",
+        vesselName:
+          registrationFormData?.vesselName ||
+          registrationData?.vesselDetails?.vesselName ||
+          "",
+        kindOfVessel:
+          registrationFormData?.kindOfVessel ||
+          registrationData?.vesselDetails?.kindOfVessel ||
+          "",
+        mortgage:
+          registrationFormData?.mortgage ||
+          registrationData?.vesselDetails?.mortgage ||
+          "",
+        placeOfBuild:
+          registrationFormData?.placeOfBuild ||
+          registrationData?.vesselDetails?.placeOfBuild ||
+          "",
+        insuranceDetails:
+          registrationFormData?.detailsOfInsurance ||
+          registrationData?.vesselDetails?.insuranceDetails ||
+          "",
+        yearOfBuild:
+          parseInt(registrationFormData?.vesselyearOfBuild) ||
+          registrationData?.vesselDetails?.yearOfBuild ||
+          null,
+        pniClubNo:
+          registrationFormData?.protectionAndIndemnityClubNo ||
+          registrationData?.vesselDetails?.pniClubNo ||
+          "",
+        pniClubName:
+          registrationFormData?.protectionAndIndemnityClubName ||
+          registrationData?.vesselDetails?.pniClubName ||
+          "",
+        applicationNo:
+          id || registrationData?.vesselDetails?.applicationNo || "",
+        nameOfClassificationSociety:
+          formData?.classificationSociety ||
+          registrationData?.vesselDetails?.nameOfClassificationSociety ||
+          "",
+        iwtVesselBasicDetailsTFk:
+          registrationData?.basicDetails?.id ||
+          registrationData?.vesselDetails?.iwtVesselBasicDetailsTFk ||
+          "",
+        insuranceValidDate:
+          registrationFormData?.insuranceValidUpto ||
+          registrationData?.vesselDetails?.insuranceValidDate ||
+          "",
+      },
+      documents: extractDocuments(formData, registrationData),
+      engineDetails: registrationData?.engineDetails
+        ? {
+            id: registrationData.engineDetails.id || "",
+            yearOfBuild:
+              registrationFormData?.yearOfBuild ||
+              registrationData.engineDetails.yearOfBuild ||
+              "",
+            engineType:
+              registrationFormData?.typeOfEngine ||
+              registrationData.engineDetails.engineType ||
+              "",
+            engineMake:
+              registrationFormData?.engineMake ||
+              registrationData.engineDetails.engineMake ||
+              "",
+            makerAddress:
+              registrationFormData?.engineMakerAddress ||
+              registrationData.engineDetails.makerAddress ||
+              "",
+            pin:
+              registrationFormData?.enginepin ||
+              registrationData.engineDetails.pin ||
+              "",
+            mobile:
+              registrationFormData?.enginephoneNumber ||
+              registrationData.engineDetails.mobile ||
+              "",
+            email:
+              registrationFormData?.engineemail ||
+              registrationData.engineDetails.email ||
+              "",
+            horsepower:
+              parseFloat(registrationFormData?.horsepower) ||
+              registrationData.engineDetails.horsepower ||
+              0,
+            speed:
+              parseFloat(registrationFormData?.speed) ||
+              registrationData.engineDetails.speed ||
+              0,
+            yearOfMake:
+              registrationFormData?.yearOfMake ||
+              registrationData.engineDetails.yearOfMake ||
+              "",
+            iwtApplRegistrationTFk:
+              registrationData?.basicDetails?.id ||
+              registrationData.engineDetails.iwtApplRegistrationTFk ||
+              "",
+          }
+        : {
+            id: "",
+            yearOfBuild: registrationFormData?.yearOfBuild || "",
+            engineType: registrationFormData?.typeOfEngine || "",
+            engineMake: registrationFormData?.engineMake || "",
+            makerAddress: registrationFormData?.engineMakerAddress || "",
+            pin: registrationFormData?.enginepin || "",
+            mobile: registrationFormData?.enginephoneNumber || "",
+            email: registrationFormData?.engineemail || "",
+            horsepower: parseFloat(registrationFormData?.horsepower) || 0,
+            speed: parseFloat(registrationFormData?.speed) || 0,
+            yearOfMake: registrationFormData?.yearOfMake || "",
+            iwtApplRegistrationTFk: registrationData?.basicDetails?.id || "",
+          },
+      enclosers: extractEnclosers(registrationFormData, registrationData),
+      appointmentSlots: appointmentSlots.map(slot => ({
+      date: slot.date,
+      timeSlot: slot.timeSlot,
+      // appointmentStatus: slot.appointmentStatus || "PENDING",
+       appointmentStatus: slot.appointmentStatus || "",
+      isBooked: slot.isBooked || false,
+      bookedBy: slot.bookedBy || null
+    }))
+    };
+  };
+
+  const extractDocuments = (formData, registrationData) => {
+    const documents = [];
+
+    if (
+      registrationData?.documents &&
+      Array.isArray(registrationData.documents)
+    ) {
+      registrationData.documents.forEach((doc) => {
+        documents.push({
+          id: doc.id || "",
+          fileStoreId: doc.fileStoreId || "",
+          documentName: doc.documentName || "",
+          documentType: doc.documentType || "",
+          documentSource: doc.documentSource || "",
+          description: doc.description || "",
+        });
+      });
+    }
+
+    const documentTypes = [
+      {
+        key: "WORK_ORDER",
+        name: "Work Order.pdf",
+        description: "Work Order document",
+      },
+      { key: "DRAWINGS", name: "Drawing.pdf", description: "Drawing document" },
+      {
+        key: "TONNAGE_BOOKLETS",
+        name: "Tonnage Booklet.pdf",
+        description: "Tonnage document",
+      },
+      {
+        key: "STABILITY_BOOKLETS",
+        name: "Stability Booklet.pdf",
+        description: "Stability document",
+      },
+    ];
+
+    documentTypes.forEach(({ key, name, description }) => {
+      const fileStoreId = formData?.[`${key}_fileStoreId`];
+      if (fileStoreId) {
+        documents.push({
+          id: "",
+          fileStoreId,
+          documentName: name,
+          documentType: key,
+          documentSource: key,
+          description,
+        });
+      }
+    });
+
+    return documents;
+  };
+
+  const extractEnclosers = (formData, registrationData) => {
+    const enclosers = [];
+
+    if (
+      registrationData?.enclosers &&
+      Array.isArray(registrationData.enclosers)
+    ) {
+      registrationData.enclosers.forEach((encloser) => {
+        enclosers.push({
+          id: encloser.id || "",
+          fileStoreId: encloser.fileStoreId || "",
+          documentName: encloser.documentName || "",
+          documentType: encloser.documentType || "",
+          documentSource: encloser.documentSource || "",
+          description: encloser.description || "",
+        });
+      });
+    }
+
+    const encloserTypes = [
+      {
+        key: "thirdPartyInsurance",
+        type: "THIRD_PARTY_INSURANCE",
+        name: "Third Party Insurance",
+      },
+      {
+        key: "builderCertificate",
+        type: "BUILDERS_CERTIFICATE",
+        name: "Builder Certificate",
+      },
+      {
+        key: "instrumentOfSale",
+        type: "INSTRUMENT_OF_SALE",
+        name: "Instrument of Sale",
+      },
+      {
+        key: "mortgageDetails",
+        type: "MORTGAGE_DETAILS",
+        name: "Mortgage Details",
+      },
+      {
+        key: "pniInsurance",
+        type: "PREOTECTION_AND_INDEMNITY_INSURANCE_NO",
+        name: "Protection and Indemnity Insurance",
+      },
+      {
+        key: "declarationOfOwnership",
+        type: "DECLARATION_OF_OWNERSHIP",
+        name: "Declaration of Ownership",
+      },
+      { key: "challan", type: "CHALLAN", name: "Challan" },
+    ];
+
+    encloserTypes.forEach(({ key, type, name }) => {
+      const fileStoreId = formData?.[`${key}FileStoreId`];
+      if (fileStoreId) {
+        enclosers.push({
+          id: "",
+          fileStoreId,
+          documentName: `${name}.pdf`,
+          documentType: type,
+          documentSource: type,
+          description: `${name} document`,
+        });
+      }
+    });
+
+    return enclosers;
+  };
+
+  const handleSubmit = async () => {
+    try {
+      loaderRef.current?.show();
+
+      const formData = methods.getValues();
+      let registrationFormData = {};
+      if (registrationFormRef.current?.getFormData) {
+        registrationFormData = registrationFormRef.current.getFormData();
+      }
+
+      const payload = createRegistrationPayload(formData, registrationFormData);
+
+      const apiUrl =
+        SERVICE_BASE.IWT_REGISTRATION + URLS_ENDPOINT.VESSEL_SERVICE.CREATE;
+      const response = await postData(apiUrl, payload);
+
+      if (response?.status === 200 && response?.data?.responseStatus) {
+          // if (response?.status === 200 && response?.data?.responseStatus?.status === "Data Created Successfully") {
+        toast.success(
+          response?.data?.responseStatus?.message ||
+            "Registration submitted successfully!"
+        );
+        setDisableSubmit(true);
+        setInitialStep(steps.length - 1);
+        // setTimeout(() => {
+        // navigate("/dashboard");
+        // }, 1500);
+      } else {
+        toast.error(
+          response?.data?.responseStatus?.message ||
+            "Submission failed. Please try again."
+        );
+      }
+    } catch (error) {
+      console.error("Submission error:", error);
+      toast.error("Failed to submit form. Please try again.");
+    } finally {
+         // setIsLoading(false);
+      loaderRef.current?.hide();
+    }
+  };
+
+  const actionDropdown =
+    isViewMode && isOfficerLogin && actionsFromAPI.length > 0 ? (
+      <ActionDropdown
+        actions={actionsFromAPI}
+        onActionClick={handleActionClick}
+        variant="contained"
+        sx={{
+          backgroundColor: "#2E57A7",
+          fontWeight: "bold",
+          borderRadius: "0.5rem",
+          minWidth: "8rem",
+          fontSize: "0.9rem",
+          color: "#fff",
+          "&:hover": {
+            backgroundColor: "#1f4ea0",
+          },
+        }}
+      />
+    ) : null;
+
+  return (
+    <Box
+      sx={{
+        padding: "1rem 0.5rem 0 0.5rem",
+        backgroundColor: "#f5f6fa",
+        minHeight: "100vh",
+      }}
+    >
+      <NewLoader ref={loaderRef} />
+      <>
+        <div className="d-flex flex-column flex-md-row justify-content-between align-items-start align-items-md-center mb-4 gap-3">
+          <div
+            className="d-flex align-items-center flex-grow-1"
+            style={{ gap: "16px" }}
+          >
+            <Button
+              variant="outline-primary"
+              onClick={() => navigate("/dashboard")}
+              className="d-flex align-items-center justify-content-center shadow-sm"
+              style={{
+                borderRadius: "50%",
+                width: "40px",
+                height: "40px",
+                border: "2px solid #2E57A7",
+                color: "#2E57A7",
+                backgroundColor: "#fff",
+                transition: "all 0.3s ease",
+                padding: "0",
+              }}
+              onMouseEnter={(e) => {
+                e.target.style.backgroundColor = "#2E57A7";
+                e.target.style.color = "#fff";
+                e.target.style.transform = "translateY(-2px)";
+                e.target.style.boxShadow = "0 4px 12px rgba(46, 87, 167, 0.3)";
+              }}
+              onMouseLeave={(e) => {
+                e.target.style.backgroundColor = "#fff";
+                e.target.style.color = "#2E57A7";
+                e.target.style.transform = "translateY(0)";
+                e.target.style.boxShadow = "0 2px 4px rgba(0,0,0,0.1)";
+              }}
+            >
+              <BsArrowLeft size={16} />
+            </Button>
+            <Stack spacing={0.5} className="flex-grow-1">
+              <Typography
+                sx={{
+                  fontWeight: 550,
+                  color: "#2E57A7",
+                  fontSize: { xs: "1rem", sm: "1.1rem", md: "1.2rem" },
+                  lineHeight: 1.2,
+                }}
+              >
+                Vessel Application Details - ({id})
+              </Typography>
+              <Typography
+                sx={{
+                  color: "#026931ff",
+                  fontSize: { xs: "0.95rem", sm: "0.85rem" },
+                  fontWeight: "bold",
+                  lineHeight: 1.3,
+                }}
+              >
+                {pageName === "uploadReports"
+                  ? "Upload neccessary Reports & Documents"
+                  : pageName === "vesselRegistration"
+                  ? "Please fill up the Vessel Registration form.."
+                  : ""}
+              </Typography>
+            </Stack>
+          </div>
+        </div>
+        {steps?.length > 0 && (
+          <Stepper
+            ref={stepperRef}
+            steps={steps}
+            viewMode={true}
+            actionComponent={actionDropdown}
+            onSyncData={handleFormSubmit}
+            onSave={handleFinalSubmit}
+            onSubmit={handleSubmit}
+            disableSubmit={disableSubmit}
+            initialStep={initialStep}
+            omitSubmitButton={pageName === "uploadReports" || (isOfficerLogin && actionsFromAPI?.length === 0 && steps?.length === 1) }
+            onGetInvoice={handleGetInvoice}
+          />
+        )}
+        {isOfficerLogin && isViewMode && (
+          <ApprovalModal
+            show={showApprovalModal}
+            handleClose={handleCloseModal}
+            handleSubmitData={workflowApplicationSubmit}
+            selectedAction={selectedAction}
+          />
+        )}
+        <InvoiceModal
+          show={showInvoiceModal}
+          onHide={() => setShowInvoiceModal(false)}
+          paymentData={paymentData}
+          onProceedToPay={handleProceedToPay}
+          applicationNumber={id}
+        />
+      </>
+    </Box>
+  );
+};
+
+export default VesselReportsAndDocs;
+
+import React, { useState } from 'react';
+import { Modal, Button, Form, Row, Col } from 'react-bootstrap';
+import { toast } from 'react-toastify';
+import DatePicker from 'react-datepicker';
+import "react-datepicker/dist/react-datepicker.css";
+
+const OfficerAppointmentModal = ({ show, handleClose, handleConfirm }) => {
+  const [appointments, setAppointments] = useState([
+    { id: 1, date: null, time: null },
+    { id: 2, date: null, time: null },
+    { id: 3, date: null, time: null },
+    { id: 4, date: null, time: null }
+  ]);
+
+  const timeSlots = [
+    { value: '09:00 AM - 10:00 AM', label: '9:00 AM - 10:00 AM' },
+    { value: '10:00 AM - 11:00 AM', label: '10:00 AM - 11:00 AM' },
+    { value: '11:00 AM - 12:00 AM', label: '11:00 AM - 12:00 PM' },
+    { value: '12:00 PM - 13:00 PM', label: '12:00 PM - 1:00 PM' },
+    { value: '1:00 PM - 2:00 PM', label: '1:00 PM - 2:00 PM' },
+    { value: '2:00 PM - 3:00 PM', label: '2:00 PM - 3:00 PM' },
+    { value: '3:00 PM - 4:00 PM', label: '3:00 PM - 4:00 PM' },
+    { value: '4:00 PM - 5:00 PM', label: '4:00 PM - 5:00 PM' },
+    { value: '5:00 PM - 6:00 PM', label: '5:00 PM - 6:00 PM' }
+  ];
+
+  const handleDateChange = (index, date) => {
+    const updatedAppointments = [...appointments];
+    updatedAppointments[index].date = date;
+    setAppointments(updatedAppointments);
+  };
+
+  const handleTimeChange = (index, time) => {
+    const updatedAppointments = [...appointments];
+    updatedAppointments[index].time = time;
+    setAppointments(updatedAppointments);
+  };
+
+ const handleConfirmAppointments = async () => {
+    const validAppointments = appointments.filter(apt => apt.date && apt.time);
+    
+    if (validAppointments.length < 2) {
+      toast.error("Please select at least 2 appointment slots");
+      return;
+    }
+
+    const formattedAppointments = validAppointments.map(apt => ({
+      date: apt.date,
+      time: apt.time,
+      dateTime: `${apt.date.toLocaleDateString()} at ${timeSlots.find(t => t.value === apt.time)?.label}`,
+      // appointmentStatus: "PENDING",
+      appointmentStatus: "",
+      isBooked: false,
+      bookedBy: null
+    }));
+
+    try {
+      await handleConfirm(formattedAppointments);
+      toast.success(`${validAppointments.length} appointment slots proposed successfully!`, {
+        position: "top-right",
+        autoClose: 3000,
+      });
+      handleClose();
+      resetForm();
+    } catch (error) {
+      toast.error("Failed to submit appointments. Please try again.");
+      console.error("Appointment submission error:", error);
+    }
+  };
+
+  const resetForm = () => {
+    setAppointments([
+      { id: 1, date: null, time: null },
+      { id: 2, date: null, time: null },
+      { id: 3, date: null, time: null },
+      { id: 4, date: null, time: null }
+    ]);
+  };
+
+  const handleModalClose = () => {
+    resetForm();
+    handleClose();
+  };
+
+  const validAppointmentsCount = appointments.filter(apt => apt.date && apt.time).length;
+
+  return (
+    <Modal 
+      show={show} 
+      onHide={handleModalClose} 
+      centered 
+      size="lg"
+      style={{ zIndex: 1050 }}
+    >
+      <Modal.Header 
+        closeButton 
+        style={{ 
+          backgroundColor: '#2E57A7', 
+          color: 'white',
+          border: 'none'
+        }}
+      >
+        <Modal.Title className="fw-bold d-flex align-items-center">
+          <i className="bi bi-calendar-plus me-2"></i>
+          Confirm Appointment
+        </Modal.Title>
+      </Modal.Header>
+      
+      <Modal.Body style={{ padding: '2rem' }}>
+        <div className="mb-4">
+          <h6 style={{ color: '#2E57A7', fontWeight: 600, marginBottom: '1rem' }}>
+            Proposed Appointments ({validAppointmentsCount}/4)
+          </h6>
+          <p style={{ color: '#64748b', fontSize: '0.9rem', marginBottom: '1.5rem' }}>
+            Select at least 2 appointment slots with 1-hour time ranges for the vessel inspection
+          </p>
+          {validAppointmentsCount < 2 && (
+            <div className="alert alert-warning" style={{ fontSize: '0.85rem', padding: '8px 12px' }}>
+              <strong>Note:</strong> Minimum 2 appointment slots required to proceed
+            </div>
+          )}
+        </div>
+
+        {appointments.map((appointment, index) => (
+          <Row key={appointment.id} className="mb-3 align-items-center">
+            <Col md={1}>
+              <div 
+                style={{
+                  width: '30px',
+                  height: '30px',
+                  borderRadius: '50%',
+                  backgroundColor: appointment.date && appointment.time ? '#10b981' : '#2E57A7',
+                  color: 'white',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontWeight: 'bold',
+                  fontSize: '0.9rem'
+                }}
+              >
+                {appointment.date && appointment.time ? '✓' : index + 1}
+              </div>
+            </Col>
+            
+            <Col md={5}>
+              <Form.Group>
+                <Form.Label style={{ fontWeight: 500, color: '#374151' }}>Date</Form.Label>
+                <DatePicker
+                  selected={appointment.date}
+                  onChange={(date) => handleDateChange(index, date)}
+                  dateFormat="dd/MM/yyyy"
+                  placeholderText="Select date"
+                  className="form-control"
+                  style={{ borderRadius: '8px' }}
+                  showYearDropdown
+                  showMonthDropdown
+                  dropdownMode="select"
+                />
+              </Form.Group>
+            </Col>
+            
+            <Col md={5}>
+              <Form.Group>
+                <Form.Label style={{ fontWeight: 500, color: '#374151' }}>Time Range</Form.Label>
+                <Form.Select
+                  value={appointment.time || ''}
+                  onChange={(e) => handleTimeChange(index, e.target.value)}
+                  style={{ borderRadius: '8px' }}
+                >
+                  <option value="">Select time range</option>
+                  {timeSlots.map(slot => (
+                    <option key={slot.value} value={slot.value}>
+                      {slot.label}
+                    </option>
+                  ))}
+                </Form.Select>
+              </Form.Group>
+            </Col>
+            
+            <Col md={1}>
+              {appointment.date && appointment.time && (
+                <i 
+                  className="bi bi-check-circle-fill" 
+                  style={{ color: '#10b981', fontSize: '1.2rem' }}
+                ></i>
+              )}
+            </Col>
+          </Row>
+        ))}
+      </Modal.Body>
+      
+      <Modal.Footer style={{ border: 'none', padding: '1rem 2rem 2rem' }}>
+        <Button 
+          variant="outline-secondary" 
+          onClick={handleModalClose}
+          style={{ 
+            borderRadius: '8px',
+            padding: '8px 20px',
+            fontWeight: 500
+          }}
+        >
+          <i className="bi bi-x-lg me-2"></i>
+          Cancel
+        </Button>
+        <Button 
+          variant="primary"
+          onClick={handleConfirmAppointments}
+          disabled={validAppointmentsCount < 2}
+          style={{ 
+            backgroundColor: validAppointmentsCount >= 2 ? '#2E57A7' : '#6c757d',
+            borderColor: validAppointmentsCount >= 2 ? '#2E57A7' : '#6c757d',
+            borderRadius: '8px',
+            padding: '8px 20px',
+            fontWeight: 500,
+            opacity: validAppointmentsCount >= 2 ? 1 : 0.6
+          }}
+        >
+          <i className="bi bi-check-lg me-2"></i>
+          Confirm Appointments
+        </Button>
+      </Modal.Footer>
+    </Modal>
+  );
+};
+
+export default OfficerAppointmentModal;
+                          
+import React, { useState } from 'react';
+import { Container, Row, Col, Card } from 'react-bootstrap';
+import { Button } from 'react-bootstrap';
+import { BsCalendarCheck } from 'react-icons/bs';
+import { useForm } from 'react-hook-form';
+import { useTranslation } from 'react-i18next';
+import InputText from '../../../../common/InputText.tsx';
+import AppointmentModal from '../../../../common/AppointmentModal';
+import OfficerAppointmentModal from './OfficerAppointmentModal.js';
+import { getFromLocalStorage } from '../../../../../utils/localStorageUtils.js';
+import { USER_ROLES } from '../../../../../utils/constants.ts';
+
+const CurvingMarkingNote = ({ registrationData,onSubmitAppointments }) => {
+  const { t } = useTranslation();
+  const [showModal, setShowModal] = useState(false);
+  
+  const userRole = getFromLocalStorage("userRole") || "";
+  const isOfficer = userRole === USER_ROLES.OFFICER_L3 || userRole === USER_ROLES.OFFICER_L4;
+  
+  const {
+    register,
+    formState: { errors },
+    setValue,
+    watch,
+    clearErrors,
+  } = useForm({
+    mode: "onChange",
+    defaultValues: {
+      vesselName: registrationData?.vesselDetails?.vesselName || '',
+      officialNo: registrationData?.vesselDetails?.registrationNumber || 'Auto Generated',
+      portOfRegistry: registrationData?.vesselDetails?.nameOfRegistry || '',
+      yearOfRegistry: registrationData?.vesselDetails?.yearOfBuild || ''
+    },
+  });
+
+
+const handleConfirm = async (appointments) => {
+  setShowModal(false);
+  try {
+    const formattedAppointments = appointments.map(apt => ({
+      date: apt.date.toLocaleDateString('en-GB'), 
+      timeSlot: apt.time,
+      appointmentStatus: "",
+      //  appointmentStatus: "PENDING",
+      isBooked: false,
+      bookedBy: null
+    }));
+
+   
+    await onSubmitAppointments(formattedAppointments);
+  } catch (error) {
+    console.error("Error submitting appointments:", error);
+  }
+};
+
+  return (
+    <Container fluid className="p-0">
+      <Card className="mb-1">
+        <Card.Body>
+          <div className="d-flex justify-content-between align-items-center mb-4">
+            <div>
+              <h6 style={{ color: "#2466BF", marginBottom: "0.5rem" }}>{t("Curving & Marking Note")}</h6>
+              <p style={{ color: "#64748b", fontSize: "0.9rem", margin: 0 }}>{t("Vessel Registration Details")}</p>
+            </div>
+            <Button 
+              variant="primary" 
+              onClick={() => setShowModal(true)}
+              className="d-flex align-items-center gap-2"
+              style={{
+                backgroundColor: '#2E57A7',
+                borderColor: '#2E57A7',
+                fontWeight: 600,
+                padding: '10px 24px',
+                borderRadius: '8px',
+                fontSize: '0.9rem',
+                boxShadow: '0 4px 12px rgba(46, 87, 167, 0.2)',
+                transition: 'all 0.3s ease'
+              }}
+            >
+              <BsCalendarCheck size={16} />
+              {isOfficer ? 'Propose Appointments' : 'Schedule Appointment'}
+            </Button>
+          </div>
+          
+          <hr style={{ borderColor: '#e2e8f0', margin: '1rem 0' }} />
+          
+          <form className="employee-form">
+            <Card className="form-section-card">
+              <Card.Body>
+                <Row className="g-3">
+                  <Col md={6}>
+                    <InputText
+                      name="vesselName"
+                      label={t("Name of the Vessel")}
+                      placeholder={t("Enter vessel name")}
+                      required={true}
+                      register={{
+                        ...register("vesselName", {
+                          required: t("Vessel Name is required"),
+                        }),
+                      }}
+                      errors={errors}
+                      clearErrors={clearErrors}
+                    />
+                  </Col>
+                  
+                  <Col md={6}>
+                    <InputText
+                      name="officialNo"
+                      label={t("Official No.")}
+                      placeholder={t("Enter official number")}
+                      required={true}
+                      register={{
+                        ...register("officialNo", {
+                          required: t("Official No. is required"),
+                        }),
+                      }}
+                      errors={errors}
+                      clearErrors={clearErrors}
+                    />
+                  </Col>
+                  
+                  <Col md={6}>
+                    <InputText
+                      name="portOfRegistry"
+                      label={t("Port of Registry")}
+                      placeholder={t("Enter port of registry")}
+                      required={true}
+                      register={{
+                        ...register("portOfRegistry", {
+                          required: t("Port of Registry is required"),
+                        }),
+                      }}
+                      errors={errors}
+                      clearErrors={clearErrors}
+                    />
+                  </Col>
+                  
+                  <Col md={6}>
+                    <InputText
+                      name="yearOfRegistry"
+                      label={t("Year of Registry")}
+                      placeholder={t("Enter year of registry")}
+                      required={true}
+                      register={{
+                        ...register("yearOfRegistry", {
+                          required: t("Year of Registry is required"),
+                          pattern: { value: /^[0-9]{4}$/, message: t("Enter a valid year (YYYY)") },
+                        }),
+                      }}
+                      errors={errors}
+                      clearErrors={clearErrors}
+                    />
+                  </Col>
+                </Row>
+              </Card.Body>
+            </Card>
+          </form>
+        </Card.Body>
+      </Card>
+      
+    
+      {isOfficer ? (
+          <OfficerAppointmentModal 
+          show={showModal}
+          handleClose={() => setShowModal(false)}
+          handleConfirm={handleConfirm}
+        />
+        
+     
+       
+      ) : (
+          <AppointmentModal 
+          show={showModal}
+          handleClose={() => setShowModal(false)}
+          handleConfirm={handleConfirm}/>
+    
+        
+       
+      )}
+    </Container>
+  );
+};
+
+export default CurvingMarkingNote;
 import React, { useImperativeHandle, forwardRef, useState } from "react";
 import { Box, Button, Typography, Paper, Divider, Stack } from "@mui/material";
 import { ChevronRight, CheckCircleFill } from "react-bootstrap-icons";
 import { toast } from "react-toastify";
 import { useTranslation } from "react-i18next";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom"; // Add useParams
 
 const themeColor = "#2E57A7";
 const successColor = "#28a745";
@@ -36,9 +1586,9 @@ const Stepper = forwardRef(
     const [completed, setCompleted] = useState({});
     const [errors, setErrors] = useState({});
 
-    const totalSteps = steps?.length || 0;
-    const currentStep = steps?.[activeStep];
-
+    const totalSteps = steps.length;
+    const currentStep = steps[activeStep];
+    console.log("activeStep", activeStep);
     const buttonStyle = {
       fontWeight: "bold",
       borderRadius: "0.5rem",
@@ -65,7 +1615,7 @@ const Stepper = forwardRef(
     };
 
     const validateAndProceed = async (callback) => {
-      if (currentStep?.validate) {
+      if (currentStep.validate) {
         const isValid = await currentStep.validate();
         setErrors((prev) => ({ ...prev, [activeStep]: !isValid }));
 
@@ -124,15 +1674,19 @@ const Stepper = forwardRef(
     };
 
     const handlePayNow = () => {
-      onPayNow?.();
+
+      // const invoiceId = id || "INV-DEFAULT";
+      // navigate(`/payment/${invoiceId}`);
+
+onPayNow();
+      // onPayNow?.() || currentStep?.component?.props?.onPayNow?.();
     };
 
     const handleGetInvoice = () => {
-      onGetInvoice?.();
-    };
-
+      onGetInvoice();
+    }
     const handleSubmit = async () => {
-      if (currentStep?.validate) {
+      if (currentStep.validate) {
         const isValid = await currentStep.validate();
         if (!isValid) {
           toast.error("Please fix all errors before submitting.");
@@ -147,20 +1701,16 @@ const Stepper = forwardRef(
       if (viewMode) {
         return activeStep === totalSteps - 1 ? (
           actionComponent || (
-            <>
-              {!omitSubmitButton && (
-                <>
-                  <Button disabled={disableSubmit} variant="contained" sx={buttonStyle} onClick={handleSubmit}>
-                    Submit
-                  </Button>
-                  {disableSubmit && (
-                    <Button style={{ marginLeft: "1rem" }} variant="contained" sx={buttonStyle} onClick={handleGetInvoice}>
-                      {t("Get Invoice")}
-                    </Button>
-                  )}
-                </>
-              )}
-            </>
+              <>
+                {!omitSubmitButton ? <>
+              <Button disabled={disableSubmit} variant="contained" sx={buttonStyle} onClick={handleSubmit}>
+                Submit
+              </Button>
+              {disableSubmit && <Button style={{ marginLeft: "1rem" }} variant="contained" sx={buttonStyle} onClick={handleGetInvoice}>
+                {t("Get Invoice")}
+              </Button>}
+                </> : <></>}
+              </>
           )
         ) : (
           <Button variant="contained" sx={buttonStyle} onClick={handleNext}>
@@ -186,17 +1736,6 @@ const Stepper = forwardRef(
       }
     };
 
-    // Safety check for empty steps
-    if (!steps || steps.length === 0) {
-      return (
-        <Box sx={{ width: "100%", padding: "1rem" }}>
-          <Paper elevation={2} sx={{ padding: "2rem", textAlign: "center" }}>
-            <Typography>No steps available</Typography>
-          </Paper>
-        </Box>
-      );
-    }
-
     return (
       <Box sx={{ width: "100%", padding: "1rem" }}>
         <Paper
@@ -210,7 +1749,7 @@ const Stepper = forwardRef(
           }}
         >
           <Stack direction="row" alignItems="center" spacing={1}>
-            {steps.map((step, index) => (
+            {steps?.map((step, index) => (
               <React.Fragment key={index}>
                 <Stack
                   direction="row"
@@ -269,34 +1808,18 @@ const Stepper = forwardRef(
           </Stack>
         </Paper>
 
-        {currentStep ? (
-          <Paper
-            elevation={2}
-            sx={{
-              marginTop: "1rem",
-              borderRadius: "0.75rem",
-              backgroundColor: "#fff",
-              width: "100%",
-            }}
-          >
-            {currentStep.component}
-            {errors[activeStep]}
-          </Paper>
-        ) : (
-          <Paper
-            elevation={2}
-            sx={{
-              marginTop: "1rem",
-              borderRadius: "0.75rem",
-              backgroundColor: "#fff",
-              width: "100%",
-              padding: "2rem",
-              textAlign: "center",
-            }}
-          >
-            <Typography>Loading step...</Typography>
-          </Paper>
-        )}
+        <Paper
+          elevation={2}
+          sx={{
+            marginTop: "1rem",
+            borderRadius: "0.75rem",
+            backgroundColor: "#fff",
+            width: "100%",
+          }}
+        >
+          {currentStep.component}
+          {errors[activeStep]}
+        </Paper>
 
         <Divider sx={{ margin: "2rem 0" }} />
 
@@ -325,7 +1848,7 @@ const Stepper = forwardRef(
             {t("Previous")}
           </Button>
 
-          {currentStep && renderActionButton()}
+          {renderActionButton()}
         </Box>
       </Box>
     );
@@ -333,3 +1856,24 @@ const Stepper = forwardRef(
 );
 
 export default Stepper;
+
+
+Collapsible.js:18 Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render.
+react-dom-client.development.js:3805 Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render.
+react-dom-client.development.js:3797 Uncaught Error: Maximum update depth exceeded. This can happen when a component repeatedly calls setState inside componentWillUpdate or componentDidUpdate. React limits the number of nested updates to prevent infinite loops.
+    at getRootForUpdatedFiber (react-dom-client.development.js:3797:1)
+    at enqueueConcurrentHookUpdate (react-dom-client.development.js:3763:1)
+    at dispatchReducerAction (react-dom-client.development.js:7129:1)
+    at Dropdown.js:24:1
+    at useMergedRefs.js:9:1
+    at runWithFiberInDEV (react-dom-client.development.js:543:1)
+    at safelyDetachRef (react-dom-client.development.js:11060:1)
+    at commitDeletionEffectsOnFiber (react-dom-client.development.js:11674:1)
+    at recursivelyTraverseDeletionEffects (react-dom-client.development.js:11613:1)
+    at commitDeletionEffectsOnFiber (react-dom-client.development.js:11760:1)
+Stepper.jsx:268 Uncaught TypeError: Cannot read properties of undefined (reading 'component')
+    at Stepper.jsx:268:1
+Stepper.jsx:268 Uncaught TypeError: Cannot read properties of undefined (reading 'component')
+    at Stepper.jsx:268:1
+after confirm appointment please only close model not need redirect any page
+now after api call this all issue coming please fix this
