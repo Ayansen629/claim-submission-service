@@ -1,133 +1,335 @@
-return (
-  <Box sx={{ width: "100%", padding: "1rem" }}>
-    <Paper
-      elevation={3}
-      sx={{
-        padding: "0.75rem 1.5rem",
-        borderRadius: "0.75rem",
-        overflowX: "auto",
-        whiteSpace: "nowrap",
-        backgroundColor: "#fafafa",
-      }}
-    >
-      <Stack direction="row" alignItems="center" spacing={1}>
-        {steps?.map((step, index) => (
-          <React.Fragment key={index}>
-            <Stack
-              direction="row"
-              alignItems="center"
-              spacing={0.5}
-              sx={{ cursor: "pointer" }}
-              onClick={() => {
-                if (
-                  !disableStepNavigation &&
-                  (viewMode || completed[index] || editMode)
-                ) {
-                  goToStep(index);
-                }
-              }}
-            >
-              {completed[index] ? (
-                <CheckCircleFill size={18} color={successColor} />
-              ) : (
-                <Typography
-                  sx={{
-                    fontSize: "0.875rem",
-                    width: "1.5rem",
-                    height: "1.5rem",
-                    textAlign: "center",
-                    borderRadius: "50%",
-                    backgroundColor: "#e0e0e0",
-                    display: "inline-flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    fontWeight: "bold",
-                    color: "#666",
+import React, { useImperativeHandle, forwardRef, useState } from "react";
+import { Box, Button, Typography, Paper, Divider, Stack } from "@mui/material";
+import { ChevronRight, CheckCircleFill } from "react-bootstrap-icons";
+import { toast } from "react-toastify";
+import { useTranslation } from "react-i18next";
+import { useNavigate, useParams } from "react-router-dom";
+
+const themeColor = "#2E57A7";
+const successColor = "#28a745";
+
+const Stepper = forwardRef(
+  (
+    {
+      steps,
+      onSave,
+      viewMode = false,
+      editMode = false,
+      actionComponent = null,
+      onNext,
+      onBack,
+      onPayNow,
+      onSyncData,
+      onSubmit,
+      onGetInvoice,
+      disableStepNavigation = false,
+      disableSubmit = false,
+      initialStep = 0,
+      omitSubmitButton = false,
+    },
+    ref
+  ) => {
+    const { t } = useTranslation();
+    const navigate = useNavigate();
+    const { id } = useParams();
+    const [activeStep, setActiveStep] = useState(initialStep);
+    const [completed, setCompleted] = useState({});
+    const [errors, setErrors] = useState({});
+
+    const totalSteps = steps?.length || 0;
+    const currentStep = steps?.[activeStep];
+
+    const buttonStyle = {
+      fontWeight: "bold",
+      borderRadius: "0.5rem",
+      minWidth: "8rem",
+      fontSize: "0.9rem",
+      color: "#fff",
+      backgroundColor: themeColor,
+      "&:hover": {
+        backgroundColor: "#1f4ea0",
+      },
+    };
+
+    useImperativeHandle(ref, () => ({
+      goToNextStep,
+      goToStep,
+    }));
+
+    const goToNextStep = () => {
+      setActiveStep((prev) => Math.min(prev + 1, totalSteps - 1));
+    };
+
+    const markStepCompleted = () => {
+      setCompleted((prev) => ({ ...prev, [activeStep]: true }));
+    };
+
+    const validateAndProceed = async (callback) => {
+      if (currentStep?.validate) {
+        const isValid = await currentStep.validate();
+        setErrors((prev) => ({ ...prev, [activeStep]: !isValid }));
+
+        if (!isValid) {
+          toast.error("Please fix the errors before proceeding.");
+          return;
+        }
+      }
+
+      markStepCompleted();
+      callback();
+    };
+
+    const handleNext = () => {
+      if (viewMode || steps?.goToNextStepNoValidtion || editMode) {
+        goToNextStep();
+        markStepCompleted();
+      } else {
+        validateAndProceed(() => {
+          goToNextStep();
+          onNext?.(activeStep);
+        });
+      }
+    };
+
+    const handleBack = () => {
+      setActiveStep((prev) => Math.max(prev - 1, 0));
+      onBack?.(activeStep);
+    };
+
+    const handleSave = () => {
+      if (viewMode) return;
+
+      if (steps[activeStep]?.goToNextStepNoValidtion || editMode) {
+        goToNextStep();
+        markStepCompleted();
+        return;
+      }
+
+      validateAndProceed(() => {
+        if (activeStep < totalSteps - 1) {
+          const currentStepInfo = {
+            index: activeStep,
+            label: currentStep?.label,
+            component: currentStep?.component,
+            validate: currentStep?.validate,
+            isLastStep: activeStep === totalSteps - 1,
+            completedSteps: completed,
+            getFormData: currentStep?.getFormData,
+          };
+          onSyncData?.(currentStepInfo);
+        } else {
+          onSave?.();
+        }
+      });
+    };
+
+    const handlePayNow = () => {
+      onPayNow?.();
+    };
+
+    const handleGetInvoice = () => {
+      onGetInvoice?.();
+    };
+
+    const handleSubmit = async () => {
+      if (currentStep?.validate) {
+        const isValid = await currentStep.validate();
+        if (!isValid) {
+          toast.error("Please fix all errors before submitting.");
+          return;
+        }
+      }
+
+      onSubmit?.();
+    };
+
+    const renderActionButton = () => {
+      if (viewMode) {
+        return activeStep === totalSteps - 1 ? (
+          actionComponent || (
+            <>
+              {!omitSubmitButton && (
+                <>
+                  <Button disabled={disableSubmit} variant="contained" sx={buttonStyle} onClick={handleSubmit}>
+                    Submit
+                  </Button>
+                  {disableSubmit && (
+                    <Button style={{ marginLeft: "1rem" }} variant="contained" sx={buttonStyle} onClick={handleGetInvoice}>
+                      {t("Get Invoice")}
+                    </Button>
+                  )}
+                </>
+              )}
+            </>
+          )
+        ) : (
+          <Button variant="contained" sx={buttonStyle} onClick={handleNext}>
+            {t("Next")}
+          </Button>
+        );
+      }
+
+      return activeStep === totalSteps - 1 ? (
+        <Button variant="contained" sx={buttonStyle} onClick={handlePayNow}>
+          {t("Proceed to Pay")}
+        </Button>
+      ) : (
+        <Button variant="contained" sx={buttonStyle} onClick={handleSave}>
+          {t("Save & Next")}
+        </Button>
+      );
+    };
+
+    const goToStep = (index) => {
+      if (index >= 0 && index < totalSteps) {
+        setActiveStep(index);
+      }
+    };
+
+    // Safety check for empty steps
+    if (!steps || steps.length === 0) {
+      return (
+        <Box sx={{ width: "100%", padding: "1rem" }}>
+          <Paper elevation={2} sx={{ padding: "2rem", textAlign: "center" }}>
+            <Typography>No steps available</Typography>
+          </Paper>
+        </Box>
+      );
+    }
+
+    return (
+      <Box sx={{ width: "100%", padding: "1rem" }}>
+        <Paper
+          elevation={3}
+          sx={{
+            padding: "0.75rem 1.5rem",
+            borderRadius: "0.75rem",
+            overflowX: "auto",
+            whiteSpace: "nowrap",
+            backgroundColor: "#fafafa",
+          }}
+        >
+          <Stack direction="row" alignItems="center" spacing={1}>
+            {steps.map((step, index) => (
+              <React.Fragment key={index}>
+                <Stack
+                  direction="row"
+                  alignItems="center"
+                  spacing={0.5}
+                  sx={{ cursor: "pointer" }}
+                  onClick={() => {
+                    if (
+                      !disableStepNavigation &&
+                      (viewMode || completed[index] || editMode)
+                    ) {
+                      goToStep(index);
+                    }
                   }}
                 >
-                  {index + 1}
-                </Typography>
-              )}
-              <Typography
-                sx={{
-                  fontWeight:
-                    index === activeStep || completed[index]
-                      ? "bold"
-                      : "normal",
-                  color: index === activeStep ? themeColor : "#999",
-                  fontSize: "0.875rem",
-                  whiteSpace: "nowrap",
-                }}
-              >
-                {step.label}
-              </Typography>
-            </Stack>
-            {index < steps.length - 1 && (
-              <ChevronRight size={14} color="green" />
-            )}
-          </React.Fragment>
-        ))}
-      </Stack>
-    </Paper>
+                  {completed[index] ? (
+                    <CheckCircleFill size={18} color={successColor} />
+                  ) : (
+                    <Typography
+                      sx={{
+                        fontSize: "0.875rem",
+                        width: "1.5rem",
+                        height: "1.5rem",
+                        textAlign: "center",
+                        borderRadius: "50%",
+                        backgroundColor: "#e0e0e0",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontWeight: "bold",
+                        color: "#666",
+                      }}
+                    >
+                      {index + 1}
+                    </Typography>
+                  )}
+                  <Typography
+                    sx={{
+                      fontWeight:
+                        index === activeStep || completed[index]
+                          ? "bold"
+                          : "normal",
+                      color: index === activeStep ? themeColor : "#999",
+                      fontSize: "0.875rem",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {step.label}
+                  </Typography>
+                </Stack>
+                {index < steps.length - 1 && (
+                  <ChevronRight size={14} color="green" />
+                )}
+              </React.Fragment>
+            ))}
+          </Stack>
+        </Paper>
 
-    {/* Add safety check here */}
-    {currentStep ? (
-      <Paper
-        elevation={2}
-        sx={{
-          marginTop: "1rem",
-          borderRadius: "0.75rem",
-          backgroundColor: "#fff",
-          width: "100%",
-        }}
-      >
-        {currentStep.component}
-        {errors[activeStep]}
-      </Paper>
-    ) : (
-      <Paper
-        elevation={2}
-        sx={{
-          marginTop: "1rem",
-          borderRadius: "0.75rem",
-          backgroundColor: "#fff",
-          width: "100%",
-          padding: "2rem",
-          textAlign: "center",
-        }}
-      >
-        <Typography>Loading step...</Typography>
-      </Paper>
-    )}
+        {currentStep ? (
+          <Paper
+            elevation={2}
+            sx={{
+              marginTop: "1rem",
+              borderRadius: "0.75rem",
+              backgroundColor: "#fff",
+              width: "100%",
+            }}
+          >
+            {currentStep.component}
+            {errors[activeStep]}
+          </Paper>
+        ) : (
+          <Paper
+            elevation={2}
+            sx={{
+              marginTop: "1rem",
+              borderRadius: "0.75rem",
+              backgroundColor: "#fff",
+              width: "100%",
+              padding: "2rem",
+              textAlign: "center",
+            }}
+          >
+            <Typography>Loading step...</Typography>
+          </Paper>
+        )}
 
-    <Divider sx={{ margin: "2rem 0" }} />
+        <Divider sx={{ margin: "2rem 0" }} />
 
-    <Box
-      sx={{
-        display: "flex",
-        justifyContent: "space-between",
-        gap: "1rem",
-        flexDirection: { xs: "column", sm: "row" },
-        alignItems: { xs: "stretch", sm: "center" },
-      }}
-    >
-      <Button
-        variant="outlined"
-        onClick={handleBack}
-        disabled={activeStep === 0}
-        sx={{
-          color: themeColor,
-          borderColor: themeColor,
-          fontWeight: "bold",
-          borderRadius: "0.5rem",
-          minWidth: { xs: "100%", sm: "8rem" },
-          fontSize: "0.9rem",
-        }}
-      >
-        {t("Previous")}
-      </Button>
+        <Box
+          sx={{
+            display: "flex",
+            justifyContent: "space-between",
+            gap: "1rem",
+            flexDirection: { xs: "column", sm: "row" },
+            alignItems: { xs: "stretch", sm: "center" },
+          }}
+        >
+          <Button
+            variant="outlined"
+            onClick={handleBack}
+            disabled={activeStep === 0}
+            sx={{
+              color: themeColor,
+              borderColor: themeColor,
+              fontWeight: "bold",
+              borderRadius: "0.5rem",
+              minWidth: { xs: "100%", sm: "8rem" },
+              fontSize: "0.9rem",
+            }}
+          >
+            {t("Previous")}
+          </Button>
 
-      {currentStep && renderActionButton()}
-    </Box>
-  </Box>
+          {currentStep && renderActionButton()}
+        </Box>
+      </Box>
+    );
+  }
 );
+
+export default Stepper;
