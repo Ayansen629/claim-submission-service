@@ -7,12 +7,12 @@ import { postData } from "../../services/http.service.ts";
 import {
   SERVICE_BASE,
   URLS_ENDPOINT,
-  BASE_IP,
 } from "../../utils/urlsConstants.ts";
-import { TheaterComedy } from '@mui/icons-material';
+
 const AppointmentModal = ({ show, handleClose, handleConfirm, registrationData }) => {
   const [selectedSlot, setSelectedSlot] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isBooking, setIsBooking] = useState(false);
 
   // Get appointment slots from API data
   const appointmentSlots = registrationData?.appointmentSlots || [];
@@ -43,35 +43,68 @@ const AppointmentModal = ({ show, handleClose, handleConfirm, registrationData }
     }, 1000);
   };
 
-  const handleConfirmAppointment = () => {
+  const handleConfirmAppointment = async () => {
     if (selectedSlot) {
-      const appointmentData = {
-        id: selectedSlot.id,
-        date: selectedSlot.fullDate,
-        time: selectedSlot.display,
-        dayName: selectedSlot.dayName,
-        dateDisplay: selectedSlot.dateDisplay,
-        fullDisplay: selectedSlot.fullDisplay,
-        applicationNumber: selectedSlot.originalSlot.applicationNumber
-      };
+      setIsBooking(true);
       
-      console.log('Confirmed Appointment:', JSON.stringify(appointmentData, null, 2));
-      
-      toast.success(`🎉 Appointment successfully booked for ${appointmentData.dateDisplay} at ${appointmentData.time}`, {
-        position: "top-right",
-        autoClose: 5000,
-        hideProgressBar: false,
-        closeOnClick: true,
-        pauseOnHover: true,
-        draggable: true,
-      });
-      
-      if (handleConfirm) {
-        handleConfirm(appointmentData);
+      try {
+        const apiUrl = `${SERVICE_BASE.IWT_REGISTRATION}${URLS_ENDPOINT.VESSEL_SERVICE.SLOT_BOOK}`;
+        
+        const payload = {
+          id: selectedSlot.id,
+          applicationNumber: selectedSlot.originalSlot.applicationNumber,
+          date: selectedSlot.fullDate,
+          timeSlot: selectedSlot.display,
+          isBooked: true,
+          bookedBy: "User", // You can replace this with actual user info
+          auditDetails: {
+            createdBy: selectedSlot.originalSlot.auditDetails?.createdBy || "Admin",
+            createdOn: selectedSlot.originalSlot.auditDetails?.createdOn || new Date().toISOString(),
+            updatedBy: "User", // You can replace this with actual user info
+            updatedOn: new Date().toISOString()
+          }
+        };
+
+        console.log('Booking payload:', JSON.stringify(payload, null, 2));
+
+        const response = await postData(apiUrl, payload);
+        
+        if (response) {
+          toast.success(`🎉 Appointment successfully booked for ${selectedSlot.dateDisplay} at ${selectedSlot.display}`, {
+            position: "top-right",
+            autoClose: 5000,
+            hideProgressBar: false,
+            closeOnClick: true,
+            pauseOnHover: true,
+            draggable: true,
+          });
+
+          const appointmentData = {
+            id: selectedSlot.id,
+            date: selectedSlot.fullDate,
+            time: selectedSlot.display,
+            dayName: selectedSlot.dayName,
+            dateDisplay: selectedSlot.dateDisplay,
+            fullDisplay: selectedSlot.fullDisplay,
+            applicationNumber: selectedSlot.originalSlot.applicationNumber
+          };
+
+          if (handleConfirm) {
+            handleConfirm(appointmentData);
+          }
+
+          handleClose();
+          setSelectedSlot(null);
+        }
+      } catch (error) {
+        console.error('Error booking appointment:', error);
+        toast.error('Failed to book appointment. Please try again.', {
+          position: "top-right",
+          autoClose: 5000,
+        });
+      } finally {
+        setIsBooking(false);
       }
-      
-      handleClose();
-      setSelectedSlot(null);
     }
   };
 
@@ -113,22 +146,24 @@ const AppointmentModal = ({ show, handleClose, handleConfirm, registrationData }
           </div>
         )}
         
-        {isLoading && (
+        {(isLoading || isBooking) && (
           <div className={styles.loadingOverlay}>
             <div className={styles.loadingContent}>
               <Spinner animation="border" variant="primary" className={styles.loadingSpinner} />
-              <div className={styles.loadingText}>Processing your selection...</div>
+              <div className={styles.loadingText}>
+                {isBooking ? 'Booking appointment...' : 'Processing your selection...'}
+              </div>
             </div>
           </div>
         )}
         
-        <div className={`${styles.slotsContainer} ${isLoading ? styles.loading : ''}`}>
+        <div className={`${styles.slotsContainer} ${(isLoading || isBooking) ? styles.loading : ''}`}>
           {transformedSlots.length > 0 ? (
             transformedSlots.map((slot, index) => (
               <div 
                 key={slot.id}
-                className={`${styles.timeSlotCard} ${selectedSlot?.id === slot.id ? styles.selected : ''} ${isLoading ? styles.disabled : ''}`}
-                onClick={() => !isLoading && handleSlotSelect(slot)}
+                className={`${styles.timeSlotCard} ${selectedSlot?.id === slot.id ? styles.selected : ''} ${(isLoading || isBooking) ? styles.disabled : ''}`}
+                onClick={() => !(isLoading || isBooking) && handleSlotSelect(slot)}
                 style={{ animationDelay: `${index * 0.1}s` }}
               >
                 <div className={styles.slotContent}>
@@ -158,7 +193,7 @@ const AppointmentModal = ({ show, handleClose, handleConfirm, registrationData }
           variant="outline-secondary" 
           onClick={handleModalClose} 
           className={styles.btnCancel}
-          disabled={isLoading}
+          disabled={isLoading || isBooking}
         >
           <i className="bi bi-x-lg me-2"></i>
           Cancel
@@ -166,11 +201,11 @@ const AppointmentModal = ({ show, handleClose, handleConfirm, registrationData }
         <Button 
           variant="primary" 
           onClick={handleConfirmAppointment}
-          disabled={!selectedSlot || isLoading}
+          disabled={!selectedSlot || isLoading || isBooking}
           className={styles.btnConfirm}
         >
           <i className="bi bi-check-lg me-2"></i>
-          Confirm Appointment
+          {isBooking ? 'Booking...' : 'Confirm Appointment'}
         </Button>
       </Modal.Footer>
     </Modal>
@@ -178,22 +213,3 @@ const AppointmentModal = ({ show, handleClose, handleConfirm, registrationData }
 };
 
 export default AppointmentModal;
-api call-
-const apiUrl = `${SERVICE_BASE.IWT_REGISTRATION}${URLS_ENDPOINT.VESSEL_SERVICE.SLOT_BOOK}`;
-please call this api in confirm appointment
-this type of payload send that
-{
-    "id": "7a860f89-3885-43f5-b0f7-98cb5cf449ab", 
-    "applicationNumber": "APP-12345", 
-    "date": "2025-08-31",
-    "timeSlot": "09:00 AM - 10:00 AM",
-    "isBooked": false,
-    "bookedBy": "XYZ", 
-    "auditDetails": {
-        "createdBy": "Admin",
-        "createdOn": "2025-08-13T11:39:30.739450600",
-        "updatedBy": "Admin",
-        "updatedOn": "2025-08-13T11:39:30.739450600"
-    }
-}
-please write full code
