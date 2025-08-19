@@ -1,615 +1,391 @@
+import React, { useState, useEffect, useRef } from "react";
+import { Box, Typography, Stack } from "@mui/material";
+import { useParams, useLocation, useNavigate } from "react-router-dom";
+import Stepper from "../../../../common/Stepper.jsx";
+import VesselSurveyForm from "./VesselSurveyForm.js";
+import { useForm } from "react-hook-form";
+import { useTranslation } from "react-i18next";
+import { toast } from "react-toastify";
+import { Button } from "react-bootstrap";
+import { BsArrowLeft } from "react-icons/bs";
+import { postFORMdata } from "../../../../../services/http.service.ts";
+import { URLS_ENDPOINT } from "../../../../../utils/urlsConstants.ts";
+import VesselEquipmentForm from "./VesselEquipmentForm.js";
+import PaymentModal from "../../../../common/PaymentModal.js";
+import { has, size } from "lodash";
+import { initialEquipementData } from "./constants/VesselEquipementConstant.js";
+import { vesselSurveyInitialValues } from "./constants/VesselServeyConstant.js";
+import Invoicing from "../../../../common/Invoicing.js";
 
-export const initialEquipementData = {
-    fireFighting: {
-        fireFightingPlan: { type: "", capacity: "", location: "", condition: "", remarks: "" },
-        firePumpsMech: { type: "", capacity: "", location: "", condition: "", remarks: "" },
-        firePumpsHand: { type: "", capacity: "", location: "", condition: "", remarks: "" },
-        portableExtinguishers: { type: "", capacity: "", location: "", condition: "", remarks: "" },
-        fixedExtinguishing: { type: "", capacity: "", location: "", condition: "", remarks: "" },
-        fireBuckets: { type: "", capacity: "", location: "", condition: "", remarks: "" },
-        sandBoxes: { type: "", capacity: "", location: "", condition: "", remarks: "" },
-        hydrants: { type: "", capacity: "", location: "", condition: "", remarks: "" },
-        hoses: { type: "", capacity: "", location: "", condition: "", remarks: "" },
-        fittings: { type: "", capacity: "", location: "", condition: "", remarks: "" },
-        nozzles: { type: "", capacity: "", location: "", condition: "", remarks: "" },
-        jetSpray: { type: "", capacity: "", location: "", condition: "", remarks: "" },
+const VesselSurveyRegistration = () => {
+  const { t } = useTranslation();
+  const { id } = useParams();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [paymentMode, setPaymentMode] = useState("offline");
+  const [challanFile, setChallanFile] = useState(null);
+  const isEditMode = !!id && location.pathname.includes("/edit/");
+  const isViewMode = !!id && location.pathname.includes("/view/");
+  // const isViewMode = true;
+  const stepperRef = useRef();
+  const [showModal, setShowModal] = useState(false);
+  const methods = useForm({
+    defaultValues: {
+      ...vesselSurveyInitialValues,
+      ...initialEquipementData,
     },
-    equipment: {
-        anchors: { number: "", type: "", location: "", condition: "", remarks: "" },
-        anchorCablesChains: { number: "", type: "", location: "", condition: "", remarks: "" },
-        bilgePumps: { number: "", type: "", location: "", condition: "", remarks: "" },
-        winches: { number: "", type: "", location: "", condition: "", remarks: "" },
-        cranes: { number: "", type: "", location: "", condition: "", remarks: "" },
-        derricks: { number: "", type: "", location: "", condition: "", remarks: "" },
-        towingEquipment: { number: "", type: "", location: "", condition: "", remarks: "" },
-        ropesAndLines: { number: "", type: "", location: "", condition: "", remarks: "" },
-        collisionMat: { number: "", type: "", location: "", condition: "", remarks: "" },
-        gangway: { number: "", type: "", location: "", condition: "", remarks: "" },
-        fenders: { number: "", type: "", location: "", condition: "", remarks: "" },
-        boatHook: { number: "", type: "", location: "", condition: "", remarks: "" },
-        firstAidKit: { number: "", type: "", location: "", condition: "", remarks: "" },
-        binoculars: { number: "", type: "", location: "", condition: "", remarks: "" },
-        wasteContainers: { number: "", type: "", location: "", condition: "", remarks: "" },
-        heavingLine: { number: "", type: "", location: "", condition: "", remarks: "" },
-        axe: { number: "", type: "", location: "", condition: "", remarks: "" },
-        torch: { number: "", type: "", location: "", condition: "", remarks: "" }
-    },
-    navigation: {
-        navigationLights: { number: "", type: "", location: "", condition: "", remarks: "" },
-        soundSignals: { number: "", type: "", location: "", condition: "", remarks: "" },
-        shapes: { number: "", type: "", location: "", condition: "", remarks: "" },
-        magneticCompass: { number: "", type: "", location: "", condition: "", remarks: "" },
-        classBais: { number: "", type: "", location: "", condition: "", remarks: "" },
-        communicationEquipment: { number: "", type: "", location: "", condition: "", remarks: "" },
-        nauticalPublications: { number: "", type: "", location: "", condition: "", remarks: "" }
-    },
-    deckSpaces: [
-        {
-            maxPassengersNo: 0,
-            size: "",
-            function: "",
-            condition: "",
-            remarks: ""
+    mode: "onTouched",
+  });
+  const { trigger, getValues, setError, setValue, reset, formState: { errors } } = methods;
+
+  const [isLoading, setIsLoading] = useState(false);
+
+  const validateSurveyForm = async () => {
+    if (isViewMode) return true;
+
+    const requiredFields = [
+      "basicVesselInfo.typeOfSurvey",
+      "basicVesselInfo.placeYardNo",
+      "basicVesselInfo.netTonnage",
+    ];
+
+    // Validate required fields
+    const isValid = await trigger(requiredFields);
+
+    // Check crew details
+    const crewDetails = getValues("crewDetails.crewDetails") || [];
+    let hasValidCrew = true;
+    crewDetails.forEach((crew, index) => {
+      if (!crew.crewType) {
+        setError(`crewDetails.crewDetails.${index}.crewType`, {
+          type: "required",
+          message: t("Crew Type is required")
+        });
+        hasValidCrew = false;
+      }
+      if (!crew.name) {
+        setError(`crewDetails.crewDetails.${index}.name`, {
+          type: "required",
+          message: t("Crew Name is required")
+        });
+        hasValidCrew = false;
+      }
+    });
+    // Check file uploads - TRIGGER VALIDATION FOR FILES
+    const requiredFiles = ["enclosure.authorizationFile", "enclosure.paymentChallan", "enclosure.lastCertificateCopy", "enclosure.registrationCertificateCopy", "enclosure.builderCertificate",
+      "enclosure.testCertificate"];
+    let hasFileErrors = false;
+
+    if (!isEditMode) {
+      requiredFiles.forEach(fieldName => {
+        const fieldValue = getValues(fieldName);
+        if (!fieldValue) {
+          setError(fieldName, {
+            type: "required",
+            message: t(`${fieldName} is required`)
+          });
+          hasFileErrors = true;
         }
-    ],
-    lifeSavingEquipment: {
-        lifejackets: { number: "", type: "", location: "", condition: "", remarks: "" },
-        liferafts: { number: "", type: "", location: "", condition: "", remarks: "" },
-        launchingArrangements: { number: "", type: "", location: "", condition: "", remarks: "" },
-        flotationDevices: { number: "", type: "", location: "", condition: "", remarks: "" },
-        lifebuoys: { number: "", type: "", location: "", condition: "", remarks: "" },
-        flaresParachute: { number: "", type: "", location: "", condition: "", remarks: "" },
-        flaresHandHeld: { number: "", type: "", location: "", condition: "", remarks: "" },
-        smokeSignals: { number: "", type: "", location: "", condition: "", remarks: "" },
-        lifeRaftEquipment: { number: "", type: "", location: "", condition: "", remarks: "" },
-        emergencyCommunications: { number: "", type: "", location: "", condition: "", remarks: "" }
-    },
-    machinery: {
-        mainMachinery: { bhp: "", type: "", location: "", condition: "", remarks: "" },
-        mainGenerator: { bhp: "", type: "", location: "", condition: "", remarks: "" },
-        emergencyGenerator: { bhp: "", type: "", location: "", condition: "", remarks: "" },
-        mainSteeringGear: { bhp: "", type: "", location: "", condition: "", remarks: "" },
-        auxiliarySteeringGear: { bhp: "", type: "", location: "", condition: "", remarks: "" },
-        switchboard: { bhp: "", type: "", location: "", condition: "", remarks: "" },
-        shoreConnection: { bhp: "", type: "", location: "", condition: "", remarks: "" },
-        batteries: { bhp: "", type: "", location: "", condition: "", remarks: "" },
-        signalLightSwitches: { bhp: "", type: "", location: "", condition: "", remarks: "" }
-    },
-    accommodation: {
-        escapeRoutes: { number: "", type: "", location: "", condition: "", remarks: "" },
-        washrooms: { number: "", type: "", location: "", condition: "", remarks: "" },
-        toilets: { number: "", type: "", location: "", condition: "", remarks: "" },
-        galley: { number: "", type: "", location: "", condition: "", remarks: "" },
-        messroom: { number: "", type: "", location: "", condition: "", remarks: "" },
-        waterTanks: { number: "", type: "", location: "", condition: "", remarks: "" },
-        heatingCoolingVentilation: { number: "", type: "", location: "", condition: "", remarks: "" },
-        berthLocker: { number: "", type: "", location: "", condition: "", remarks: "" },
-        accessToAccommodation: { number: "", type: "", location: "", condition: "", remarks: "" },
-        lighting: { number: "", type: "", location: "", condition: "", remarks: "" },
-        machineryGuards: { number: "", type: "", location: "", condition: "", remarks: "" },
-        guardRails: { number: "", type: "", location: "", condition: "", remarks: "" },
-        nonSlipSurfaces: { number: "", type: "", location: "", condition: "", remarks: "" },
-        laddersCompanionways: { number: "", type: "", location: "", condition: "", remarks: "" },
-        noiseInsulation: { number: "", type: "", location: "", condition: "", remarks: "" },
-        foamFlotationMaterialDensity: { number: "", type: "", location: "", condition: "", remarks: "" }
+      });
+
+      // Trigger validation for file fields
+      await trigger(requiredFiles);
     }
+
+    return isValid && hasValidCrew && !hasFileErrors;
+  };
+
+  const validateEquipmentForm = async () => {
+    if (isViewMode) return true;
+    return true;
+  };
+  const handleFormSubmit = async (stepInfo) => {
+    if (stepInfo.index === 0) {
+      const formValues = stepInfo?.getFormData?.() || {};
+
+      console.log("=== SURVEY FORM DATA ===");
+      console.log("Step Index:", stepInfo.index);
+      console.log("Step Label:", stepInfo.label);
+      console.log("Form Values:", formValues);
+      console.log("Crew Details:", formValues.crewDetails);
+      console.log("Files:", {
+        authorizationFile: formValues.authorizationFile,
+        paymentChallan: formValues.paymentChallan,
+        lastCertificateCopy: formValues.lastCertificateCopy,
+        registrationCertificateCopy: formValues.registrationCertificateCopy
+      });
+      console.log("========================");
+
+      // Simulate success and move to next step
+      toast.success("Survey details saved successfully.");
+      stepperRef.current?.goToNextStep();
+    }
+
+    if (stepInfo.index === 1) {
+      const formValues = stepInfo?.getFormData?.() || {};
+
+      console.log("=== EQUIPMENT FORM DATA ===");
+      console.log("Step Index:", stepInfo.index);
+      console.log("Step Label:", stepInfo.label);
+      console.log("Form Values:", formValues);
+      console.log("===========================");
+
+      toast.success("Equipment details saved successfully.");
+      stepperRef.current?.goToNextStep();
+    }
+  };
+  const handleOnlinePay = () => {
+    setIsLoading(true);
+    setShowModal(false);
+
+    setTimeout(() => {
+      setIsLoading(false);
+      navigate("/vessel-survey/successs", {
+        state: { registrationId: "VR2024001" },
+      });
+    }, 1500);
+  };
+  const handleChallanUpload = (e) => {
+    setChallanFile(e.target.files?.[0] || null);
+  };
+  const handleOfflineSubmit = () => {
+    setShowModal(false);
+    setIsLoading(true);
+
+    setTimeout(() => {
+      setIsLoading(false);
+      navigate("/vessel-survey/success", {
+        state: { registrationId: "VR2024001" },
+      });
+    }, 1500);
+  };
+
+  const handlePayNow = () => {
+
+    const allFormData = methods.getValues();
+
+    console.log("=== PAY NOW - ALL FORM DATA ===");
+    console.log("Complete Form Data:", allFormData);
+    console.log("===============================");
+
+    // setShowModal(true);
+  };
+  //   const handleFormSubmit = async (stepInfo) => {
+  //     if (stepInfo.index === 0) {
+  //       const formValues = stepInfo?.getFormData?.() || {};
+
+  //       const request = {
+  //         surveyDetails: {
+  //           typeOfSurvey: formValues.typeOfSurvey,
+  //           placeYardNo: formValues.placeYardNo,
+  //           netTonnage: formValues.netTonnage,
+  //           hullLength: formValues.hullLength,
+  //           hullBreadth: formValues.hullBreadth,
+  //           hullDepth: formValues.hullDepth,
+  //           hullMaterial: formValues.hullMaterial,
+  //           hullPlattingThickness: formValues.hullPlattingThickness,
+  //           keelLayingDate: formValues.keelLayingDate,
+  //           agentName: formValues.agentName,
+  //           agentAddress: formValues.agentAddress,
+  //           agentTelephone: formValues.agentTelephone,
+  //           placeOfLastSurvey: formValues.placeOfLastSurvey,
+  //           dateOfLastSurvey: formValues.dateOfLastSurvey,
+  //           dateOfProposedVisit: formValues.dateOfProposedVisit,
+  //           crewDetails: formValues.crewDetails?.filter(crew => crew.crewType && crew.name) || []
+  //         }
+  //       };
+
+  //       const fd = new FormData();
+  //       fd.append("request", new Blob([JSON.stringify(request)], { type: "application/json" }));
+  // stepperRef.current?.goToNextStep();
+  //       // try {
+  //       //   setIsLoading(true);
+  //       //   const URL = process.env.REACT_APP_IWT_URL + URLS_ENDPOINT.VESSEL_SERVICE.CREATE_SURVEY;
+  //       //   const response = await postFORMdata(URL, fd);
+
+  //       //   if (response?.status === 200) {
+  //       //     toast.success("Survey details saved successfully.");
+  //       //     stepperRef.current?.goToNextStep();
+  //       //   } else {
+  //       //     toast.error("Something went wrong.");
+  //       //   }
+  //       // } catch (err) {
+  //       //   console.error(err);
+  //       //   toast.error("Error saving survey details.");
+  //       // } finally {
+  //       //   setIsLoading(false);
+  //       // }
+  //     }
+  //   };
+
+  const handleSave = () => {
+    console.log("=== HANDLE SAVE ===");
+    setIsLoading(true);
+    setTimeout(() => {
+      setIsLoading(false);
+      navigate("/vessel-survey/success", {
+        state: { surveyId: "VS2024001" }
+      });
+    }, 1500);
+  };
+
+  const steps = [
+    {
+      label: t("Survey of Inland Vessel Details"),
+      component: (
+        <VesselSurveyForm
+          formMethods={methods}
+          viewMode={isViewMode}
+          editMode={isEditMode}
+        />
+      ),
+      validate: validateSurveyForm,
+      getFormData: () => methods?.getValues(),
+    },
+    {
+      label: t("Equipment & Vessel Information"),
+      component: (
+        <VesselEquipmentForm
+          formMethods={methods}
+          viewMode={isViewMode}
+          editMode={isEditMode}
+        />
+      ),
+      validate: validateEquipmentForm,
+      getFormData: () => methods?.getValues(),
+    },
+    {
+      label: t("vesselDetails.Invoicing"),
+      component: (
+        <Invoicing
+          supervisionAuthority={"CLASSIFICATION SOCIETY"}
+          // onPayNow={handlePayNow}
+          // vesselRegisData={vesselRegisData}
+          paymentData={{
+            "invoiceBreakupInfo": [
+              {
+                "id": "163",
+                "label": "Workorder Fee",
+                "amount": 500,
+                "categoryHeader": "WORKORDER FEE"
+              }
+            ],
+            "summary": {
+              "subTotal": 500,
+              "cgst": 13,
+              "sgst": 13,
+              "igst": 25,
+              "totalPayable": 526
+            }
+          }}
+        />
+      ),
+      validate: () => true,
+    },
+  ];
+
+  return (
+    <Box sx={{ padding: "1rem 0.5rem 0 0.5rem", backgroundColor: "#f5f6fa", minHeight: "100vh" }}>
+      {isLoading ? (
+        <div className="d-flex justify-content-center align-items-center" style={{ height: "80vh" }}>
+          <div className="text-center">
+            <div className="spinner-border text-primary" role="status" style={{ width: "3rem", height: "3rem" }}>
+              <span className="visually-hidden">Loading...</span>
+            </div>
+            <p className="mt-3">Processing your request...</p>
+          </div>
+        </div>
+      ) : (
+        <>
+          <div className="d-flex flex-column flex-md-row justify-content-between align-items-start align-items-md-center mb-3 gap-2">
+            <div className="d-flex align-items-center flex-grow-1" style={{ gap: '20px' }}>
+              <Button
+                variant="outline-primary"
+                onClick={() => navigate("/dashboard")}
+                className="d-flex align-items-center justify-content-center shadow-sm"
+                style={{
+                  borderRadius: "50%",
+                  width: "40px",
+                  height: "40px",
+                  border: "2px solid #2E57A7",
+                  color: "#2E57A7",
+                  backgroundColor: "#fff",
+                  transition: "all 0.3s ease",
+                  padding: "0",
+                }}
+                onMouseEnter={(e) => {
+                  e.target.style.backgroundColor = "#2E57A7";
+                  e.target.style.color = "#fff";
+                  e.target.style.transform = "translateY(-2px)";
+                  e.target.style.boxShadow = "0 4px 12px rgba(46, 87, 167, 0.3)";
+                }}
+                onMouseLeave={(e) => {
+                  e.target.style.backgroundColor = "#fff";
+                  e.target.style.color = "#2E57A7";
+                  e.target.style.transform = "translateY(0)";
+                  e.target.style.boxShadow = "0 2px 4px rgba(0,0,0,0.1)";
+                }}
+              >
+                <BsArrowLeft size={16} />
+              </Button>
+              <Stack spacing={0.5} className="flex-grow-1">
+                <Typography
+                  sx={{
+                    fontWeight: 550,
+                    color: "#2E57A7",
+                    fontSize: { xs: "1rem", sm: "1.1rem", md: "1.2rem" },
+                    lineHeight: 1.2,
+                  }}
+                >
+                  {isViewMode
+                    ? t("View Vessel Survey") + ` - ${id}`
+                    : isEditMode
+                      ? t("Edit Vessel Survey") + ` - ${id}`
+                      : t("New Vessel Survey")}
+                </Typography>
+                <Typography
+                  sx={{
+                    color: "#666",
+                    fontSize: { xs: "0.6rem", sm: "0.65rem" },
+                    lineHeight: 1.3,
+                  }}
+                >
+                  {isViewMode
+                    ? t("(View vessel survey details)")
+                    : isEditMode
+                      ? t("(Update vessel survey details)")
+                      : t("(Fill in the survey details to complete registration)")}
+                </Typography>
+              </Stack>
+            </div>
+          </div>
+
+          <Stepper
+            ref={stepperRef}
+            steps={steps}
+            onSave={handleSave}
+            viewMode={isViewMode}
+            onSyncData={handleFormSubmit}
+            onPayNow={handlePayNow}
+          />
+          {/* {!isViewMode && (
+            <PaymentModal
+              show={showModal}
+              onHide={() => setShowModal(false)}
+              paymentMode={paymentMode}
+              setPaymentMode={setPaymentMode}
+              challanFile={challanFile}
+              onChallanUpload={handleChallanUpload}
+              onOnlinePay={handleOnlinePay}
+              onOfflineSubmit={handleOfflineSubmit}
+              isLoading={isLoading}
+              formMethods={methods}
+            />
+          )} */}
+        </>
+      )}
+    </Box>
+  );
 };
 
-export const conditionOptions = [
-    { value: "", label: "Select Condition" },
-    { value: "Good", label: "Good" },
-    { value: "Fair", label: "Fair" },
-    { value: "Poor", label: "Poor" },
-    { value: "N/A", label: "N/A" },
-]
-const commonTableItems = [
-    {
-        item: 'number',
-        type: 'number',
-        placeholder: "Enter Number",
-        required: false,
-        register: {},
-    },
-    {
-        item: 'type',
-        type: "text",
-        placeholder: "Enter Type",
-        required: false,
-        register: {},
-    },
-    {
-        item: 'capacity',
-        type: "text",
-        placeholder: "Enter Capacity",
-        required: false,
-        register: {},
-    },
-    {
-        item: 'location',
-        type: "text",
-        placeholder: "Enter Location",
-        required: false,
-        register: {},
-    },
-    {
-        item: 'condition',
-        type: "select",
-        placeholder: "Select Condition",
-        options: conditionOptions,
-        required: false,
-        register: {},
-    },
-    {
-        item: 'remarks',
-        type: "text",
-        placeholder: "Enter Remarks",
-        required: false,
-        register: {},
-    },
-
-];
-
-const commonHeaderItems = [
-    {
-        title: "Number",
-        minWidth: "150px"
-    },
-    {
-        title: "Type",
-        minWidth: "150px"
-    },
-    {
-        title: "Capacity",
-        minWidth: "150px"
-    },
-    {
-        title: "Location",
-        minWidth: "150px"
-    },
-    {
-        title: "Condition",
-        minWidth: "200px"
-    },
-    {
-        title: "Remarks",
-        minWidth: "200px"
-    },
-]
-export const fireEquipmentTableData = {
-    name: "fireFighting",
-    headers: [
-        {
-            title: "Fire Fighting Equipment",
-            minWidth: "250px"
-        },
-        ...commonHeaderItems,
-    ],
-    items: [
-        {
-            title: "Fire Fighting Plan",
-            key: "fireFightingPlan",
-            subItems: [...commonTableItems]
-        },
-        {
-            title: "Fire Pumps (Mech)",
-            key: "firePumpsMech",
-            subItems: [...commonTableItems]
-        },
-        {
-            title: "Fire Pumps (Hand)",
-            key: "firePumpsHand",
-            subItems: [...commonTableItems]
-        },
-        {
-            title: "Portable extinguishers",
-            key: "portableExtinguishers",
-            subItems: [...commonTableItems]
-        },
-        {
-            title: "Fixed extinguishing system",
-            key: "fixedExtinguishing",
-            subItems: [...commonTableItems]
-        },
-        {
-            title: "Fire Buckets",
-            key: "fireBuckets",
-            subItems: [...commonTableItems]
-        },
-        {
-            title: "Sand Boxes",
-            key: "sandBoxes",
-            subItems: [...commonTableItems]
-        },
-        {
-            title: "Hydrants",
-            key: "hydrants",
-            subItems: [...commonTableItems]
-        },
-        {
-            title: "Hoses",
-            key: "hoses",
-            subItems: [...commonTableItems]
-        },
-        {
-            title: "Fittings",
-            key: "fittings",
-            subItems: [...commonTableItems]
-        },
-        {
-            title: "Nozzles",
-            key: "nozzles",
-            subItems: [...commonTableItems]
-        },
-        {
-            title: "Jet/Spray",
-            key: "jetSpray",
-            subItems: [...commonTableItems]
-        }
-    ],
-
-};
-
-export const equipmentTableData = {
-    name: "equipment",
-    headers: [
-        {
-            title: "Equipments",
-            minWidth: "200px"
-        },
-        ...commonHeaderItems,
-    ],
-    items: [
-        {
-            title: "Anchors",
-            key: "anchors",
-            subItems: [...commonTableItems]
-        },
-        {
-            title: "Anchor cables/Chains",
-            key: "anchorCablesChains",
-            subItems: [...commonTableItems]
-        },
-        {
-            title: "Bilge pumps",
-            key: "bilgePumps",
-            subItems: [...commonTableItems]
-        },
-        {
-            title: "Winches",
-            key: "winches",
-            subItems: [...commonTableItems]
-        },
-        {
-            title: "Cranes",
-            key: "cranes",
-            subItems: [...commonTableItems]
-        },
-        {
-            title: "Derricks",
-            key: "derricks",
-            subItems: [...commonTableItems]
-        },
-        {
-            title: "Towing Equipment",
-            key: "towingEquipment",
-            subItems: [...commonTableItems]
-        },
-        {
-            title: "Ropes and Lines",
-            key: "ropesAndLines",
-            subItems: [...commonTableItems]
-        },
-        {
-            title: "Collision mat",
-            key: "collisionMat",
-            subItems: [...commonTableItems]
-        },
-        {
-            title: "Gangway",
-            key: "gangway",
-            subItems: [...commonTableItems]
-        },
-        {
-            title: "Fenders",
-            key: "fenders",
-            subItems: [...commonTableItems]
-        },
-        {
-            title: "Boat hook",
-            key: "boatHook",
-            subItems: [...commonTableItems]
-        },
-        {
-            title: "First Aid Kit",
-            key: "firstAidKit",
-            subItems: [...commonTableItems]
-        },
-        {
-            title: "Binoculars",
-            key: "binoculars",
-            subItems: [...commonTableItems]
-        },
-        {
-            title: "Waste Containers",
-            key: "wasteContainers",
-            subItems: [...commonTableItems]
-        },
-        {
-            title: "Heaving line",
-            key: "heavingLine",
-            subItems: [...commonTableItems]
-        },
-        {
-            title: "Axe",
-            key: "axe",
-            subItems: [...commonTableItems]
-        },
-        {
-            title: "Torch",
-            key: "torch",
-            subItems: [...commonTableItems]
-        },
-    ],
-
-};
-
-export const navigationTableData = {
-    name: "navigation",
-    headers: [
-        {
-            title: "Navigational Equipments",
-            minWidth: "250px"
-        },
-        ...commonHeaderItems,
-    ],
-    items: [
-        {
-            title: "Navigation Lights",
-            key: "navigationLights",
-            subItems: [...commonTableItems]
-        },
-        {
-            title: "Sound Signals",
-            key: "soundSignals",
-            subItems: [...commonTableItems]
-        },
-        {
-            title: "Shapes",
-            key: "shapes",
-            subItems: [...commonTableItems]
-        },
-        {
-            title: "Magnetic Compass",
-            key: "magneticCompass",
-            subItems: [...commonTableItems]
-        },
-        {
-            title: "Class B AIS",
-            key: "classBais",
-            subItems: [...commonTableItems]
-        },
-        {
-            title: "Communication equipment",
-            key: "communicationEquipment",
-            subItems: [...commonTableItems]
-        },
-        {
-            title: "Nautical publications",
-            key: "nauticalPublications",
-            subItems: [...commonTableItems]
-        },
-    ],
-
-};
-
-export const lifeSavingEquipmentTableData = {
-    name: "lifeSavingEquipment",
-    headers: [
-        {
-            title: "Life-Saving Equipment",
-            minWidth: "250px"
-        },
-        ...commonHeaderItems,
-    ],
-    items: [
-        {
-            title: "Life jackets",
-            key: "lifejackets",
-            subItems: [...commonTableItems]
-        },
-        {
-            title: "Life rafts",
-            key: "liferafts",
-            subItems: [...commonTableItems]
-        },
-        {
-            title: "Launching arrangements",
-            key: "launchingArrangements",
-            subItems: [...commonTableItems]
-        },
-        {
-            title: "Flotation Devices",
-            key: "flotationDevices",
-            subItems: [...commonTableItems]
-        },
-        {
-            title: "Lifebuoys",
-            key: "lifebuoys",
-            subItems: [...commonTableItems]
-        },
-        {
-            title: "Flares – Parachute",
-            key: "flaresParachute",
-            subItems: [...commonTableItems]
-        },
-        {
-            title: "Smoke Signals",
-            key: "smokeSignals",
-            subItems: [...commonTableItems]
-        },
-        {
-            title: "Life raft equipment",
-            key: "lifeRaftEquipment",
-            subItems: [...commonTableItems]
-        },
-        {
-            title: "Emergency Communications",
-            key: "emergencyCommunications",
-            subItems: [...commonTableItems]
-        },
-    ],
-
-};
-
-export const machineryTableData = {
-    name: "machinery",
-    headers: [
-        {
-            title: "Machinery/Electrical",
-            minWidth: "250px"
-        },
-        ...commonHeaderItems,
-    ],
-    items: [
-        {
-            title: "Main Machinery",
-            key: "mainMachinery",
-            subItems: [...commonTableItems]
-        },
-        {
-            title: "Main Generator",
-            key: "mainGenerator",
-            subItems: [...commonTableItems]
-        },
-        {
-            title: "Emergency Generator",
-            key: "emergencyGenerator",
-            subItems: [...commonTableItems]
-        },
-        {
-            title: "Main Steering Gear",
-            key: "mainSteeringGear",
-            subItems: [...commonTableItems]
-        },
-        {
-            title: "Auxiliary Steering Gear",
-            key: "auxiliarySteeringGear",
-            subItems: [...commonTableItems]
-        },
-        {
-            title: "Switchboard",
-            key: "switchboard",
-            subItems: [...commonTableItems]
-        },
-        {
-            title: "Shore Connection",
-            key: "shoreConnection",
-            subItems: [...commonTableItems]
-        },
-        {
-            title: "Batteries",
-            key: "batteries",
-            subItems: [...commonTableItems]
-        },
-        {
-            title: "Signal Light Switches",
-            key: "signalLightSwitches",
-            subItems: [...commonTableItems]
-        },
-    ],
-
-};
-
-export const accomodationEquipmentTableData = {
-    name: "accommodation",
-    headers: [
-        {
-            title: "Accommodation/Safety",
-            minWidth: "200px"
-        },
-        ...commonHeaderItems,
-    ],
-    items: [
-        {
-            title: "Escape routes",
-            key: "escapeRoutes",
-            subItems: [...commonTableItems]
-        },
-        {
-            title: "Washrooms",
-            key: "washrooms",
-            subItems: [...commonTableItems]
-        },
-        {
-            title: "Toilets",
-            key: "toilets",
-            subItems: [...commonTableItems]
-        },
-        {
-            title: "Galley",
-            key: "galley",
-            subItems: [...commonTableItems]
-        },
-        {
-            title: "Messroom",
-            key: "messroom",
-            subItems: [...commonTableItems]
-        },
-        {
-            title: "Water tanks",
-            key: "waterTanks",
-            subItems: [...commonTableItems]
-        },
-        {
-            title: "Heating/cooling/ventilation",
-            key: "heatingCoolingVentilation",
-            subItems: [...commonTableItems]
-        },
-        {
-            title: "Berth/locker",
-            key: "berthLocker",
-            subItems: [...commonTableItems]
-        },
-        {
-            title: "Access to accommodation",
-            key: "accessToAccommodation",
-            subItems: [...commonTableItems]
-        },
-        {
-            title: "Lighting",
-            key: "lighting",
-            subItems: [...commonTableItems]
-        },
-        {
-            title: "Machinery guards",
-            key: "machineryGuards",
-            subItems: [...commonTableItems]
-        },
-        {
-            title: "Guard rails",
-            key: "guardRails",
-            subItems: [...commonTableItems]
-        },
-        {
-            title: "Non-slip surfaces",
-            key: "nonSlipSurfaces",
-            subItems: [...commonTableItems]
-        },
-        {
-            title: "Ladders/companionways",
-            key: "laddersCompanionways",
-            subItems: [...commonTableItems]
-        },
-        {
-            title: "Noise insulation / protection / notices",
-            key: "noiseInsulation",
-            subItems: [...commonTableItems]
-        },
-        {
-            title: "Foam flotation material: Density",
-            key: "foamFlotationMaterialDensity",
-            subItems: [...commonTableItems]
-        },
-    ],
-
-};
+export default VesselSurveyRegistration;
