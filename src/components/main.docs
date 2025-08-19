@@ -1,1739 +1,308 @@
-import React, { useState, useEffect, useRef } from "react";
-import { Box, Typography, Stack } from "@mui/material";
-import { useParams, useLocation, useNavigate } from "react-router-dom";
-import Stepper from "../../../../common/Stepper.jsx";
-import { useForm } from "react-hook-form";
-import ActionDropdown from "../../../../common/ActionDropdown";
-import ApprovalModal from "../../../../common/ApprovalModal";
-import { useTranslation } from "react-i18next";
+import React, { useImperativeHandle, forwardRef, useState } from "react";
+import { Box, Button, Typography, Paper, Divider, Stack } from "@mui/material";
+import { ChevronRight, CheckCircleFill } from "react-bootstrap-icons";
 import { toast } from "react-toastify";
-import { postData } from "../../../../../services/http.service.ts";
-import {
-  SERVICE_BASE,
-  URLS_ENDPOINT,
-  BASE_IP,
-} from "../../../../../utils/urlsConstants.ts";
-import VesselBasicDetailsView from "./VesselBasicDetailsView.js";
-import ReportsDashboard from "./reports/reportsDashboard.js";
-import { Button } from "react-bootstrap";
-import { BsArrowLeft } from "react-icons/bs";
-import RegistrationApplicationForm from "./RegistrationApplicationForm.jsx";
-import NewLoader from "../../../../common/NewLoader.js";
-import InvoiceModal from "../../../../common/InvoiceModal.js";
-import { getFromLocalStorage } from "../../../../../utils/localStorageUtils.js";
-import { OFFICER_ROLES, USER_ROLES } from "../../../../../utils/constants.ts";
-import { handleErrorMessage } from "../../../../../utils/errorMessageHandler.js";
-import CurvingMarkingNote from "../../new-vessel/common/CurvingMarkingNote.js";
-import CurvingMarkingNoteL5 from "../../new-vessel/common/CurvingMarkingNoteL5.js";
+import { useTranslation } from "react-i18next";
+import { useNavigate, useParams } from "react-router-dom"; // Add useParams
 
-const VesselReportsAndDocs = () => {
-  const { t } = useTranslation();
-  const { id } = useParams();
-  const location = useLocation();
-  const navigate = useNavigate();
-  let isEditMode = !!id && location.pathname.includes("/edit/");
-  let isViewMode = !!id && location.pathname.includes("/view/");
-  const { rowData, pageName } = location?.state || {};
-  const [actionsFromAPI, setActionsFromAPI] = useState([]);
+const themeColor = "#2E57A7";
+const successColor = "#28a745";
 
-  const stepperRef = useRef();
-  const registrationFormRef = useRef();
-
-  const methods = useForm({ mode: "onTouched" });
-  const { trigger, getValues, setValue } = methods;
-  // const [isLoading, setIsLoading] = useState(false);
-  const [showApprovalModal, setShowApprovalModal] = useState(false);
-  const [selectedAction, setSelectedAction] = useState("");
-  const [registrationData, setRegistrationData] = useState(null);
-  const [steps, setSteps] = useState([]);
-  const [disableSubmit, setDisableSubmit] = useState(false);
-  const [initialStep, setInitialStep] = useState(0);
-  const loaderRef = useRef();
-  const [showInvoiceModal, setShowInvoiceModal] = useState(false);
-  const [paymentData, setPaymentData] = useState(null);
-  const [fullPaymentData, setFullPaymentData] = useState({});
-  const [showCmnStepper, setShowCmnStepper] = useState(false);
-
-  const userRole = getFromLocalStorage("userRole") || "";
-  const userDetails = getFromLocalStorage("userDetails") || {};
-  const isOfficerLogin = OFFICER_ROLES.includes(userRole) || false;
-  if (isOfficerLogin) {
-    isViewMode = true;
-  }
-
-  const fetchPaymentDetails = async () => {
-    try {
-      const payload = {
-        category: "REGISTRATION",
-        paymentProcess: "APPLICATIONCHARGE",
-        application_no: id ?? "",
-      };
-
-      loaderRef.current?.show();
-      const apiUrl = `${SERVICE_BASE.IWT_REGISTRATION}${URLS_ENDPOINT.VESSEL_SERVICE.PAYMENT_GENERATE}`;
-      const { status, data } = await postData(apiUrl, payload);
-      if (
-        status !== 200 ||
-        data?.responseStatus?.status !== "FeeSlab found successfully"
-      ) {
-        console.warn(
-          "Payment details not found or API response status mismatch."
-        );
-        return;
-      }
-
-      loaderRef.current?.hide();
-      const apiData = data?.data ?? {};
-
-      const invoiceBreakupInfo = (apiData?.feesDetailsl ?? []).map(
-        (fee, index) => ({
-          id: fee?.id ?? index.toString(),
-          label: fee?.category_description ?? fee?.category_name ?? "N/A",
-          amount: fee?.totalCalucation ?? fee?.old_data ?? 0,
-          categoryHeader: fee?.catHeaderName ?? "",
-        })
-      );
-
-      const summary = {
-        subTotal: apiData.totalAmount ?? 0,
-        cgst: apiData.cgst ?? 0,
-        sgst: apiData.sgst ?? 0,
-        igst: apiData.igst ?? 0,
-        totalPayable: apiData.totalAmountAtergst ?? 0,
-      };
-      console.log("Payment Data:", invoiceBreakupInfo, summary);
-      setPaymentData({ invoiceBreakupInfo, summary });
-      setFullPaymentData(data ?? {});
-    } catch (error) {
-      loaderRef.current?.hide();
-      console.error("Error fetching payment details:", error?.message || error);
-    }
-  };
-
-  const handleGetInvoice = async () => {
-    await fetchPaymentDetails();
-    setShowInvoiceModal(true);
-  };
-
-  const handleProceedToPay = () => {
-    setShowInvoiceModal(false);
-    if (paymentData && id) {
-      navigate(`/payment/${id}`, {
-        state: {
-          paymentData,
-          applicationNumber: id,
-          fullPaymentData,
-        },
-      });
-    }
-  };
-
-  const fetchRegistrationDetails = async () => {
-    console.log("Fetching registration details...");
-    loaderRef.current?.show();
-
-    try {
-      const payload = { applicationNumbers: [id ?? ""] };
-      const apiUrl = `${SERVICE_BASE.IWT_REGISTRATION}${URLS_ENDPOINT.USER_SERVICE.REGISTRATION_SEARCH_BY_ID}`;
-      const { status, data } = await postData(apiUrl, payload);
-
-      const resData = data?.data?.[0] ?? {};
-      // const statusMessage = res?.responseStatus?.status;
-
-      if (status !== 200) {
-        toast.error("Unable to fetch registration details.");
-        return;
-      }
-
-      setRegistrationData(resData);
-
-      const batchSetValues = (valuesObj) => {
-        Object.entries(valuesObj).forEach(([key, value]) => {
-          setValue(key, value ?? "");
-        });
-      };
-
-      const {
-        basicDetails = {},
-        vesselDetails = {},
-        engineDetails = {},
-        processActionMapResponce = [],
-      } = resData;
-
-      const owner = basicDetails?.ownerDetails ?? {};
-      batchSetValues({
-        ownerName: owner?.ownerCompanyName ?? "",
-        ownerAddress: `${owner?.addressLine1 ?? ""}, ${owner?.addressLine2 ?? ""
-          }`,
-        mobile: owner?.phoneNumber ?? "",
-        email: owner?.emailId ?? "",
-        pan: owner?.panNo ?? "",
-        gst: owner?.gstNo ?? "",
-        aadhar: owner?.aadharNumber ?? "",
-        tradeLicence: owner?.tradeLicenseNumber ?? "",
-      });
-
-      batchSetValues({
-        grt: vesselDetails?.grossTonnage ?? "",
-        workOrderValue: vesselDetails?.workOrderValue ?? "",
-        vesselType: vesselDetails?.typeOfVessel ?? "",
-        category: vesselDetails?.categoryOfVessel ?? "",
-        zone: vesselDetails?.zone ?? "",
-        purchaseType: vesselDetails?.purchaseType ?? "",
-        supervisionAuthority: vesselDetails?.supervisionAuthority ?? "",
-        classificationSociety: vesselDetails?.nameOfClassificationSociety ?? "",
-        nameOfMaster: vesselDetails?.nameOfMaster ?? "",
-        certificateNo: vesselDetails?.certficateNumber ?? "",
-        nameOfRegistry: vesselDetails?.nameOfRegistry ?? "",
-        registrationNo: vesselDetails?.registrationNumber ?? "",
-        vesselName: vesselDetails?.vesselName ?? "",
-        kindOfVessel: vesselDetails?.kindOfVessel ?? "",
-        categoryOfVessel: vesselDetails?.categoryOfVessel ?? "",
-        mortgage: vesselDetails?.mortgage ?? "",
-        placeOfBuild: vesselDetails?.placeOfBuild ?? "",
-        detailsOfInsurance: vesselDetails?.insuranceDetails ?? "",
-        vesselyearOfBuild: vesselDetails?.yearOfBuild?.toString() ?? "",
-        protectionAndIndemnityClubNo: vesselDetails?.pniClubNo ?? "",
-        protectionAndIndemnityClubName: vesselDetails?.pniClubName ?? "",
-        insuranceValidUpto: vesselDetails?.insuranceValidDate ?? "",
-      });
-
-      const builder = basicDetails?.builderDetails ?? {};
-      batchSetValues({
-        constructedBy: basicDetails?.constructedBy ?? "2",
-        builderName: builder?.builderName,
-        builderAddress: `${builder?.addressLine1 ?? ""}, ${builder.addressLine2 ?? ""
-          }`,
-        builderEmail: builder?.emailId ?? "",
-        builderMobile: builder?.phone ?? "",
-        builderGST: builder?.gstNo ?? "",
-        builderTradeLicence: builder?.tradeLicenseNumber ?? "",
-        builderAuth: basicDetails?.builderAuthorization ?? "",
-      });
-
-      batchSetValues({
-        yearOfBuild: engineDetails?.yearOfBuild ?? "",
-        typeOfEngine: engineDetails?.engineType ?? "",
-        engineMake: engineDetails?.engineMake ?? "",
-        engineMakerAddress: engineDetails?.makerAddress ?? "",
-        enginepin: engineDetails?.pin ?? "",
-        enginephoneNumber: engineDetails?.mobile ?? "",
-        engineemail: engineDetails?.email ?? "",
-        horsepower: engineDetails?.horsepower?.toString() ?? "",
-        speed: engineDetails?.speed?.toString() ?? "",
-        yearOfMake: engineDetails?.yearOfMake ?? "",
-      });
-
-      batchSetValues({
-        occupation: basicDetails?.occupation,
-        originalPlaceOfBusiness: basicDetails?.originalPlaceBusiness,
-      });
-
-      if (isOfficerLogin) {
-        let actionsItems =
-          processActionMapResponce?.length > 0
-            ? processActionMapResponce[0]?.processs?.[0]?.actions || []
-            : [];
-
-        if (actionsItems?.length > 0 && resData?.appointmentSlots?.length > 0) {
-          actionsItems = actionsItems?.filter(
-            (item) => item.actionName !== "Generate CMN"
-          );
-        }
-
-        setActionsFromAPI(actionsItems);
-      }
-    } catch (err) {
-      console.error("Failed to fetch registration details:", err);
-      toast.error("Failed to fetch registration details.");
-    } finally {
-      loaderRef.current?.hide();
-    }
-  };
-
-  useEffect(() => {
-    if (id) {
-      fetchRegistrationDetails();
-    }
-  }, [id]);
-
-  const handleSubmitAppointments = async (appointmentSlots) => {
-    try {
-      loaderRef.current?.show();
-
-      const payload = {
-        ...createRegistrationPayload(methods.getValues(), {}, appointmentSlots),
-      };
-
-      const apiUrl =
-        SERVICE_BASE.IWT_REGISTRATION + URLS_ENDPOINT.VESSEL_SERVICE.CREATE;
-      const response = await postData(apiUrl, payload);
-
-      if (response?.status === 200 && response?.data?.responseStatus) {
-        toast.success(
-          response?.data?.responseStatus?.message ||
-            "Appointment slots submitted successfully!"
-        );
-        setActionsFromAPI((actions) => {
-          const newActionsItems = actions?.filter(
-            (item) => item.actionName !== "Generate CMN"
-          );
-          return newActionsItems;
-        });
-      } else {
-        toast.error(
-          response?.data?.responseStatus?.message ||
-            "Failed to submit appointment slots"
-        );
-      }
-    } catch (error) {
-      console.error("Appointment submission error:", error);
-      toast.error("Failed to submit appointment slots. Please try again.");
-    } finally {
-      loaderRef.current?.hide();
-    }
-  };
-
-  useEffect(() => {
-    if (!registrationData) return;
-
-    const createStep = (
-      label,
-      component,
-      validate = null,
-      noValidation = true
-    ) => ({
-      label,
-      component,
-      getFormData: () => methods?.getValues(),
-      validate,
-      goToNextStepNoValidtion: noValidation,
-    });
-
-    if (isOfficerLogin || (USER_ROLES.VESSEL_OWNER && isViewMode)) {
-      const stepsList = [];
-      const hasBasicDetails =
-        registrationData?.basicDetails && registrationData?.vesselDetails;
-      if (hasBasicDetails) {
-        stepsList.push(
-          createStep(
-            "Basic Details",
-            <VesselBasicDetailsView
-              formMethods={methods}
-              isPreview
-              formData={getValues()}
-              registrationData={registrationData}
-              ref={loaderRef}
-              BASE_IP={BASE_IP}
-            />
-          )
-        );
-      }
-
-      const reportKeys = [
-        "materialTestReports",
-        "radiographyReports",
-        "inspectionReports",
-        "otherReports",
-      ];
-
-      const hasReports = reportKeys.some(
-        (key) => registrationData?.reports?.[key]?.length > 0
-      );
-
-      if (hasReports) {
-        stepsList.push(
-          createStep(
-            "Reports & Documents",
-            <ReportsDashboard
-              formMethods={methods}
-              viewMode={isViewMode}
-              isUploadOnly
-              applicationNumber={registrationData?.applicationNumber ?? ""}
-              additionalData={registrationData ?? {}}
-              pageName={pageName ?? ""}
-              ref={loaderRef}
-            />
-          )
-        );
-      }
-
-      const hasEngineDetails =
-        registrationData?.engineDetails &&
-        registrationData.engineDetails !== null &&
-        Object.keys(registrationData.engineDetails).length > 0;
-      const hasEnclosers =
-        registrationData?.enclosers && registrationData.enclosers.length > 0;
-
-      if (hasEngineDetails || hasEnclosers) {
-        if (!hasReports && stepsList.length === 1) {
-          stepsList.push(
-            createStep(
-              "Reports & Documents",
-              <ReportsDashboard
-                formMethods={methods}
-                viewMode={isViewMode}
-                isUploadOnly
-                applicationNumber={registrationData?.applicationNumber}
-                additionalData={registrationData}
-                pageName={pageName}
-                ref={loaderRef}
-              />
-            )
-          );
-        }
-
-        stepsList.push(
-          createStep(
-            "Application for Registration",
-            <RegistrationApplicationForm
-              ref={registrationFormRef}
-              registrationData={registrationData}
-              isViewMode={isViewMode}
-            />,
-            async () => {
-              if (registrationFormRef.current?.validateForm) {
-                return await registrationFormRef.current.validateForm();
-              }
-              return true;
-            },
-            false
-          )
-        );
-      }
-      // //  Curving & Marking Note step for L3 and L4 officers
-      // if (
-      //   userRole === USER_ROLES.OFFICER_L3 ||
-      //   userRole === USER_ROLES.OFFICER_L4
-      // ) {
-      //   stepsList.push(
-      //     createStep(
-      //       "Curving & Marking Note",
-      //       <CurvingMarkingNote registrationData={registrationData} />
-      //     )
-      //   );
-      // }
-
-      // //  Director Review step for L5 officers
-      // if (userRole === USER_ROLES.OFFICER_L5) {
-      //   stepsList.push(
-      //     createStep(
-      //       "Director Review",
-      //       <CurvingMarkingNoteL5 registrationData={registrationData} />
-      //     )
-      //   );
-      // }
-
-      if (
-        registrationData?.basicDetails?.isCmnGenerated ||
-        showCmnStepper ||
-        (registrationData?.appointmentSlots &&
-          registrationData.appointmentSlots.length > 0)
-      ) {
-        if (userRole === USER_ROLES.OFFICER_L5) {
-          stepsList.push(
-            createStep(
-              "Director Review",
-              <CurvingMarkingNoteL5
-                registrationData={registrationData}
-                onSubmitAppointments={handleSubmitAppointments}
-              />
-            )
-          );
-        } else if (
-          //  else if (isOfficerLogin) {
-          userRole === USER_ROLES.OFFICER_L3 ||
-          userRole === USER_ROLES.OFFICER_L4 ||
-          USER_ROLES.VESSEL_OWNER
-        ) {
-          stepsList.push(
-            createStep(
-              "Curving & Marking Note",
-              <CurvingMarkingNote
-                registrationData={registrationData}
-                onSubmitAppointments={handleSubmitAppointments}
-              />
-            )
-          );
-        }
-      }
-
-      setSteps(stepsList);
-    } else {
-      const stepsList = [
-        createStep(
-          "Basic Details",
-          <VesselBasicDetailsView
-            formMethods={methods}
-            isPreview
-            formData={getValues()}
-            registrationData={registrationData}
-            ref={loaderRef}
-            BASE_IP={BASE_IP}
-          />
-        ),
-      ];
-
-      const reportsDashboardStep = createStep(
-        "Reports & Documents",
-        <ReportsDashboard
-          formMethods={methods}
-          viewMode={isViewMode}
-          isUploadOnly
-          applicationNumber={rowData?.applicationNumber}
-          additionalData={rowData}
-          pageName={pageName}
-          ref={loaderRef}
-        />
-      );
-
-      if (pageName === "uploadReports" && !isViewMode) {
-        stepsList.push(reportsDashboardStep);
-      }
-
-      if (pageName === "vesselRegistration") {
-        if (!isViewMode) {
-          stepsList.push(reportsDashboardStep);
-        }
-        stepsList.push(
-          createStep(
-            "Application for Registration",
-            <RegistrationApplicationForm
-              ref={registrationFormRef}
-              registrationData={registrationData}
-            />,
-            async () => {
-              if (registrationFormRef.current?.validateForm) {
-                return await registrationFormRef.current.validateForm();
-              }
-              return true;
-            },
-            false
-          )
-        );
-      }
-
-      setSteps(stepsList);
-    }
-  }, [registrationData, isViewMode, isOfficerLogin, userRole, showCmnStepper]);
-
-  const handleActionClick = (action) => {
-    if (action?.actionName === "Generate CMN") {
-      setShowCmnStepper(true);
-      toast.success(
-        "CMN Generated successfully. Please proceed with the next step."
-      );
-      return;
-    }
-
-    setSelectedAction(action);
-    setShowApprovalModal(true);
-  };
-
-  const workflowApplicationSubmit = async (modalFormData) => {
-    try {
-      const URL =
-        SERVICE_BASE.IWT_WORKFLOW +
-        URLS_ENDPOINT.WORK_FLOW_SERVICE.WORKFLOW_ACTION;
-
-      loaderRef?.current?.show();
-
-      const payload = {
-        applicationNo: registrationData?.applicationNumber,
-        processId:
-          registrationData?.processActionMapResponce?.[0]?.processs?.[0]
-            ?.processId,
-        actionId: selectedAction?.actionId,
-        assignerRole: userRole,
-        assignerName:
-          userDetails?.userName ||
-          getFromLocalStorage("userDetails")?.userName ||
-          "",
-        fileId: modalFormData?.document?.url || "",
-        remarks: modalFormData?.reason,
-      };
-
-      const response = await postData(URL, payload);
-      if (
-        response &&
-        response?.status === 200 &&
-        response?.data?.responseStatus?.status === "200"
-      ) {
-        toast.success(
-          response?.data?.responseStatus?.message ||
-          "Action submitted successfully"
-        );
-        handleCloseModal();
-        loaderRef?.current?.hide();
-        setTimeout(() => {
-          navigate("/dashboard");
-        }, 1000);
-      } else {
-        loaderRef?.current?.hide();
-        toast.info(
-          response?.data?.responseStatus?.message || "Something went wrong..",
-          { position: "top-right" }
-        );
-      }
-    } catch (err) {
-      console.log(err);
-      loaderRef?.current?.hide();
-      handleErrorMessage(err?.response?.data);
-    }
-  };
-
-  const handleCloseModal = () => {
-    setShowApprovalModal(false);
-    setSelectedAction("");
-  };
-
-  const handleFormSubmit = async (stepInfo) => {
-    console.log("Current Step Info from Stepper:", stepInfo);
-  };
-
-  const handleFinalSubmit = () => {
-    const allFormData = methods.getValues();
-    toast.success("Form submitted successfully!");
-  };
-
-  const createRegistrationPayload = (
-    formData,
-    registrationFormData,
-    appointmentSlots = []
+const Stepper = forwardRef(
+  (
+    {
+      steps,
+      onSave,
+      viewMode = false,
+      editMode = false,
+      actionComponent = null,
+      onNext,
+      onBack,
+      onPayNow,
+      onSyncData,
+      onSubmit,
+      onGetInvoice,
+      disableStepNavigation = false,
+      disableSubmit = false,
+      initialStep = 0,
+      omitSubmitButton = false,
+    },
+    ref
   ) => {
-    const basePayload = {
-      id: registrationData?.id || "",
-      applicationNumber: id || "",
-      basicDetails: {
-        id: registrationData?.basicDetails?.id || "",
-        applicationNumber: id || "",
-        status: registrationData?.basicDetails?.status || "",
-        constructedBy:
-          registrationData?.basicDetails?.constructedBy ||
-          registrationFormData?.builderName ||
-          "",
-        ownerDetails: {
-          id: registrationData?.basicDetails?.ownerDetails?.id || "",
-          ownerName:
-            registrationFormData?.ownerName ||
-            registrationData?.basicDetails?.ownerDetails?.ownerCompanyName ||
-            "",
-          ownerType:
-            registrationFormData?.ownerType ||
-            registrationData?.basicDetails?.ownerDetails?.categoryOfOwner ||
-            "",
-          email:
-            registrationFormData?.builderEmail ||
-            registrationData?.basicDetails?.ownerDetails?.emailId ||
-            "",
-          address:
-            registrationFormData?.address ||
-            registrationData?.basicDetails?.ownerDetails?.addressLine1 ||
-            "",
-        },
-        builderDetails: {
-          id: registrationData?.basicDetails?.builderDetails?.id || "",
-          builderName:
-            registrationFormData?.builderName ||
-            registrationData?.basicDetails?.builderDetails?.builderName ||
-            "",
-          registrationNumber:
-            registrationData?.basicDetails?.builderDetails
-              ?.registrationNumber || "",
-          address:
-            registrationFormData?.builderAddress ||
-            registrationData?.basicDetails?.builderDetails?.addressLine1 ||
-            "",
-          contactPerson:
-            registrationData?.basicDetails?.builderDetails?.contactPerson || "",
-          contactNumber:
-            registrationFormData?.builderphoneNumber ||
-            registrationData?.basicDetails?.builderDetails?.phone ||
-            "",
-        },
-        builderAuthorization:
-          registrationData?.basicDetails?.builderAuthorization || "",
-        authorizationLetter: registrationData?.basicDetails?.authorizationLetter
-          ? {
-            id: registrationData.basicDetails.authorizationLetter.id || "",
-            fileStoreId:
-              registrationData.basicDetails.authorizationLetter.fileStoreId ||
-              "",
-            documentName:
-              registrationData.basicDetails.authorizationLetter
-                .documentName || "Authorization_Letter.pdf",
-            documentType:
-              registrationData.basicDetails.authorizationLetter
-                .documentType || "AUTHORIZATION_LETTER",
-            documentSource:
-              registrationData.basicDetails.authorizationLetter
-                .documentSource || "AUTHORIZATION_LETTER",
-            descriptions:
-              registrationData.basicDetails.authorizationLetter.description ||
-              "builder authorised letter",
-          }
-          : {
-            id: "",
-            fileStoreId: "",
-            documentName: "Authorization_Letter.pdf",
-            documentType: "AUTHORIZATION_LETTER",
-            documentSource: "AUTHORIZATION_LETTER",
-            descriptions: "builder authorised letter",
-          },
-        occupation:
-          registrationFormData?.occupation ||
-          registrationData?.basicDetails?.occupation ||
-          "",
-        originalPlaceBusiness:
-          registrationFormData?.originalPlaceOfBusiness ||
-          registrationData?.basicDetails?.originalPlaceBusiness ||
-          "",
-        isDrawingFee: registrationData?.basicDetails?.isDrawingFee || false,
-        isSupervisionFee:
-          registrationData?.basicDetails?.isSupervisionFee || false,
-        isApplicationRegistrationFee:
-          registrationData?.basicDetails?.isApplicationRegistrationFee || false,
-        isProvisionaCertificate:
-          registrationData?.basicDetails?.isProvisionaCertificate || false,
-        isEditable:
-          registrationData?.basicDetails?.isEditable !== undefined
-            ? registrationData.basicDetails.isEditable
-            : true,
+    const { t } = useTranslation();
+    const navigate = useNavigate();
+    const { id } = useParams();
+    const [activeStep, setActiveStep] = useState(initialStep);
+    const [completed, setCompleted] = useState({});
+    const [errors, setErrors] = useState({});
+
+    const totalSteps = steps.length;
+    const currentStep = steps[activeStep];
+    console.log("activeStep", activeStep);
+    const buttonStyle = {
+      fontWeight: "bold",
+      borderRadius: "0.5rem",
+      minWidth: "8rem",
+      fontSize: "0.9rem",
+      color: "#fff",
+      backgroundColor: themeColor,
+      "&:hover": {
+        backgroundColor: "#1f4ea0",
       },
-      vesselDetails: {
-        id: registrationData?.vesselDetails?.id || "",
-        typeOfVessel:
-          registrationFormData?.typeOfVessel ||
-          registrationData?.vesselDetails?.typeOfVessel ||
-          "",
-        categoryOfVessel:
-          registrationFormData?.categoryOfVessel ||
-          registrationData?.vesselDetails?.categoryOfVessel ||
-          "",
-        zone:
-          registrationFormData?.zone ||
-          registrationData?.vesselDetails?.zone ||
-          "",
-        grossTonnage:
-          parseInt(formData?.grt) ||
-          registrationData?.vesselDetails?.grossTonnage ||
-          0,
-        workOrderValue:
-          formData?.workOrderValue ||
-          registrationData?.vesselDetails?.workOrderValue ||
-          "",
-        purchaseType:
-          formData?.purchaseType ||
-          registrationData?.vesselDetails?.purchaseType ||
-          "",
-        supervisionAuthority:
-          formData?.supervisionAuthority ||
-          registrationData?.vesselDetails?.supervisionAuthority ||
-          "",
-        nameOfMaster:
-          registrationFormData?.nameOfMaster ||
-          registrationData?.vesselDetails?.nameOfMaster ||
-          "",
-        certficateNumber:
-          registrationFormData?.certificateNo ||
-          registrationData?.vesselDetails?.certficateNumber ||
-          "",
-        nameOfRegistry:
-          registrationFormData?.nameOfRegistry ||
-          registrationData?.vesselDetails?.nameOfRegistry ||
-          "",
-        registrationNumber:
-          registrationFormData?.registrationNo ||
-          registrationData?.vesselDetails?.registrationNumber ||
-          "",
-        vesselName:
-          registrationFormData?.vesselName ||
-          registrationData?.vesselDetails?.vesselName ||
-          "",
-        kindOfVessel:
-          registrationFormData?.kindOfVessel ||
-          registrationData?.vesselDetails?.kindOfVessel ||
-          "",
-        mortgage:
-          registrationFormData?.mortgage ||
-          registrationData?.vesselDetails?.mortgage ||
-          "",
-        placeOfBuild:
-          registrationFormData?.placeOfBuild ||
-          registrationData?.vesselDetails?.placeOfBuild ||
-          "",
-        insuranceDetails:
-          registrationFormData?.detailsOfInsurance ||
-          registrationData?.vesselDetails?.insuranceDetails ||
-          "",
-        yearOfBuild:
-          parseInt(registrationFormData?.vesselyearOfBuild) ||
-          registrationData?.vesselDetails?.yearOfBuild ||
-          null,
-        pniClubNo:
-          registrationFormData?.protectionAndIndemnityClubNo ||
-          registrationData?.vesselDetails?.pniClubNo ||
-          "",
-        pniClubName:
-          registrationFormData?.protectionAndIndemnityClubName ||
-          registrationData?.vesselDetails?.pniClubName ||
-          "",
-        applicationNo:
-          id || registrationData?.vesselDetails?.applicationNo || "",
-        nameOfClassificationSociety:
-          formData?.classificationSociety ||
-          registrationData?.vesselDetails?.nameOfClassificationSociety ||
-          "",
-        iwtVesselBasicDetailsTFk:
-          registrationData?.basicDetails?.id ||
-          registrationData?.vesselDetails?.iwtVesselBasicDetailsTFk ||
-          "",
-        insuranceValidDate:
-          registrationFormData?.insuranceValidUpto ||
-          registrationData?.vesselDetails?.insuranceValidDate ||
-          "",
-      },
-      documents: extractDocuments(formData, registrationData),
-      engineDetails: registrationData?.engineDetails
-        ? {
-          id: registrationData.engineDetails.id || "",
-          yearOfBuild:
-            registrationFormData?.yearOfBuild ||
-            registrationData.engineDetails.yearOfBuild ||
-            "",
-          engineType:
-            registrationFormData?.typeOfEngine ||
-            registrationData.engineDetails.engineType ||
-            "",
-          engineMake:
-            registrationFormData?.engineMake ||
-            registrationData.engineDetails.engineMake ||
-            "",
-          makerAddress:
-            registrationFormData?.engineMakerAddress ||
-            registrationData.engineDetails.makerAddress ||
-            "",
-          pin:
-            registrationFormData?.enginepin ||
-            registrationData.engineDetails.pin ||
-            "",
-          mobile:
-            registrationFormData?.enginephoneNumber ||
-            registrationData.engineDetails.mobile ||
-            "",
-          email:
-            registrationFormData?.engineemail ||
-            registrationData.engineDetails.email ||
-            "",
-          horsepower:
-            parseFloat(registrationFormData?.horsepower) ||
-            registrationData.engineDetails.horsepower ||
-            0,
-          speed:
-            parseFloat(registrationFormData?.speed) ||
-            registrationData.engineDetails.speed ||
-            0,
-          yearOfMake:
-            registrationFormData?.yearOfMake ||
-            registrationData.engineDetails.yearOfMake ||
-            "",
-          iwtApplRegistrationTFk:
-            registrationData?.basicDetails?.id ||
-            registrationData.engineDetails.iwtApplRegistrationTFk ||
-            "",
-        }
-        : {
-          id: "",
-          yearOfBuild: registrationFormData?.yearOfBuild || "",
-          engineType: registrationFormData?.typeOfEngine || "",
-          engineMake: registrationFormData?.engineMake || "",
-          makerAddress: registrationFormData?.engineMakerAddress || "",
-          pin: registrationFormData?.enginepin || "",
-          mobile: registrationFormData?.enginephoneNumber || "",
-          email: registrationFormData?.engineemail || "",
-          horsepower: parseFloat(registrationFormData?.horsepower) || 0,
-          speed: parseFloat(registrationFormData?.speed) || 0,
-          yearOfMake: registrationFormData?.yearOfMake || "",
-          iwtApplRegistrationTFk: registrationData?.basicDetails?.id || "",
-        },
-      enclosers: extractEnclosers(registrationFormData, registrationData),
     };
 
-    if (appointmentSlots.length > 0) {
-      basePayload.appointmentSlots = appointmentSlots;
-    }
+    useImperativeHandle(ref, () => ({
+      goToNextStep,
+      goToStep,
+    }));
 
-    return basePayload;
-  };
+    const goToNextStep = () => {
+      setActiveStep((prev) => Math.min(prev + 1, totalSteps - 1));
+    };
 
-  const extractDocuments = (formData, registrationData) => {
-    const documents = [];
+    const markStepCompleted = () => {
+      setCompleted((prev) => ({ ...prev, [activeStep]: true }));
+    };
 
-    if (
-      registrationData?.documents &&
-      Array.isArray(registrationData.documents)
-    ) {
-      registrationData.documents.forEach((doc) => {
-        documents.push({
-          id: doc.id || "",
-          fileStoreId: doc.fileStoreId || "",
-          documentName: doc.documentName || "",
-          documentType: doc.documentType || "",
-          documentSource: doc.documentSource || "",
-          description: doc.description || "",
-        });
-      });
-    }
+    const validateAndProceed = async (callback) => {
+      if (currentStep.validate) {
+        const isValid = await currentStep.validate();
+        setErrors((prev) => ({ ...prev, [activeStep]: !isValid }));
 
-    const documentTypes = [
-      {
-        key: "WORK_ORDER",
-        name: "Work Order.pdf",
-        description: "Work Order document",
-      },
-      { key: "DRAWINGS", name: "Drawing.pdf", description: "Drawing document" },
-      {
-        key: "TONNAGE_BOOKLETS",
-        name: "Tonnage Booklet.pdf",
-        description: "Tonnage document",
-      },
-      {
-        key: "STABILITY_BOOKLETS",
-        name: "Stability Booklet.pdf",
-        description: "Stability document",
-      },
-    ];
-
-    documentTypes.forEach(({ key, name, description }) => {
-      const fileStoreId = formData?.[`${key}_fileStoreId`];
-      if (fileStoreId) {
-        documents.push({
-          id: "",
-          fileStoreId,
-          documentName: name,
-          documentType: key,
-          documentSource: key,
-          description,
-        });
-      }
-    });
-
-    return documents;
-  };
-
-  const extractEnclosers = (formData, registrationData) => {
-    const enclosers = [];
-
-    if (
-      registrationData?.enclosers &&
-      Array.isArray(registrationData.enclosers)
-    ) {
-      registrationData.enclosers.forEach((encloser) => {
-        enclosers.push({
-          id: encloser.id || "",
-          fileStoreId: encloser.fileStoreId || "",
-          documentName: encloser.documentName || "",
-          documentType: encloser.documentType || "",
-          documentSource: encloser.documentSource || "",
-          description: encloser.description || "",
-        });
-      });
-    }
-
-    const encloserTypes = [
-      {
-        key: "thirdPartyInsurance",
-        type: "THIRD_PARTY_INSURANCE",
-        name: "Third Party Insurance",
-      },
-      {
-        key: "builderCertificate",
-        type: "BUILDERS_CERTIFICATE",
-        name: "Builder Certificate",
-      },
-      {
-        key: "instrumentOfSale",
-        type: "INSTRUMENT_OF_SALE",
-        name: "Instrument of Sale",
-      },
-      {
-        key: "mortgageDetails",
-        type: "MORTGAGE_DETAILS",
-        name: "Mortgage Details",
-      },
-      {
-        key: "pniInsurance",
-        type: "PREOTECTION_AND_INDEMNITY_INSURANCE_NO",
-        name: "Protection and Indemnity Insurance",
-      },
-      {
-        key: "declarationOfOwnership",
-        type: "DECLARATION_OF_OWNERSHIP",
-        name: "Declaration of Ownership",
-      },
-      { key: "challan", type: "CHALLAN", name: "Challan" },
-    ];
-
-    encloserTypes.forEach(({ key, type, name }) => {
-      const fileStoreId = formData?.[`${key}FileStoreId`];
-      if (fileStoreId) {
-        enclosers.push({
-          id: "",
-          fileStoreId,
-          documentName: `${name}.pdf`,
-          documentType: type,
-          documentSource: type,
-          description: `${name} document`,
-        });
-      }
-    });
-
-    return enclosers;
-  };
-
-  const handleSubmit = async () => {
-    try {
-      loaderRef.current?.show();
-
-      const formData = methods.getValues();
-      let registrationFormData = {};
-      if (registrationFormRef.current?.getFormData) {
-        registrationFormData = registrationFormRef.current.getFormData();
-      }
-
-      const payload = createRegistrationPayload(formData, registrationFormData);
-
-      const apiUrl =
-        SERVICE_BASE.IWT_REGISTRATION + URLS_ENDPOINT.VESSEL_SERVICE.CREATE;
-      const response = await postData(apiUrl, payload);
-
-      if (response?.status === 200 && response?.data?.responseStatus) {
-        // if (response?.status === 200 && response?.data?.responseStatus?.status === "Data Created Successfully") {
-        toast.success(
-          response?.data?.responseStatus?.message ||
-          "Registration submitted successfully!"
-        );
-        setDisableSubmit(true);
-        setInitialStep(steps.length - 1);
-        // setTimeout(() => {
-        // navigate("/dashboard");
-        // }, 1500);
-      } else {
-        toast.error(
-          response?.data?.responseStatus?.message ||
-          "Submission failed. Please try again."
-        );
-      }
-    } catch (error) {
-      console.error("Submission error:", error);
-      toast.error("Failed to submit form. Please try again.");
-    } finally {
-      // setIsLoading(false);
-      loaderRef.current?.hide();
-    }
-  };
-
-  const actionDropdown =
-    isViewMode && isOfficerLogin && actionsFromAPI.length > 0 ? (
-      <ActionDropdown
-        actions={actionsFromAPI}
-        onActionClick={handleActionClick}
-        variant="contained"
-        sx={{
-          backgroundColor: "#2E57A7",
-          fontWeight: "bold",
-          borderRadius: "0.5rem",
-          minWidth: "8rem",
-          fontSize: "0.9rem",
-          color: "#fff",
-          "&:hover": {
-            backgroundColor: "#1f4ea0",
-          },
-        }}
-      />
-    ) : null;
-
-  return (
-    <Box
-      sx={{
-        padding: "1rem 0.5rem 0 0.5rem",
-        backgroundColor: "#f5f6fa",
-        minHeight: "100vh",
-      }}
-    >
-      <NewLoader ref={loaderRef} />
-      <>
-        <div className="d-flex flex-column flex-md-row justify-content-between align-items-start align-items-md-center mb-4 gap-3">
-          <div
-            className="d-flex align-items-center flex-grow-1"
-            style={{ gap: "16px" }}
-          >
-            <Button
-              variant="outline-primary"
-              onClick={() => navigate("/dashboard")}
-              className="d-flex align-items-center justify-content-center shadow-sm"
-              style={{
-                borderRadius: "50%",
-                width: "40px",
-                height: "40px",
-                border: "2px solid #2E57A7",
-                color: "#2E57A7",
-                backgroundColor: "#fff",
-                transition: "all 0.3s ease",
-                padding: "0",
-              }}
-              onMouseEnter={(e) => {
-                e.target.style.backgroundColor = "#2E57A7";
-                e.target.style.color = "#fff";
-                e.target.style.transform = "translateY(-2px)";
-                e.target.style.boxShadow = "0 4px 12px rgba(46, 87, 167, 0.3)";
-              }}
-              onMouseLeave={(e) => {
-                e.target.style.backgroundColor = "#fff";
-                e.target.style.color = "#2E57A7";
-                e.target.style.transform = "translateY(0)";
-                e.target.style.boxShadow = "0 2px 4px rgba(0,0,0,0.1)";
-              }}
-            >
-              <BsArrowLeft size={16} />
-            </Button>
-            <Stack spacing={0.5} className="flex-grow-1">
-              <Typography
-                sx={{
-                  fontWeight: 550,
-                  color: "#2E57A7",
-                  fontSize: { xs: "1rem", sm: "1.1rem", md: "1.2rem" },
-                  lineHeight: 1.2,
-                }}
-              >
-                Vessel Application Details - ({id})
-              </Typography>
-              <Typography
-                sx={{
-                  color: "#026931ff",
-                  fontSize: { xs: "0.95rem", sm: "0.85rem" },
-                  fontWeight: "bold",
-                  lineHeight: 1.3,
-                }}
-              >
-                {pageName === "uploadReports"
-                  ? "Upload neccessary Reports & Documents"
-                  : pageName === "vesselRegistration"
-                    ? "Please fill up the Vessel Registration form.."
-                    : ""}
-              </Typography>
-            </Stack>
-          </div>
-        </div>
-        {steps?.length > 0 && (
-          <Stepper
-            ref={stepperRef}
-            steps={steps}
-            viewMode={true}
-            actionComponent={actionDropdown}
-            onSyncData={handleFormSubmit}
-            onSave={handleFinalSubmit}
-            onSubmit={handleSubmit}
-            disableSubmit={disableSubmit}
-            initialStep={initialStep}
-            omitSubmitButton={
-              pageName === "uploadReports" ||
-              (isOfficerLogin &&
-                actionsFromAPI?.length === 0 &&
-                steps?.length === 1) ||
-              (isOfficerLogin && actionsFromAPI?.length < 1)
-              || (userRole === USER_ROLES.VESSEL_OWNER && showCmnStepper)
-            }
-            // omitSubmitButton={pageName === "uploadReports" || (isOfficerLogin && actionsFromAPI?.length === 0 && steps?.length === 1) }
-            onGetInvoice={handleGetInvoice}
-          />
-        )}
-        {isOfficerLogin && isViewMode && (
-          <ApprovalModal
-            show={showApprovalModal}
-            handleClose={handleCloseModal}
-            handleSubmitData={workflowApplicationSubmit}
-            selectedAction={selectedAction}
-          />
-        )}
-        <InvoiceModal
-          show={showInvoiceModal}
-          onHide={() => setShowInvoiceModal(false)}
-          paymentData={paymentData}
-          onProceedToPay={handleProceedToPay}
-          applicationNumber={id}
-        />
-      </>
-    </Box>
-  );
-};
-
-export default VesselReportsAndDocs;
-
-response-->
-{
-    "responseStatus": {
-        "status": "Registration details fetched successfully",
-        "message": "Operation completed successfully."
-    },
-    "data": [
-        {
-            "id": "33a00400-5136-424b-a5a6-cdbb19b823f8",
-            "applicationNumber": "WB-REG-2025-640092",
-            "basicDetails": {
-                "id": "33a00400-5136-424b-a5a6-cdbb19b823f8",
-                "applicationNumber": "WB-REG-2025-640092",
-                "status": "Vessel Application Approved",
-                "ownerDetails": {
-                    "id": "01245a20-4c1d-49bb-acd3-fdc1fddb5e37",
-                    "categoryOfOwner": "A",
-                    "ownerCompanyName": "fhhfhf",
-                    "emailId": "owner@owner.com",
-                    "phoneNumber": "7654545454",
-                    "panNo": "GFDSY0987E",
-                    "gstNo": "27ABCDE1234F1Z5",
-                    "addressLine1": "FDFDFD",
-                    "addressLine2": "",
-                    "pin": 700155,
-                    "district": "24 PARAGANAS NORTH",
-                    "state": "WEST BENGAL",
-                    "country": "India",
-                    "authorisedFname": "SADASD",
-                    "authorisedLname": "sadasda",
-                    "authorisedMob": "8765255252",
-                    "authorisedEmail": "dsdsdf@gmail.com",
-                    "loaReferenceId": "",
-                    "panReferenceId": "",
-                    "gstCertReferenceId": "",
-                    "addressReferenceId": "",
-                    "companyCertReferenceId": "",
-                    "cinNo": "U12345MH2025PTC999999",
-                    "dinNo": "12345678",
-                    "moaCertificateReferenceId": "",
-                    "aoaCertificateReferenceId": "",
-                    "userMIdFk": "",
-                    "aadharNumber": "123456789012",
-                    "tradeLicenseNumber": "TLN-2025-IND-004123",
-                    "fileStoreMap": [
-                        {
-                            "fileStoreId": "9e7d8617-14db-4e05-bbb2-d85380b02772",
-                            "alfrescoId": "e1ef29f2-61d6-490c-af29-f261d6890c92",
-                            "registrationNumber": "01245a20-4c1d-49bb-acd3-fdc1fddb5e37",
-                            "fileName": "dummy.pdf",
-                            "module": "iwt.upload",
-                            "tenantId": "iwt.wb",
-                            "tag": null,
-                            "fieldName": "owner_details_dummy",
-                            "auditDetails": null,
-                            "downLoadFile": "http://3.111.175.246:7073/filestore/v1/files/id?fileStoreId=9e7d8617-14db-4e05-bbb2-d85380b02772"
-                        }
-                    ],
-                    "auditDetails": {
-                        "createdBy": "01245a20-4c1d-49bb-acd3-fdc1fddb5e37",
-                        "createdOn": null,
-                        "updatedBy": "01245a20-4c1d-49bb-acd3-fdc1fddb5e37",
-                        "updatedOn": null
-                    }
-                },
-                "builderDetails": {
-                    "id": "b018c3a1-068a-4464-be8c-4dd167e7aa79",
-                    "builderName": "BlueWave Shipbuilders LLP",
-                    "emailId": "rider21@builder.com",
-                    "phone": "9988776655",
-                    "panNo": "ABCDE1234F",
-                    "gstNo": "27ABCDE1234F1Z5",
-                    "addressLine1": "Plot 15, Dockyard Lane",
-                    "addressLine2": "Sector 3, Industrial Area",
-                    "pin": "400001",
-                    "district": "Mumbai",
-                    "state": "Maharashtra",
-                    "country": "India",
-                    "panReferenceId": "doc123_pan",
-                    "gstCertificateReferenceId": "doc456_gst",
-                    "addressReferenceId": "doc789_address",
-                    "userId": "",
-                    "aadharNumber": "123456789012",
-                    "tradeLicenseNumber": "TLN-2025-IND-000123",
-                    "fileStoreMap": [
-                        {
-                            "fileStoreId": "598b0de0-a1f4-45f0-b951-13c6d74a4f14",
-                            "alfrescoId": "a6f93a7a-2c64-435e-b93a-7a2c64835ea0",
-                            "registrationNumber": "b018c3a1-068a-4464-be8c-4dd167e7aa79",
-                            "fileName": "Screenshot (2).png",
-                            "module": "iwt.upload",
-                            "tenantId": "iwt.wb",
-                            "tag": null,
-                            "fieldName": "builder_details_Screenshot (2)",
-                            "auditDetails": null,
-                            "downLoadFile": "http://3.111.175.246:7073/filestore/v1/files/id?fileStoreId=598b0de0-a1f4-45f0-b951-13c6d74a4f14"
-                        }
-                    ],
-                    "auditDetails": {
-                        "createdBy": "b018c3a1-068a-4464-be8c-4dd167e7aa79",
-                        "createdOn": null,
-                        "updatedBy": "b018c3a1-068a-4464-be8c-4dd167e7aa79",
-                        "updatedOn": null
-                    }
-                },
-                "builderAuthorization": "APPROVED",
-                "authorizationLetter": {
-                    "id": "9813b661-9e67-4295-aebd-dff8d0998e34",
-                    "documentName": "Authorization_Letter.pdf",
-                    "documentType": "AUTHORIZATION_LETTER",
-                    "applicationNumber": "WB-REG-2025-640092",
-                    "fileStoreId": "672a6521-a042-42c1-b8ab-a71368925b24",
-                    "documentSource": "AUTHORIZATION_LETTER",
-                    "description": "",
-                    "auditDetails": {
-                        "createdBy": null,
-                        "createdOn": null,
-                        "updatedBy": "f401e43a-17aa-4a15-abc9-545702bb5864",
-                        "updatedOn": "2025-08-19T11:04:06.559188763"
-                    },
-                    "active": true
-                },
-                "constructedBy": "2",
-                "occupation": "test-occupation",
-                "originalPlaceBusiness": "test-business",
-                "isDrawingFee": true,
-                "isSupervisionFee": true,
-                "isApplicationRegistrationFee": true,
-                "isProvisionaCertificate": false,
-                "isEditable": true,
-                "enableReportUpload": false,
-                "isReportUploadCompleted": false,
-                "isCmnGenerated": true,
-                "enableAppRegistration": false,
-                "enableInitialSurvey": true,
-                "initialSurveyCompleted": false,
-                "currentWorkflowState": "APPLICATIONCHARGE",
-                "auditDetails": {
-                    "createdBy": "33a00400-5136-424b-a5a6-cdbb19b823f8",
-                    "createdOn": "2025-08-19T10:34:04.087299098",
-                    "updatedBy": "33a00400-5136-424b-a5a6-cdbb19b823f8",
-                    "updatedOn": "33a00400-5136-424b-a5a6-cdbb19b823f8"
-                }
-            },
-            "vesselDetails": {
-                "id": "fa4611f3-a7c9-425b-bf20-122020bb2164",
-                "typeOfVessel": "NON PASSENGER",
-                "categoryOfVessel": "A",
-                "zone": "ZONE 1",
-                "grossTonnage": 2020,
-                "workOrderValue": "232",
-                "purchaseType": "NEW",
-                "supervisionAuthority": "CLASSIFICATION SOCIETY",
-                "nameOfMaster": "test-vessel",
-                "certficateNumber": "test-vessel25256",
-                "nameOfRegistry": "vessel-reg",
-                "registrationNumber": "WBJ0009",
-                "vesselName": "maa saraswati vessel",
-                "kindOfVessel": "JALADHARA",
-                "mortgage": "yes",
-                "placeOfBuild": "2025",
-                "insuranceDetails": "int-test",
-                "yearOfBuild": 2025,
-                "pniClubNo": "pni-2532",
-                "pniClubName": "club-388",
-                "applicationNo": "WB-REG-2025-640092",
-                "nameOfClassificationSociety": "",
-                "iwtVesselBasicDetailsTFk": "33a00400-5136-424b-a5a6-cdbb19b823f8",
-                "insuranceValidDate": "2029",
-                "auditDetails": {
-                    "createdBy": "fa4611f3-a7c9-425b-bf20-122020bb2164",
-                    "createdOn": "2025-08-19T10:34:04.336833645",
-                    "updatedBy": "fa4611f3-a7c9-425b-bf20-122020bb2164",
-                    "updatedOn": "2025-08-19T11:04:06.551218816"
-                }
-            },
-            "documents": [
-                {
-                    "id": "f400b490-2e99-40e5-9ee5-5b8759cdd5a8",
-                    "documentName": "Stability Booklets.pdf",
-                    "documentType": "STABILITY_BOOKLETS",
-                    "applicationNumber": "WB-REG-2025-640092",
-                    "fileStoreId": "cef39a9c-5033-4cb3-8232-ec67163cd423",
-                    "documentSource": "STABILITY_BOOKLETS",
-                    "description": "Stability document",
-                    "auditDetails": {
-                        "createdBy": null,
-                        "createdOn": null,
-                        "updatedBy": "f401e43a-17aa-4a15-abc9-545702bb5864",
-                        "updatedOn": "2025-08-19T11:04:06.556277017"
-                    },
-                    "active": true
-                },
-                {
-                    "id": "b0967ad3-3234-4c86-a7dd-63fa728a09a6",
-                    "documentName": "Tonnage Booklets.pdf",
-                    "documentType": "TONNAGE_BOOKLETS",
-                    "applicationNumber": "WB-REG-2025-640092",
-                    "fileStoreId": "ef502f10-6111-46fa-a74b-080fddc9a4e5",
-                    "documentSource": "TONNAGE_BOOKLETS",
-                    "description": "Tonnage document",
-                    "auditDetails": {
-                        "createdBy": null,
-                        "createdOn": null,
-                        "updatedBy": "f401e43a-17aa-4a15-abc9-545702bb5864",
-                        "updatedOn": "2025-08-19T11:04:06.557669141"
-                    },
-                    "active": true
-                },
-                {
-                    "id": "9813b661-9e67-4295-aebd-dff8d0998e34",
-                    "documentName": "Authorization_Letter.pdf",
-                    "documentType": "AUTHORIZATION_LETTER",
-                    "applicationNumber": "WB-REG-2025-640092",
-                    "fileStoreId": "672a6521-a042-42c1-b8ab-a71368925b24",
-                    "documentSource": "AUTHORIZATION_LETTER",
-                    "description": "",
-                    "auditDetails": {
-                        "createdBy": null,
-                        "createdOn": null,
-                        "updatedBy": "f401e43a-17aa-4a15-abc9-545702bb5864",
-                        "updatedOn": "2025-08-19T11:04:06.559188763"
-                    },
-                    "active": true
-                },
-                {
-                    "id": "14856cc4-ef65-44e1-bab0-c6d50e026225",
-                    "documentName": "DRAWINGS_01.pdf",
-                    "documentType": "DRAWINGS",
-                    "applicationNumber": "WB-REG-2025-640092",
-                    "fileStoreId": "e0bf2acd-2ad0-4633-bb29-5e039bf8ffb5",
-                    "documentSource": "DRAWINGS",
-                    "description": "",
-                    "auditDetails": {
-                        "createdBy": null,
-                        "createdOn": null,
-                        "updatedBy": "f401e43a-17aa-4a15-abc9-545702bb5864",
-                        "updatedOn": "2025-08-19T11:04:06.560499543"
-                    },
-                    "active": true
-                },
-                {
-                    "id": "b2e66f4f-c047-4be5-a43d-3c75f3944d09",
-                    "documentName": "WORK_ORDER_01.pdf",
-                    "documentType": "WORK_ORDER",
-                    "applicationNumber": "WB-REG-2025-640092",
-                    "fileStoreId": "1dbae63f-618f-4b0e-ae1d-5feda1264ae1",
-                    "documentSource": "WORK_ORDER",
-                    "description": "",
-                    "auditDetails": {
-                        "createdBy": null,
-                        "createdOn": null,
-                        "updatedBy": "f401e43a-17aa-4a15-abc9-545702bb5864",
-                        "updatedOn": "2025-08-19T11:04:06.561770471"
-                    },
-                    "active": true
-                }
-            ],
-            "reports": {
-                "materialTestReports": [
-                    {
-                        "id": "3b0f5f4e-8134-447b-a5bd-7137afbdfe98",
-                        "documentName": "Material Test Report",
-                        "documentType": "MATERIAL_TEST_REPORT",
-                        "applicationNumber": "WB-REG-2025-640092",
-                        "fileStoreId": "41dee559-a202-42c9-8ac6-a7d52fef50c3",
-                        "documentSource": "MATERIAL_TEST_REPORT",
-                        "description": "",
-                        "auditDetails": {
-                            "createdBy": null,
-                            "createdOn": null,
-                            "updatedBy": "3b0f5f4e-8134-447b-a5bd-7137afbdfe98",
-                            "updatedOn": "2025-08-19T10:51:15.152723444"
-                        },
-                        "active": true
-                    }
-                ],
-                "radiographyReports": [],
-                "inspectionReports": [],
-                "otherReports": [
-                    {
-                        "id": "332418e3-d555-4388-b730-f5b49af1abae",
-                        "documentName": "Other Report",
-                        "documentType": "OTHER_REPORT",
-                        "applicationNumber": "WB-REG-2025-640092",
-                        "fileStoreId": "1b65739c-a786-4fd6-a387-0a21a72131fe",
-                        "documentSource": "OTHER_REPORT",
-                        "description": "",
-                        "auditDetails": {
-                            "createdBy": null,
-                            "createdOn": null,
-                            "updatedBy": "332418e3-d555-4388-b730-f5b49af1abae",
-                            "updatedOn": "2025-08-19T10:51:27.241515966"
-                        },
-                        "active": true
-                    }
-                ]
-            },
-            "engineDetails": {
-                "id": "afdf8770-5537-4e25-831e-f21776ed3b4a",
-                "yearOfBuild": "2025",
-                "engineType": "diesel",
-                "engineMake": "test-engine",
-                "makerAddress": "kolkata",
-                "pin": "700129",
-                "mobile": "7366362626",
-                "email": "testenginemake@gmail.com",
-                "horsepower": 2000.00,
-                "speed": 2029.00,
-                "yearOfMake": "2025",
-                "applRegistrationTFk": "33a00400-5136-424b-a5a6-cdbb19b823f8",
-                "auditDetails": {
-                    "createdBy": "afdf8770-5537-4e25-831e-f21776ed3b4a",
-                    "createdOn": "2025-08-19T10:55:48.754396500",
-                    "updatedBy": "afdf8770-5537-4e25-831e-f21776ed3b4a",
-                    "updatedOn": "2025-08-19T11:04:06.562992246"
-                }
-            },
-            "enclosers": [
-                {
-                    "id": "2fd4d0e4-8b2b-45bf-a6ab-ad2dbcf5d9c6",
-                    "documentName": "Protection and Indemnity Insurance.pdf",
-                    "documentType": "PREOTECTION_AND_INDEMNITY_INSURANCE_NO",
-                    "applicationNumber": "WB-REG-2025-640092",
-                    "fileStoreId": "d8800d95-f4a4-4f5e-84e8-01f3601d245a",
-                    "documentSource": "PREOTECTION_AND_INDEMNITY_INSURANCE_NO",
-                    "description": "Protection and Indemnity Insurance document",
-                    "auditDetails": {
-                        "createdBy": null,
-                        "createdOn": null,
-                        "updatedBy": "f401e43a-17aa-4a15-abc9-545702bb5864",
-                        "updatedOn": "2025-08-19T11:04:06.566469072"
-                    },
-                    "active": true
-                },
-                {
-                    "id": "e2639ce6-fd94-4a10-b73e-c2d718f2799f",
-                    "documentName": "Instrument of Sale.pdf",
-                    "documentType": "INSTRUMENT_OF_SALE",
-                    "applicationNumber": "WB-REG-2025-640092",
-                    "fileStoreId": "51c97051-238c-4c32-a074-fb5fef8a5161",
-                    "documentSource": "INSTRUMENT_OF_SALE",
-                    "description": "Instrument of Sale document",
-                    "auditDetails": {
-                        "createdBy": null,
-                        "createdOn": null,
-                        "updatedBy": "f401e43a-17aa-4a15-abc9-545702bb5864",
-                        "updatedOn": "2025-08-19T11:04:06.567689858"
-                    },
-                    "active": true
-                },
-                {
-                    "id": "8b7cc5a2-2d2a-4c09-a007-f70a8d7ceed9",
-                    "documentName": "Builder Certificate.pdf",
-                    "documentType": "BUILDERS_CERTIFICATE",
-                    "applicationNumber": "WB-REG-2025-640092",
-                    "fileStoreId": "05240f16-cc5e-40cd-ab3a-9e297a2d0dd1",
-                    "documentSource": "BUILDERS_CERTIFICATE",
-                    "description": "Builder Certificate document",
-                    "auditDetails": {
-                        "createdBy": null,
-                        "createdOn": null,
-                        "updatedBy": "f401e43a-17aa-4a15-abc9-545702bb5864",
-                        "updatedOn": "2025-08-19T11:04:06.568884712"
-                    },
-                    "active": true
-                },
-                {
-                    "id": "e57dffb7-fe8c-4129-a258-ba1b30ee21cf",
-                    "documentName": "Declaration of Ownership.pdf",
-                    "documentType": "DECLARATION_OF_OWNERSHIP",
-                    "applicationNumber": "WB-REG-2025-640092",
-                    "fileStoreId": "ea1aba0b-7d3c-4069-b2e6-1ce8e76df9cd",
-                    "documentSource": "DECLARATION_OF_OWNERSHIP",
-                    "description": "Declaration of Ownership document",
-                    "auditDetails": {
-                        "createdBy": null,
-                        "createdOn": null,
-                        "updatedBy": "f401e43a-17aa-4a15-abc9-545702bb5864",
-                        "updatedOn": "2025-08-19T11:04:06.570099397"
-                    },
-                    "active": true
-                },
-                {
-                    "id": "6db7903a-975b-4172-8c44-71ac7ba7c5d8",
-                    "documentName": "Mortgage Details.pdf",
-                    "documentType": "MORTGAGE_DETAILS",
-                    "applicationNumber": "WB-REG-2025-640092",
-                    "fileStoreId": "6615df0e-ce33-4f3e-847d-2a2767ba98a1",
-                    "documentSource": "MORTGAGE_DETAILS",
-                    "description": "Mortgage Details document",
-                    "auditDetails": {
-                        "createdBy": null,
-                        "createdOn": null,
-                        "updatedBy": "f401e43a-17aa-4a15-abc9-545702bb5864",
-                        "updatedOn": "2025-08-19T11:04:06.571305601"
-                    },
-                    "active": true
-                },
-                {
-                    "id": "a54d4659-083a-48ac-a46a-f89eb4c06238",
-                    "documentName": "Challan.pdf",
-                    "documentType": "CHALLAN",
-                    "applicationNumber": "WB-REG-2025-640092",
-                    "fileStoreId": "24c16cd0-b3a5-442e-bb93-bee2be37e26b",
-                    "documentSource": "CHALLAN",
-                    "description": "Challan document",
-                    "auditDetails": {
-                        "createdBy": null,
-                        "createdOn": null,
-                        "updatedBy": "f401e43a-17aa-4a15-abc9-545702bb5864",
-                        "updatedOn": "2025-08-19T11:04:06.572478954"
-                    },
-                    "active": true
-                },
-                {
-                    "id": "b3e0a8b4-2639-42de-bd66-1bb7c5569273",
-                    "documentName": "Third Party Insurance.pdf",
-                    "documentType": "THIRD_PARTY_INSURANCE",
-                    "applicationNumber": "WB-REG-2025-640092",
-                    "fileStoreId": "58cc670c-5433-48ff-b31f-7ebedfabe2e1",
-                    "documentSource": "THIRD_PARTY_INSURANCE",
-                    "description": "Third Party Insurance document",
-                    "auditDetails": {
-                        "createdBy": null,
-                        "createdOn": null,
-                        "updatedBy": "f401e43a-17aa-4a15-abc9-545702bb5864",
-                        "updatedOn": "2025-08-19T11:04:06.573661568"
-                    },
-                    "active": true
-                }
-            ],
-            "appointmentSlots": [
-                {
-                    "id": "fc1e4a2d-3517-429b-b3b1-aef40868d4e7",
-                    "applicationNumber": "WB-REG-2025-640092",
-                    "date": "2025-08-19",
-                    "timeSlot": "11:00 AM - 12:00 PM",
-                    "appointmentStatus": "AVAILABLE",
-                    "isBooked": false,
-                    "bookedBy": null,
-                    "auditDetails": {
-                        "createdBy": "Admin",
-                        "createdOn": "2025-08-19T11:04:06.580972929",
-                        "updatedBy": "Admin",
-                        "updatedOn": "2025-08-19T11:04:06.580983449"
-                    }
-                },
-                {
-                    "id": "e0f05e30-493d-4b92-948a-aaccf5eeaf26",
-                    "applicationNumber": "WB-REG-2025-640092",
-                    "date": "2025-08-19",
-                    "timeSlot": "12:00 PM - 01:00 PM",
-                    "appointmentStatus": "AVAILABLE",
-                    "isBooked": false,
-                    "bookedBy": null,
-                    "auditDetails": {
-                        "createdBy": "Admin",
-                        "createdOn": "2025-08-19T11:04:06.584944692",
-                        "updatedBy": "Admin",
-                        "updatedOn": "2025-08-19T11:04:06.584953822"
-                    }
-                },
-                {
-                    "id": "b19086c6-9637-4ff4-b8cd-33cd20d90aa2",
-                    "applicationNumber": "WB-REG-2025-640092",
-                    "date": "2025-08-19",
-                    "timeSlot": "02:00 PM - 03:00 PM",
-                    "appointmentStatus": "AVAILABLE",
-                    "isBooked": false,
-                    "bookedBy": null,
-                    "auditDetails": {
-                        "createdBy": "Admin",
-                        "createdOn": "2025-08-19T11:04:06.587744651",
-                        "updatedBy": "Admin",
-                        "updatedOn": "2025-08-19T11:04:06.587752112"
-                    }
-                },
-                {
-                    "id": "34c0bad8-625c-48a5-8f80-05581cd7d807",
-                    "applicationNumber": "WB-REG-2025-640092",
-                    "date": "2025-08-19",
-                    "timeSlot": "01:00 PM - 02:00 PM",
-                    "appointmentStatus": "BOOKED",
-                    "isBooked": true,
-                    "bookedBy": "WB-REG-2025-640092",
-                    "auditDetails": {
-                        "createdBy": "Admin",
-                        "createdOn": "2025-08-19T11:04:06.586317455",
-                        "updatedBy": "",
-                        "updatedOn": "2025-08-19T11:09:13.415155876"
-                    }
-                }
-            ],
-            "carvingmakingNote": {
-                "id": "33f0f465-0bf5-42b3-917c-290f5c24e271",
-                "documentName": "fa4611f3-a7c9-425b-bf20-122020bb2164_cmn.pdf",
-                "documentType": "CARVING_MARKING_NOTE",
-                "applicationNumber": "WB-REG-2025-640092",
-                "fileStoreId": "856dd874-8d8a-440f-a7c9-93813d336ed0",
-                "documentSource": "CARVING_MARKING_NOTE",
-                "description": "Generated CMN PDF for Vessel Registration NO : WB-REG-2025-640092",
-                "auditDetails": {
-                    "createdBy": null,
-                    "createdOn": null,
-                    "updatedBy": "33f0f465-0bf5-42b3-917c-290f5c24e271",
-                    "updatedOn": "2025-08-19T11:07:07.022928816"
-                },
-                "active": true
-            },
-            "invoices": [
-                {
-                    "id": "af2b4ced-ccc1-47c1-85f9-2fe8e8d92bc9",
-                    "documentName": "TEST_ORDER618a9b1f-961b-4914-aa44-fad8a4e54490_invoice.pdf",
-                    "documentType": "DRAWING_APPROVAL",
-                    "applicationNumber": "WB-REG-2025-640092",
-                    "fileStoreId": "81ad8328-81e6-4d65-8eb6-50255bfe42fb",
-                    "documentSource": "DRAWING_APPROVAL",
-                    "description": "Generated invoice PDF for transaction TEST_ORDER618a9b1f-961b-4914-aa44-fad8a4e54490",
-                    "auditDetails": {
-                        "createdBy": null,
-                        "createdOn": null,
-                        "updatedBy": "af2b4ced-ccc1-47c1-85f9-2fe8e8d92bc9",
-                        "updatedOn": "2025-08-19T10:56:06.222704897"
-                    },
-                    "active": true
-                },
-                {
-                    "id": "e3a9d932-7d79-406d-9950-de35a80d58f1",
-                    "documentName": "TEST_ORDERdd1fbca9-f753-489e-a7c1-40dee12fcbdd_invoice.pdf",
-                    "documentType": "DRAWING_APPROVAL",
-                    "applicationNumber": "WB-REG-2025-640092",
-                    "fileStoreId": "d8d4c3b6-dedd-417d-8170-26c724dfdfa3",
-                    "documentSource": "DRAWING_APPROVAL",
-                    "description": "Generated invoice PDF for transaction TEST_ORDERdd1fbca9-f753-489e-a7c1-40dee12fcbdd",
-                    "auditDetails": {
-                        "createdBy": null,
-                        "createdOn": null,
-                        "updatedBy": "e3a9d932-7d79-406d-9950-de35a80d58f1",
-                        "updatedOn": "2025-08-19T10:48:58.635137855"
-                    },
-                    "active": true
-                },
-                {
-                    "id": "966f5258-d9f7-43ba-87c2-ecbb0f979335",
-                    "documentName": "TEST_ORDERf0b14492-0c0f-462d-9ca3-7cff072b0790_invoice.pdf",
-                    "documentType": "DRAWING_APPROVAL",
-                    "applicationNumber": "WB-REG-2025-640092",
-                    "fileStoreId": "6ae1b5ee-7aa7-4436-abeb-152da42c7c70",
-                    "documentSource": "DRAWING_APPROVAL",
-                    "description": "Generated invoice PDF for transaction TEST_ORDERf0b14492-0c0f-462d-9ca3-7cff072b0790",
-                    "auditDetails": {
-                        "createdBy": null,
-                        "createdOn": null,
-                        "updatedBy": "966f5258-d9f7-43ba-87c2-ecbb0f979335",
-                        "updatedOn": "2025-08-19T10:35:46.717063407"
-                    },
-                    "active": true
-                }
-            ],
-            "processActionMapResponce": null
+        if (!isValid) {
+          toast.error("Please fix the errors before proceeding.");
+          return;
         }
-    ],
-    "errors": null,
-    "timestamp": 1755586087.924175564,
-    "pagination": null
-}
+      }
+
+      markStepCompleted();
+      callback();
+    };
+
+    const handleNext = () => {
+      if (viewMode || steps?.goToNextStepNoValidtion || editMode) {
+        goToNextStep();
+        markStepCompleted();
+      } else {
+        validateAndProceed(() => {
+          goToNextStep();
+          onNext?.(activeStep);
+        });
+      }
+    };
+
+    const handleBack = () => {
+      setActiveStep((prev) => Math.max(prev - 1, 0));
+      onBack?.(activeStep);
+    };
+
+    const handleSave = () => {
+      if (viewMode) return;
+
+      if (steps[activeStep]?.goToNextStepNoValidtion || editMode) {
+        goToNextStep();
+        markStepCompleted();
+        return;
+      }
+
+      validateAndProceed(() => {
+        if (activeStep < totalSteps - 1) {
+          const currentStepInfo = {
+            index: activeStep,
+            label: currentStep?.label,
+            component: currentStep?.component,
+            validate: currentStep?.validate,
+            isLastStep: activeStep === totalSteps - 1,
+            completedSteps: completed,
+            getFormData: currentStep?.getFormData,
+          };
+          onSyncData?.(currentStepInfo);
+        } else {
+          onSave?.();
+        }
+      });
+    };
+
+    const handlePayNow = () => {
+
+      // const invoiceId = id || "INV-DEFAULT";
+      // navigate(`/payment/${invoiceId}`);
+
+onPayNow();
+      // onPayNow?.() || currentStep?.component?.props?.onPayNow?.();
+    };
+
+    const handleGetInvoice = () => {
+      onGetInvoice();
+    }
+    const handleSubmit = async () => {
+      if (currentStep.validate) {
+        const isValid = await currentStep.validate();
+        if (!isValid) {
+          toast.error("Please fix all errors before submitting.");
+          return;
+        }
+      }
+
+      onSubmit?.();
+    };
+
+    const renderActionButton = () => {
+      if (viewMode) {
+        return activeStep === totalSteps - 1 ? (
+          actionComponent || (
+              <>
+                {!omitSubmitButton ? <>
+              <Button disabled={disableSubmit} variant="contained" sx={buttonStyle} onClick={handleSubmit}>
+                Submit
+              </Button>
+              {disableSubmit && <Button style={{ marginLeft: "1rem" }} variant="contained" sx={buttonStyle} onClick={handleGetInvoice}>
+                {t("Get Invoice")}
+              </Button>}
+                </> : <></>}
+              </>
+          )
+        ) : (
+          <Button variant="contained" sx={buttonStyle} onClick={handleNext}>
+            {t("Next")}
+          </Button>
+        );
+      }
+
+      return activeStep === totalSteps - 1 ? (
+        <Button variant="contained" sx={buttonStyle} onClick={handlePayNow}>
+          {t("Proceed to Pay")}
+        </Button>
+      ) : (
+        <Button variant="contained" sx={buttonStyle} onClick={handleSave}>
+          {t("Save & Next")}
+        </Button>
+      );
+    };
+
+    const goToStep = (index) => {
+      if (index >= 0 && index < totalSteps) {
+        setActiveStep(index);
+      }
+    };
+
+    return (
+      <Box sx={{ width: "100%", padding: "1rem" }}>
+        <Paper
+          elevation={3}
+          sx={{
+            padding: "0.75rem 1.5rem",
+            borderRadius: "0.75rem",
+            overflowX: "auto",
+            whiteSpace: "nowrap",
+            backgroundColor: "#fafafa",
+          }}
+        >
+          <Stack direction="row" alignItems="center" spacing={1}>
+            {steps?.map((step, index) => (
+              <React.Fragment key={index}>
+                <Stack
+                  direction="row"
+                  alignItems="center"
+                  spacing={0.5}
+                  sx={{ cursor: "pointer" }}
+                  onClick={() => {
+                    if (
+                      !disableStepNavigation &&
+                      (viewMode || completed[index] || editMode)
+                    ) {
+                      goToStep(index);
+                    }
+                  }}
+                >
+                  {completed[index] ? (
+                    <CheckCircleFill size={18} color={successColor} />
+                  ) : (
+                    <Typography
+                      sx={{
+                        fontSize: "0.875rem",
+                        width: "1.5rem",
+                        height: "1.5rem",
+                        textAlign: "center",
+                        borderRadius: "50%",
+                        backgroundColor: "#e0e0e0",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontWeight: "bold",
+                        color: "#666",
+                      }}
+                    >
+                      {index + 1}
+                    </Typography>
+                  )}
+                  <Typography
+                    sx={{
+                      fontWeight:
+                        index === activeStep || completed[index]
+                          ? "bold"
+                          : "normal",
+                      color: index === activeStep ? themeColor : "#999",
+                      fontSize: "0.875rem",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {step.label}
+                  </Typography>
+                </Stack>
+                {index < steps.length - 1 && (
+                  <ChevronRight size={14} color="green" />
+                )}
+              </React.Fragment>
+            ))}
+          </Stack>
+        </Paper>
+
+        <Paper
+          elevation={2}
+          sx={{
+            marginTop: "1rem",
+            borderRadius: "0.75rem",
+            backgroundColor: "#fff",
+            width: "100%",
+          }}
+        >
+          {currentStep.component}
+          {errors[activeStep]}
+        </Paper>
+
+        <Divider sx={{ margin: "2rem 0" }} />
+
+        <Box
+          sx={{
+            display: "flex",
+            justifyContent: "space-between",
+            gap: "1rem",
+            flexDirection: { xs: "column", sm: "row" },
+            alignItems: { xs: "stretch", sm: "center" },
+          }}
+        >
+          <Button
+            variant="outlined"
+            onClick={handleBack}
+            disabled={activeStep === 0}
+            sx={{
+              color: themeColor,
+              borderColor: themeColor,
+              fontWeight: "bold",
+              borderRadius: "0.5rem",
+              minWidth: { xs: "100%", sm: "8rem" },
+              fontSize: "0.9rem",
+            }}
+          >
+            {t("Previous")}
+          </Button>
+
+          {renderActionButton()}
+        </Box>
+      </Box>
+    );
+  }
+);
+
+export default Stepper;
