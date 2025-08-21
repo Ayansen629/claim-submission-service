@@ -1,100 +1,89 @@
-const onVesselRegisFormSubmit = async (stepInfo) => {
-  const formValues = stepInfo?.getFormData?.() || {};
-  
-  if (stepInfo.index === 0 || stepInfo.index === 1) {
-    // Use standardized name instead of original name
-    const authLetterStandardizedName = formValues?.authLetterStandardizedName;
-    
-    let request = {
-      id: vesselRegisData?.id || vesselRegisData?.basicDetails?.id || "",
-      applicationNumber: vesselRegisData?.applicationNumber || "",
-      basicDetails: {
-        id: vesselRegisData?.basicDetails?.id || "",
-        applicationNumber: vesselRegisData?.applicationNumber || "",
-        status: vesselRegisData?.basicDetails?.status || "",
-        constructedBy: formValues?.constructedBy,
-        ownerDetails: {
-          id: vesselRegisData?.basicDetails?.ownerDetails?.id || ownerDetails?.id,
-        },
-        builderDetails: {
-          id: vesselRegisData?.basicDetails?.builderDetails?.id || formValues?.builder || null,
-        },
-        builderAuthorization: formValues?.builderAuth,
-        authorizationLetter: {
-          id: vesselRegisData?.basicDetails?.authorizationLetter?.id || "",
-          fileStoreId: formValues?.authLetterFileStoreId,
-          documentName: authLetterStandardizedName || "Authorization Letter.pdf",
-          documentType: "AUTHORIZATION_LETTER",
-          documentSource: "AUTHORIZATION_LETTER",
-          descriptions: "",
-        },
-      },
-      vesselDetails: {
-        id: vesselRegisData?.vesselDetails?.id || "",
-        typeOfVessel: formValues?.vesselType,
-        categoryOfVessel: formValues?.category,
-        zone: formValues?.zone,
-        grossTonnage: formValues?.grt,
-        workOrderValue: formValues?.workOrderValue,
-        purchaseType: formValues?.purchaseType,
-        supervisionAuthority: formValues?.supervisionAuthority,
-        nameOfMaster: vesselRegisData?.vesselDetails?.nameOfMaster || "",
-        certficateNumber: vesselRegisData?.vesselDetails?.certficateNumber || "",
-        nameOfRegistry: vesselRegisData?.vesselDetails?.nameOfRegistry || "",
-        registrationNumber: vesselRegisData?.vesselDetails?.registrationNumber || "",
-        vesselName: vesselRegisData?.vesselDetails?.vesselName || "",
-        kindOfVessel: vesselRegisData?.vesselDetails?.kindOfVessel || "",
-        mortgage: vesselRegisData?.vesselDetails?.mortgage || "",
-        placeOfBuild: vesselRegisData?.vesselDetails?.placeOfBuild || "",
-        insuranceDetails: vesselRegisData?.vesselDetails?.insuranceDetails || "",
-        yearOfBuild: vesselRegisData?.vesselDetails?.yearOfBuild || null,
-        pniClubNo: vesselRegisData?.vesselDetails?.pniClubNo || "",
-        pniClubName: vesselRegisData?.vesselDetails?.pniClubName || "",
-        applicationNo: vesselRegisData?.applicationNumber || "",
-        nameOfClassificationSociety: formValues?.classificationSociety,
-        iwtVesselBasicDetailsTFk: vesselRegisData?.basicDetails?.id || "",
-        insuranceValidDate: vesselRegisData?.vesselDetails?.insuranceValidDate || "",
-      },
-    };
+const handleFileChange = useCallback(
+  async (name, file) => {
+    if (!file) return;
 
-    if (stepInfo.index === 1) {
-      request = { ...request, documents: extractDocuments(formValues) };
+    const validTypes = [
+      "application/pdf",
+      "image/jpeg",
+      "image/png",
+      "image/jpg",
+    ];
+    if (!validTypes.includes(file.type)) {
+      setError(name, {
+        type: "manual",
+        message: t("Only PDF, JPG or PNG files are allowed"),
+      });
+      setValue(name, null);
+      return;
     }
 
-    try {
-      loaderRef?.current?.show();
-      const URL = SERVICE_BASE.IWT_REGISTRATION + URLS_ENDPOINT.VESSEL_SERVICE.CREATE;
+    if (file.size > 10 * 1024 * 1024) {
+      setError(name, {
+        type: "manual",
+        message: t("File size should not exceed 10MB"),
+      });
+      setValue(name, null);
+      return;
+    }
 
-      const response = await postData(URL, request);
-      const apiRes = { ...response?.data };
-      if (response?.status === 200 && apiRes?.responseStatus) {
+    const extension = file?.name?.substring(file?.name?.lastIndexOf("."));
+    const fileName = `${name}${extension}`;
+    file.originalName = fileName;
+    const renamedFile = renameFile(file, fileName);
+
+    clearErrors(name);
+    setValue(name, renamedFile, { shouldValidate: true });
+    setFormData((prev) => ({
+      ...prev,
+      [name]: renamedFile,
+    }));
+
+    if (name === "authLetter") {
+      setValue("authLetterFileStoreId", null);
+      
+      // Create standardized name that matches the label
+      const standardizedName = `Authorization Letter${extension}`;
+      
+      // Create a new File object with the standardized name for display
+      const displayFile = new File([file], standardizedName, { type: file.type });
+      
+      setValue("authLetter", displayFile);
+      setValue("authLetterOriginalName", file.name);
+      
+      try {
+        const formData = new FormData();
+        formData.append("file", file);
+        const uploadUrl =
+          BASE_IP + URLS_ENDPOINT.FILE_STORE_SERVICE.UPLOAD_FILE;
+        loaderRef?.current?.show();
+        const response = await postFORMdata(uploadUrl, formData);
         loaderRef?.current?.hide();
-        setVesselRegisData((data) => {
-          return apiRes?.data ? { ...apiRes?.data, documents: data?.documents ? [...data?.documents] : [] } : {}
-        });
-        toast.success(
-          apiRes?.responseStatus?.message || "Vessel details saved successfully.",
-          { position: "top-right" }
-        );
-
-        if (stepInfo.index === 1) {
-          fetchPaymentDetails();
+        const fileStoreId = response?.data?.files[0]?.fileStoreId;
+        if (fileStoreId) {
+          console.log("authfileStoreId ", fileStoreId);
+          setValue("authLetterFileStoreId", fileStoreId);
+        } else {
+          toast.error("File addition failed. Please try again.");
+          setValue("authLetter", null);
+          setValue("authLetterOriginalName", null);
+          setFormData((prev) => ({
+            ...prev,
+            [name]: null,
+          }));
         }
-
-        setTimeout(() => {
-          stepperRef?.current?.goToNextStep();
-          window.scrollTo(0, 0);
-        }, 1000);
-      } else {
+      } catch (error) {
         loaderRef?.current?.hide();
-        toast.warning(
-          apiRes?.responseStatus?.message || "Something went wrong..",
-          { position: "top-right" }
-        );
+        clearErrors(name);
+        setValue("authLetter", null);
+        setValue("authLetterOriginalName", null);
+        setFormData((prev) => ({
+          ...prev,
+          [name]: null,
+        }));
+        console.error("File upload failed", error);
+        toast.error("File upload failed. Please try again.");
       }
-    } catch (err) {
-      loaderRef?.current?.hide();
-      handleErrorMessage(err?.response?.data);
     }
-  }
-};
+  },
+  [setValue, clearErrors, setError, t]
+);
