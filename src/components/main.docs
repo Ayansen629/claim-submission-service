@@ -1,94 +1,426 @@
-import React, { useState } from "react";
 
-const images = [
-  "https://images.unsplash.com/photo-1506744038136-46273834b3fb", // Replace with your image URLs
-  "https://images.unsplash.com/photo-1465101046530-73398c7f28ca",
-  "https://images.unsplash.com/photo-1507525428034-b723cf961d3e"
-];
+import React, { useState } from 'react';
+import { Modal, Button, Spinner } from 'react-bootstrap';
+import { format, parseISO } from 'date-fns';
+import { toast } from 'react-toastify';
+import styles from '../common/styles/AppointmentModal.module.css'; 
+import { postData } from "../../services/http.service.ts";
+import {
+  SERVICE_BASE,
+  URLS_ENDPOINT,
+} from "../../utils/urlsConstants.ts";
 
-const Carousel = () => {
-  const [current, setCurrent] = useState(0);
+const AppointmentModal = ({ show, handleClose, handleConfirm, registrationData }) => {
+  const [selectedSlot, setSelectedSlot] = useState(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [isBooking, setIsBooking] = useState(false);
 
-  const prevSlide = () => {
-    setCurrent(current === 0 ? images.length - 1 : current - 1);
+  
+  const appointmentSlots = registrationData?.appointmentSlots || [];
+  console.log(appointmentSlots,"apponitment")
+
+  
+  const transformedSlots = appointmentSlots
+    .filter(slot => slot.appointmentStatus === 'AVAILABLE' && !slot.isBooked)
+    .map(slot => {
+      const date = parseISO(slot.date);
+      return {
+        id: slot.id,
+        display: slot.timeSlot,
+        dateDisplay: format(date, 'MMM d'),
+        dayName: format(date, 'EEE'),
+        fullDate: slot.date,
+        fullDisplay: `${slot.timeSlot}, ${format(date, 'MMM d')}`,
+        originalSlot: slot
+      };
+    });
+
+  const handleSlotSelect = (slot) => {
+    setIsLoading(true);
+    
+    setTimeout(() => {
+      setSelectedSlot(slot);
+      setIsLoading(false);
+      console.log('Slot selected:', slot);
+    }, 1000);
   };
 
-  const nextSlide = () => {
-    setCurrent(current === images.length - 1 ? 0 : current + 1);
+  const handleConfirmAppointment = async () => {
+    if (selectedSlot) {
+      setIsBooking(true);
+      
+      try {
+        const apiUrl = `${SERVICE_BASE.IWT_REGISTRATION}${URLS_ENDPOINT.VESSEL_SERVICE.SLOT_BOOK}`;
+        
+        const payload = {
+          id: selectedSlot.id,
+          applicationNumber: selectedSlot.originalSlot.applicationNumber,
+          date: selectedSlot.fullDate,
+          timeSlot: selectedSlot.display,
+          isBooked: true,
+          bookedBy: "", //need to update after now coming api null
+          // auditDetails: {
+          //   createdBy: selectedSlot.originalSlot.auditDetails?.createdBy || "Admin",
+          //   createdOn: selectedSlot.originalSlot.auditDetails?.createdOn || new Date().toISOString(),
+          //   updatedBy: "", 
+          //   updatedOn: new Date().toISOString()
+          // }
+        };
+
+        console.log('Booking payload:', JSON.stringify(payload, null, 2));
+
+        const response = await postData(apiUrl, payload);
+        
+        if (response) {
+          toast.success(`🎉 Appointment successfully booked for ${selectedSlot.dateDisplay} at ${selectedSlot.display}`, {
+            position: "top-right",
+            autoClose: 5000,
+            hideProgressBar: false,
+            closeOnClick: true,
+            pauseOnHover: true,
+            draggable: true,
+          });
+
+          const appointmentData = {
+            id: selectedSlot.id,
+            date: selectedSlot.fullDate,
+            time: selectedSlot.display,
+            dayName: selectedSlot.dayName,
+            dateDisplay: selectedSlot.dateDisplay,
+            fullDisplay: selectedSlot.fullDisplay,
+            applicationNumber: selectedSlot.originalSlot.applicationNumber
+          };
+
+          if (handleConfirm) {
+            handleConfirm(appointmentData);
+          }
+
+          handleClose();
+          setSelectedSlot(null);
+        }
+      } catch (error) {
+        console.error('Error booking appointment:', error);
+        toast.error('Failed to book appointment. Please try again.', {
+          position: "top-right",
+          autoClose: 5000,
+        });
+      } finally {
+        setIsBooking(false);
+      }
+    }
+  };
+
+  const handleModalClose = () => {
+    setSelectedSlot(null);
+    setIsLoading(false);
+    handleClose();
   };
 
   return (
-    <div style={{
-      width: "600px",
-      margin: "40px auto",
-      background: "#fff",
-      borderRadius: "16px",
-      boxShadow: "0 4px 24px rgba(0,0,0,0.08)",
-      padding: "32px 0",
-      position: "relative"
-    }}>
-      <div style={{ display: "flex", justifyContent: "center", alignItems: "center" }}>
-        <button
-          onClick={prevSlide}
-          style={{
-            background: "rgba(0,0,0,0.1)",
-            border: "none",
-            borderRadius: "50%",
-            width: "40px",
-            height: "40px",
-            fontSize: "24px",
-            cursor: "pointer",
-            marginRight: "16px"
-          }}
-          aria-label="Previous"
+    <Modal 
+      show={show} 
+      onHide={handleModalClose} 
+      centered 
+      className={styles.appointmentModal} 
+      size="md"
+    >
+      <Modal.Header closeButton className={`border-0 pb-2 ${styles.modalHeaderCustom}`}>
+        <Modal.Title className="fw-bold text-white d-flex align-items-center">
+          <div className={`${styles.iconWrapper} me-3`}>
+            <i className="bi bi-calendar-check"></i>
+          </div>
+          <div>
+            <div className={styles.titleMain}>Select Appointment</div>
+            <div className={styles.titleSub}>Choose your preferred time slot</div>
+          </div>
+        </Modal.Title>
+      </Modal.Header>
+      
+      <Modal.Body className={`pt-3 ${styles.modalBodyCustom}`}>
+        {selectedSlot && !isLoading && (
+          <div className={styles.selectedSlotBanner}>
+            <div className={styles.selectedIcon}>
+              <i className="bi bi-check-circle-fill"></i>
+            </div>
+            <div className="selected-text">
+              <strong>Selected:</strong> {selectedSlot.fullDisplay}
+            </div>
+          </div>
+        )}
+        
+        {(isLoading || isBooking) && (
+          <div className={styles.loadingOverlay}>
+            <div className={styles.loadingContent}>
+              <Spinner animation="border" variant="primary" className={styles.loadingSpinner} />
+              <div className={styles.loadingText}>
+                {isBooking ? 'Booking appointment...' : 'Processing your selection...'}
+              </div>
+            </div>
+          </div>
+        )}
+        
+        <div className={`${styles.slotsContainer} ${(isLoading || isBooking) ? styles.loading : ''}`}>
+          {transformedSlots.length > 0 ? (
+            transformedSlots.map((slot, index) => (
+              <div 
+                key={slot.id}
+                className={`${styles.timeSlotCard} ${selectedSlot?.id === slot.id ? styles.selected : ''} ${(isLoading || isBooking) ? styles.disabled : ''}`}
+                onClick={() => !(isLoading || isBooking) && handleSlotSelect(slot)}
+                style={{ animationDelay: `${index * 0.1}s` }}
+              >
+                <div className={styles.slotContent}>
+                  <div className={styles.slotHeader}>
+                    <div className={styles.slotDay}>{slot.dayName}</div>
+                    <div className={styles.slotDate}>{slot.dateDisplay}</div>
+                  </div>
+                  <div className={styles.slotTime}>
+                    <i className="bi bi-clock me-2"></i>
+                    {slot.display}
+                  </div>
+                </div>
+                
+                <div className={styles.cardGlow}></div>
+              </div>
+            ))
+          ) : (
+            <div style={{ textAlign: 'center', padding: '2rem', color: '#64748b' }}>
+              No available appointment slots
+            </div>
+          )}
+        </div>
+      </Modal.Body>
+      
+      <Modal.Footer className={`border-0 pt-0 ${styles.modalFooterCustom}`}>
+        <Button 
+          variant="outline-secondary" 
+          onClick={handleModalClose} 
+          className={styles.btnCancel}
+          disabled={isLoading || isBooking}
         >
-          &#8592;
-        </button>
-        <img
-          src={images[current]}
-          alt={`Slide ${current + 1}`}
-          style={{
-            width: "400px",
-            height: "220px",
-            objectFit: "cover",
-            borderRadius: "12px",
-            boxShadow: "0 2px 8px rgba(0,0,0,0.12)"
-          }}
-        />
-        <button
-          onClick={nextSlide}
-          style={{
-            background: "rgba(0,0,0,0.1)",
-            border: "none",
-            borderRadius: "50%",
-            width: "40px",
-            height: "40px",
-            fontSize: "24px",
-            cursor: "pointer",
-            marginLeft: "16px"
-          }}
-          aria-label="Next"
+          <i className="bi bi-x-lg me-2"></i>
+          Cancel
+        </Button>
+        <Button 
+          variant="primary" 
+          onClick={handleConfirmAppointment}
+          disabled={!selectedSlot || isLoading || isBooking}
+          className={styles.btnConfirm}
         >
-          &#8594;
-        </button>
-      </div>
-      <div style={{ textAlign: "center", marginTop: "16px" }}>
-        {images.map((_, idx) => (
-          <span
-            key={idx}
-            style={{
-              display: "inline-block",
-              width: "10px",
-              height: "10px",
-              borderRadius: "50%",
-              background: idx === current ? "#007bff" : "#d3d3d3",
-              margin: "0 4px"
-            }}
-          />
-        ))}
-      </div>
-    </div>
+          <i className="bi bi-check-lg me-2"></i>
+          {isBooking ? 'Booking...' : 'Confirm Appointment'}
+        </Button>
+      </Modal.Footer>
+    </Modal>
   );
 };
 
-export default Carousel;
+export default AppointmentModal;
+import React, { useState } from "react";
+import { Container, Row, Col, Card } from "react-bootstrap";
+import { Button } from "react-bootstrap";
+import { BsCalendarCheck } from "react-icons/bs";
+import { useForm } from "react-hook-form";
+import { useTranslation } from "react-i18next";
+import InputText from "../../../../common/InputText.tsx";
+import AppointmentModal from "../../../../common/AppointmentModal";
+import OfficerAppointmentModal from "./OfficerAppointmentModal.js";
+import { getFromLocalStorage } from "../../../../../utils/localStorageUtils.js";
+import { USER_ROLES } from "../../../../../utils/constants.ts";
+
+const CurvingMarkingNote = ({ registrationData, onSubmitAppointments }) => {
+  const { t } = useTranslation();
+  const [showModal, setShowModal] = useState(false);
+    const hasBookedAppointment = registrationData?.appointmentSlots?.some(slot => slot.isBooked);
+  
+  const [displayAppointment, setDisplayAppointment] = useState(
+    registrationData?.appointmentSlots?.length > 0 && !hasBookedAppointment ? false : !hasBookedAppointment
+  );
+
+  // const [displayAppointment, setDisplayAppointment] = useState(registrationData?.appointmentSlots?.length > 0 ? false : true);
+  console.log("registrationData ", registrationData);
+
+  const userRole = getFromLocalStorage("userRole") || "";
+  const isOfficer =
+    userRole === USER_ROLES.OFFICER_L3 || userRole === USER_ROLES.OFFICER_L4;
+
+  const {
+    register,
+    formState: { errors },
+    setValue,
+    watch,
+    clearErrors,
+  } = useForm({
+    mode: "onChange",
+    defaultValues: {
+      vesselName: registrationData?.vesselDetails?.vesselName || "",
+      officialNo:
+        registrationData?.vesselDetails?.registrationNumber || "Auto Generated",
+      portOfRegistry: registrationData?.vesselDetails?.nameOfRegistry || "",
+      yearOfRegistry: registrationData?.vesselDetails?.yearOfBuild || "",
+    },
+  });
+
+  const handleConfirm = async (appointments) => {
+    setShowModal(false);
+    try {
+      const formattedAppointments = appointments.map((apt) => ({
+        date: apt.date.toLocaleDateString("en-GB"),
+        timeSlot: apt.time,
+        appointmentStatus: "",
+        isBooked: false,
+        bookedBy: null,
+      }));
+      console.log("Awaiting confirmation...");
+      await onSubmitAppointments(formattedAppointments);
+      console.log("Confirmation successful");
+      setDisplayAppointment(false);
+    } catch (error) {
+      console.error("Error submitting appointments:", error);
+    }
+  };
+
+    console.log("displayAppointment inside", displayAppointment);
+      console.log("userRole === USER_ROLES.VESSEL_OWNER", userRole === USER_ROLES.VESSEL_OWNER);
+
+  console.log("displayAppointment || userRole === USER_ROLES.VESSEL_OWNER", displayAppointment || userRole === USER_ROLES.VESSEL_OWNER);
+
+  return (
+    <Container fluid className="p-0">
+      <Card className="mb-1">
+        <Card.Body>
+          <div className="d-flex justify-content-between align-items-center mb-4">
+            <div>
+              <h6 style={{ color: "#2466BF", marginBottom: "0.5rem" }}>
+                {t("Curving & Marking Note")}
+              </h6>
+              <p style={{ color: "#64748b", fontSize: "0.9rem", margin: 0 }}>
+                {t("Vessel Registration Details")}
+              </p>
+            </div>
+            {/* {(displayAppointment || userRole === USER_ROLES.VESSEL_OWNER) && (  */}
+            {(displayAppointment || userRole === USER_ROLES.VESSEL_OWNER) && !hasBookedAppointment &&  (
+              <Button
+                variant="primary"
+                onClick={() => setShowModal(true)}
+                className="d-flex align-items-center gap-2"
+                style={{
+                  backgroundColor: "#2E57A7",
+                  borderColor: "#2E57A7",
+                  fontWeight: 600,
+                  padding: "10px 24px",
+                  borderRadius: "8px",
+                  fontSize: "0.9rem",
+                  boxShadow: "0 4px 12px rgba(46, 87, 167, 0.2)",
+                  transition: "all 0.3s ease",
+                }}
+              >
+                <BsCalendarCheck size={16} />
+                {isOfficer ? "Propose Appointments" : "Schedule Appointment"}
+              </Button>
+            )}
+          </div>
+
+          <hr style={{ borderColor: "#e2e8f0", margin: "1rem 0" }} />
+
+          <form className="employee-form">
+            <Card className="form-section-card">
+              <Card.Body>
+                <Row className="g-3">
+                  <Col md={6}>
+                    <InputText
+                      name="vesselName"
+                      label={t("Name of the Vessel")}
+                      placeholder={t("Enter vessel name")}
+                      required={true}
+                      register={{
+                        ...register("vesselName", {
+                          required: t("Vessel Name is required"),
+                        }),
+                      }}
+                      errors={errors}
+                      clearErrors={clearErrors}
+                      disabled={true}
+                    />
+                  </Col>
+
+                  <Col md={6}>
+                    <InputText
+                      name="officialNo"
+                      label={t("Official No.")}
+                      placeholder={t("Enter official number")}
+                      required={true}
+                      register={{
+                        ...register("officialNo", {
+                          required: t("Official No. is required"),
+                        }),
+                      }}
+                      errors={errors}
+                      clearErrors={clearErrors}
+                      disabled={true}
+                    />
+                  </Col>
+
+                  <Col md={6}>
+                    <InputText
+                      name="portOfRegistry"
+                      label={t("Port of Registry")}
+                      placeholder={t("Enter port of registry")}
+                      required={true}
+                      register={{
+                        ...register("portOfRegistry", {
+                          required: t("Port of Registry is required"),
+                        }),
+                      }}
+                      errors={errors}
+                      clearErrors={clearErrors}
+                      disabled={true}
+                    />
+                  </Col>
+
+                  <Col md={6}>
+                    <InputText
+                      name="yearOfRegistry"
+                      label={t("Year of Registry")}
+                      placeholder={t("Enter year of registry")}
+                      required={true}
+                      register={{
+                        ...register("yearOfRegistry", {
+                          required: t("Year of Registry is required"),
+                          pattern: {
+                            value: /^[0-9]{4}$/,
+                            message: t("Enter a valid year (YYYY)"),
+                          },
+                        }),
+                      }}
+                      errors={errors}
+                      clearErrors={clearErrors}
+                      disabled={true}
+                    />
+                  </Col>
+                </Row>
+              </Card.Body>
+            </Card>
+          </form>
+        </Card.Body>
+      </Card>
+
+      {isOfficer ? (
+        <OfficerAppointmentModal
+          show={showModal}
+          handleClose={() => setShowModal(false)}
+          handleConfirm={handleConfirm}
+        />
+      ) : (
+        <AppointmentModal
+          show={showModal}
+          handleClose={() => setShowModal(false)}
+          handleConfirm={handleConfirm}
+          registrationData={registrationData}
+        />
+      )}
+    </Container>
+  );
+};
+
+export default CurvingMarkingNote;
+
