@@ -1,220 +1,3 @@
-
-import React, { useState } from 'react';
-import { Modal, Button, Spinner } from 'react-bootstrap';
-import { format, parseISO } from 'date-fns';
-import { toast } from 'react-toastify';
-import styles from '../common/styles/AppointmentModal.module.css'; 
-import { postData } from "../../services/http.service.ts";
-import {
-  SERVICE_BASE,
-  URLS_ENDPOINT,
-} from "../../utils/urlsConstants.ts";
-
-const AppointmentModal = ({ show, handleClose, handleConfirm, registrationData }) => {
-  const [selectedSlot, setSelectedSlot] = useState(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const [isBooking, setIsBooking] = useState(false);
-
-  
-  const appointmentSlots = registrationData?.appointmentSlots || [];
-  console.log(appointmentSlots,"apponitment")
-
-  
-  const transformedSlots = appointmentSlots
-    .filter(slot => slot.appointmentStatus === 'AVAILABLE' && !slot.isBooked)
-    .map(slot => {
-      const date = parseISO(slot.date);
-      return {
-        id: slot.id,
-        display: slot.timeSlot,
-        dateDisplay: format(date, 'MMM d'),
-        dayName: format(date, 'EEE'),
-        fullDate: slot.date,
-        fullDisplay: `${slot.timeSlot}, ${format(date, 'MMM d')}`,
-        originalSlot: slot
-      };
-    });
-
-  const handleSlotSelect = (slot) => {
-    setIsLoading(true);
-    
-    setTimeout(() => {
-      setSelectedSlot(slot);
-      setIsLoading(false);
-      console.log('Slot selected:', slot);
-    }, 1000);
-  };
-
-  const handleConfirmAppointment = async () => {
-    if (selectedSlot) {
-      setIsBooking(true);
-      
-      try {
-        const apiUrl = `${SERVICE_BASE.IWT_REGISTRATION}${URLS_ENDPOINT.VESSEL_SERVICE.SLOT_BOOK}`;
-        
-        const payload = {
-          id: selectedSlot.id,
-          applicationNumber: selectedSlot.originalSlot.applicationNumber,
-          date: selectedSlot.fullDate,
-          timeSlot: selectedSlot.display,
-          isBooked: true,
-          bookedBy: "", //need to update after now coming api null
-          // auditDetails: {
-          //   createdBy: selectedSlot.originalSlot.auditDetails?.createdBy || "Admin",
-          //   createdOn: selectedSlot.originalSlot.auditDetails?.createdOn || new Date().toISOString(),
-          //   updatedBy: "", 
-          //   updatedOn: new Date().toISOString()
-          // }
-        };
-
-        console.log('Booking payload:', JSON.stringify(payload, null, 2));
-
-        const response = await postData(apiUrl, payload);
-        
-        if (response) {
-          toast.success(`🎉 Appointment successfully booked for ${selectedSlot.dateDisplay} at ${selectedSlot.display}`, {
-            position: "top-right",
-            autoClose: 5000,
-            hideProgressBar: false,
-            closeOnClick: true,
-            pauseOnHover: true,
-            draggable: true,
-          });
-
-          const appointmentData = {
-            id: selectedSlot.id,
-            date: selectedSlot.fullDate,
-            time: selectedSlot.display,
-            dayName: selectedSlot.dayName,
-            dateDisplay: selectedSlot.dateDisplay,
-            fullDisplay: selectedSlot.fullDisplay,
-            applicationNumber: selectedSlot.originalSlot.applicationNumber
-          };
-
-          if (handleConfirm) {
-            handleConfirm(appointmentData);
-          }
-
-          handleClose();
-          setSelectedSlot(null);
-        }
-      } catch (error) {
-        console.error('Error booking appointment:', error);
-        toast.error('Failed to book appointment. Please try again.', {
-          position: "top-right",
-          autoClose: 5000,
-        });
-      } finally {
-        setIsBooking(false);
-      }
-    }
-  };
-
-  const handleModalClose = () => {
-    setSelectedSlot(null);
-    setIsLoading(false);
-    handleClose();
-  };
-
-  return (
-    <Modal 
-      show={show} 
-      onHide={handleModalClose} 
-      centered 
-      className={styles.appointmentModal} 
-      size="md"
-    >
-      <Modal.Header closeButton className={`border-0 pb-2 ${styles.modalHeaderCustom}`}>
-        <Modal.Title className="fw-bold text-white d-flex align-items-center">
-          <div className={`${styles.iconWrapper} me-3`}>
-            <i className="bi bi-calendar-check"></i>
-          </div>
-          <div>
-            <div className={styles.titleMain}>Select Appointment</div>
-            <div className={styles.titleSub}>Choose your preferred time slot</div>
-          </div>
-        </Modal.Title>
-      </Modal.Header>
-      
-      <Modal.Body className={`pt-3 ${styles.modalBodyCustom}`}>
-        {selectedSlot && !isLoading && (
-          <div className={styles.selectedSlotBanner}>
-            <div className={styles.selectedIcon}>
-              <i className="bi bi-check-circle-fill"></i>
-            </div>
-            <div className="selected-text">
-              <strong>Selected:</strong> {selectedSlot.fullDisplay}
-            </div>
-          </div>
-        )}
-        
-        {(isLoading || isBooking) && (
-          <div className={styles.loadingOverlay}>
-            <div className={styles.loadingContent}>
-              <Spinner animation="border" variant="primary" className={styles.loadingSpinner} />
-              <div className={styles.loadingText}>
-                {isBooking ? 'Booking appointment...' : 'Processing your selection...'}
-              </div>
-            </div>
-          </div>
-        )}
-        
-        <div className={`${styles.slotsContainer} ${(isLoading || isBooking) ? styles.loading : ''}`}>
-          {transformedSlots.length > 0 ? (
-            transformedSlots.map((slot, index) => (
-              <div 
-                key={slot.id}
-                className={`${styles.timeSlotCard} ${selectedSlot?.id === slot.id ? styles.selected : ''} ${(isLoading || isBooking) ? styles.disabled : ''}`}
-                onClick={() => !(isLoading || isBooking) && handleSlotSelect(slot)}
-                style={{ animationDelay: `${index * 0.1}s` }}
-              >
-                <div className={styles.slotContent}>
-                  <div className={styles.slotHeader}>
-                    <div className={styles.slotDay}>{slot.dayName}</div>
-                    <div className={styles.slotDate}>{slot.dateDisplay}</div>
-                  </div>
-                  <div className={styles.slotTime}>
-                    <i className="bi bi-clock me-2"></i>
-                    {slot.display}
-                  </div>
-                </div>
-                
-                <div className={styles.cardGlow}></div>
-              </div>
-            ))
-          ) : (
-            <div style={{ textAlign: 'center', padding: '2rem', color: '#64748b' }}>
-              No available appointment slots
-            </div>
-          )}
-        </div>
-      </Modal.Body>
-      
-      <Modal.Footer className={`border-0 pt-0 ${styles.modalFooterCustom}`}>
-        <Button 
-          variant="outline-secondary" 
-          onClick={handleModalClose} 
-          className={styles.btnCancel}
-          disabled={isLoading || isBooking}
-        >
-          <i className="bi bi-x-lg me-2"></i>
-          Cancel
-        </Button>
-        <Button 
-          variant="primary" 
-          onClick={handleConfirmAppointment}
-          disabled={!selectedSlot || isLoading || isBooking}
-          className={styles.btnConfirm}
-        >
-          <i className="bi bi-check-lg me-2"></i>
-          {isBooking ? 'Booking...' : 'Confirm Appointment'}
-        </Button>
-      </Modal.Footer>
-    </Modal>
-  );
-};
-
-export default AppointmentModal;
 import React, { useState } from "react";
 import { Container, Row, Col, Card } from "react-bootstrap";
 import { Button } from "react-bootstrap";
@@ -230,18 +13,16 @@ import { USER_ROLES } from "../../../../../utils/constants.ts";
 const CurvingMarkingNote = ({ registrationData, onSubmitAppointments }) => {
   const { t } = useTranslation();
   const [showModal, setShowModal] = useState(false);
-    const hasBookedAppointment = registrationData?.appointmentSlots?.some(slot => slot.isBooked);
+  const [isAppointmentBooked, setIsAppointmentBooked] = useState(false);
+  
+  const hasBookedAppointment = registrationData?.appointmentSlots?.some(slot => slot.isBooked);
   
   const [displayAppointment, setDisplayAppointment] = useState(
     registrationData?.appointmentSlots?.length > 0 && !hasBookedAppointment ? false : !hasBookedAppointment
   );
 
-  // const [displayAppointment, setDisplayAppointment] = useState(registrationData?.appointmentSlots?.length > 0 ? false : true);
-  console.log("registrationData ", registrationData);
-
   const userRole = getFromLocalStorage("userRole") || "";
-  const isOfficer =
-    userRole === USER_ROLES.OFFICER_L3 || userRole === USER_ROLES.OFFICER_L4;
+  const isOfficer = userRole === USER_ROLES.OFFICER_L3 || userRole === USER_ROLES.OFFICER_L4;
 
   const {
     register,
@@ -253,8 +34,7 @@ const CurvingMarkingNote = ({ registrationData, onSubmitAppointments }) => {
     mode: "onChange",
     defaultValues: {
       vesselName: registrationData?.vesselDetails?.vesselName || "",
-      officialNo:
-        registrationData?.vesselDetails?.registrationNumber || "Auto Generated",
+      officialNo: registrationData?.vesselDetails?.registrationNumber || "Auto Generated",
       portOfRegistry: registrationData?.vesselDetails?.nameOfRegistry || "",
       yearOfRegistry: registrationData?.vesselDetails?.yearOfBuild || "",
     },
@@ -262,6 +42,7 @@ const CurvingMarkingNote = ({ registrationData, onSubmitAppointments }) => {
 
   const handleConfirm = async (appointments) => {
     setShowModal(false);
+    setIsAppointmentBooked(true);
     try {
       const formattedAppointments = appointments.map((apt) => ({
         date: apt.date.toLocaleDateString("en-GB"),
@@ -270,19 +51,12 @@ const CurvingMarkingNote = ({ registrationData, onSubmitAppointments }) => {
         isBooked: false,
         bookedBy: null,
       }));
-      console.log("Awaiting confirmation...");
       await onSubmitAppointments(formattedAppointments);
-      console.log("Confirmation successful");
       setDisplayAppointment(false);
     } catch (error) {
       console.error("Error submitting appointments:", error);
     }
   };
-
-    console.log("displayAppointment inside", displayAppointment);
-      console.log("userRole === USER_ROLES.VESSEL_OWNER", userRole === USER_ROLES.VESSEL_OWNER);
-
-  console.log("displayAppointment || userRole === USER_ROLES.VESSEL_OWNER", displayAppointment || userRole === USER_ROLES.VESSEL_OWNER);
 
   return (
     <Container fluid className="p-0">
@@ -297,8 +71,7 @@ const CurvingMarkingNote = ({ registrationData, onSubmitAppointments }) => {
                 {t("Vessel Registration Details")}
               </p>
             </div>
-            {/* {(displayAppointment || userRole === USER_ROLES.VESSEL_OWNER) && (  */}
-            {(displayAppointment || userRole === USER_ROLES.VESSEL_OWNER) && !hasBookedAppointment &&  (
+            {(displayAppointment || userRole === USER_ROLES.VESSEL_OWNER) && !hasBookedAppointment && !isAppointmentBooked && (
               <Button
                 variant="primary"
                 onClick={() => setShowModal(true)}
@@ -423,4 +196,3 @@ const CurvingMarkingNote = ({ registrationData, onSubmitAppointments }) => {
 };
 
 export default CurvingMarkingNote;
-
