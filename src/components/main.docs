@@ -1,76 +1,3 @@
-const handleFileChange = async (e, documentType) => {
-  if (viewMode) return;
-  const file = e?.target?.files[0];
-  if (!file) return;
-
-  const maxSize = 10 * 1024 * 1024;
-  if (file.size > maxSize) {
-    toast.error("File size must be less than or equal to 10 MB.");
-    e.target.value = null;
-    return;
-  }
-
-  loaderRef.current?.show();
-
-  try {
-    const formData = new FormData();
-    formData.append("file", file);
-
-    const uploadUrl = BASE_IP + URLS_ENDPOINT.FILE_STORE_SERVICE.UPLOAD_FILE;
-    const response = await postFORMdata(uploadUrl, formData);
-
-    const fileStoreId = response?.data?.files[0]?.fileStoreId;
-
-    if (fileStoreId) {
-      // Get file extension from original file
-      const fileExtension = file.name.substring(file.name.lastIndexOf('.'));
-      
-      const getStandardizedFileName = (docType, extension) => {
-        const baseNames = {
-          authorizationFile: "Authorization of Authorised Person",
-          paymentChallan: "Payment Challan_Acknowledgement",
-          builderCertificate: "Builder Certificate",
-          lastCertificateCopy: "Copy of last Certificate of Survey",
-          registrationCertificateCopy: "Copy of Certificate of Registration",
-          testCertificate: "Test Certificate",
-        };
-        return `${baseNames[docType] || docType}${extension}`;
-      };
-
-      const standardizedName = getStandardizedFileName(documentType, fileExtension);
-
-      // Create a new File object with standardized name for display
-      const displayFile = new File([file], standardizedName, { type: file.type });
-
-      setFileStates((prev) => ({
-        ...prev,
-        [documentType]: {
-          name: standardizedName,
-          fileStoreId,
-          originalName: file.name,
-          displayFile: displayFile,
-        },
-      }));
-      
-      setValue(`enclosure.${documentType}`, displayFile);
-      setValue(`enclosure.${documentType}FileStoreId`, fileStoreId);
-      setValue(`enclosure.${documentType}OriginalName`, file.name);
-      clearErrors(`enclosure.${documentType}`);
-      toast.success("File uploaded successfully!");
-    }
-  } catch (err) {
-    console.error("File upload failed:", err);
-    toast.error("File upload failed. Please try again.");
-    setFileStates((prev) => ({ ...prev, [documentType]: null }));
-    setValue(`enclosure.${documentType}`, null);
-    setValue(`enclosure.${documentType}FileStoreId`, null);
-    setValue(`enclosure.${documentType}OriginalName`, null);
-    e.target.value = null;
-  } finally {
-    loaderRef.current?.hide();
-  }
-};
-
 const renderFileField = (docType, label) => {
   if (viewMode) {
     return (
@@ -111,13 +38,13 @@ const renderFileField = (docType, label) => {
   }
 
   return (
-    <>
-      <div style={{ display: "flex" }}>
+    <div className="mb-3">
+      <div className="position-relative">
         <InputFile
           name={`enclosure.${docType}`}
           label={t(label)}
           id={docType}
-          style={{ width: "100%" }}
+          style={{ width: "100%", paddingRight: fileStates[docType] ? "40px" : "0" }}
           register={register(`enclosure.${docType}`, {
             required: !fileStates[docType] && t(`${label} is required`),
           })}
@@ -127,18 +54,23 @@ const renderFileField = (docType, label) => {
           onChange={(e) => handleFileChange(e, docType)}
           watch={watch}
           defaultValue={fileStates[docType]?.displayFile || watch(`enclosure.${docType}`)}
-          key={`${docType}-${fileStates[docType] ? 'uploaded' : 'empty'}`} // Force re-render
+          key={`${docType}-${fileStates[docType] ? 'uploaded' : 'empty'}`}
         />
 
         {fileStates[docType] && (
           <FaTimesCircle
-            className="text-danger position-relative"
+            className="text-danger position-absolute"
             style={{
-              top: "3rem",
-              right: "3.5rem",
+              top: "50%",
+              right: "15px",
+              transform: "translateY(-50%)",
               cursor: "pointer",
+              zIndex: 10,
+              backgroundColor: "white",
+              borderRadius: "50%",
+              padding: "2px"
             }}
-            size={18}
+            size={16}
             title="Remove file"
             onClick={() => {
               setFileStates((prev) => ({
@@ -150,11 +82,9 @@ const renderFileField = (docType, label) => {
               setValue(`enclosure.${docType}OriginalName`, null);
               clearErrors(`enclosure.${docType}`);
               
-              // Clear the file input
               const fileInput = document.getElementById(docType);
               if (fileInput) {
                 fileInput.value = '';
-                // Trigger a change event to ensure form state is updated
                 const event = new Event('change', { bubbles: true });
                 fileInput.dispatchEvent(event);
               }
@@ -164,13 +94,13 @@ const renderFileField = (docType, label) => {
       </div>
 
       {fileStates[docType] && (
-        <div className="d-flex align-items-center mt-1 mb-1">
-          <small className="text-success me-2">
+        <div className="d-flex align-items-center justify-content-between mt-2 p-2 bg-light border rounded">
+          <small className="text-success flex-grow-1 text-truncate me-2">
             ✓ {fileStates[docType].name}
           </small>
           <button
             type="button"
-            className="btn btn-sm btn-primary rounded-circle d-flex align-items-center justify-content-center"
+            className="btn btn-sm btn-outline-primary d-flex align-items-center flex-shrink-0"
             onClick={() =>
               handleFileDownload(
                 fileStates[docType].fileStoreId,
@@ -179,62 +109,17 @@ const renderFileField = (docType, label) => {
               )
             }
             title="Download file"
-            style={{ width: "24px", height: "24px", padding: "0" }}
+            style={{ 
+              fontSize: "0.75rem", 
+              padding: "4px 8px",
+              minWidth: "auto"
+            }}
           >
-            <FaDownload size={10} />
+            <FaDownload size={10} className="me-1" />
+            <span className="d-none d-sm-inline">Download</span>
           </button>
         </div>
       )}
-    </>
+    </div>
   );
-};
-
-// Updated extractEnclosures function in VesselSurveyRegistration component
-const extractEnclosures = (formValue, applicationNumber) => {
-  const mapping = {
-    authorizationFile: {
-      type: "SURVEY_AUTHORIZATION",
-      description: "Authorization file",
-    },
-    paymentChallan: {
-      type: "SURVEY_PAYMENT_CHALLAN", 
-      description: "Payment challan",
-    },
-    builderCertificate: {
-      type: "SURVEY_BUILDER_CERTIFICATE",
-      description: "Builder certificate",
-    },
-    lastCertificateCopy: {
-      type: "SURVEY_COPY_OF_LAST_CERTIFICATE_OF_SURVEY",
-      description: "Last certificate copy",
-    },
-    registrationCertificateCopy: {
-      type: "SURVEY_COPY_OF_CERTIFICATE_OF_REGISTRATION",
-      description: "Registration certificate copy",
-    },
-    testCertificate: {
-      type: "SURVEY_TEST_CERTIFICATE",
-      description: "Test certificate",
-    },
-  };
-
-  return Object.entries(mapping).map(([key, meta]) => {
-    const fileStoreId = formValue[`${key}FileStoreId`];
-    const originalName = formValue[`${key}OriginalName`];
-    const file = formValue[key];
-    
-    // Use the display file name (label + extension) for API payload
-    let documentName = file?.name || originalName || meta.description;
-    
-    return {
-      id: "",
-      documentName,
-      documentType: meta.type,
-      applicationNumber,
-      fileStoreId: fileStoreId ?? "",
-      documentSource: "SURVEY_ENCLOSURE",
-      description: meta.description,
-      active: true,
-    };
-  });
 };
