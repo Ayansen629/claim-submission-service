@@ -1,4 +1,580 @@
-provisionalCertificates: {
-    surveyCertificate: false,
-    registrationCertificate: false
+import React, { useState, useEffect, forwardRef } from "react";
+import { Button, Card } from "react-bootstrap";
+import { BsPlus } from "react-icons/bs";
+import { useTranslation } from "react-i18next";
+import { toast } from "react-toastify";
+import ActionTable from "../../../../../common/ActionTable.tsx";
+import FileReportsUploadModal from "../../../../../common/FileReportsUploadModal.jsx";
+import Collapsible from "../../../../../common/Collapsible.js";
+import { postData } from "../../../../../../services/http.service.ts";
+import {
+  BASE_IP,
+  SERVICE_BASE,
+  URLS_ENDPOINT,
+} from "../../../../../../utils/urlsConstants.ts";
+import { getFromLocalStorage } from "../../../../../../utils/localStorageUtils.js";
+import axios from "axios";
+import { OFFICER_ROLES, USER_ROLES } from "../../../../../../utils/constants.ts";
+
+
+const ReportsDashboard = forwardRef(
+  ({ viewMode = false, pageName, applicationNumber, additionalData ,registrationData }, loaderRef) => {
+    const { t } = useTranslation();
+    const [showFileModal, setShowFileModal] = useState(false);
+    const [currentReportType, setCurrentReportType] = useState("");
+    const [reports, setReports] = useState({
+      materialTest: [],
+      radiography: [],
+      inspection: [],
+      other: [],
+    });
+    const [loading, setLoading] = useState(false);
+    const userRole = getFromLocalStorage("userRole") ;
+    const isVesselOwner = userRole === USER_ROLES.VESSEL_OWNER;
+
+    const REPORT_COLUMNS = [
+      {
+        colName: t("Add Attachment"),
+        fieldName: "fileName",
+        clsName: "column-text-start",
+      },
+      {
+        colName: t("Description"),
+        fieldName: "description",
+        clsName: "column-text-start",
+      },
+      {
+        colName: t("Action"),
+        fieldName: "action",
+        actions:
+          viewMode || pageName === "vesselRegistration"
+            ? ["download"]
+            : ["delete", "download"],
+        clsName: "col-sm-2 column-text-start actions-column",
+      },
+    ];
+
+    const fetchReports = async () => {
+      setLoading(true);
+     
+      try {
+        const payload = {
+          uuid: [],
+          applicationNumber: [applicationNumber || ''],
+        };
+
+        const searchApiUrl =
+          SERVICE_BASE.IWT_REGISTRATION +
+          URLS_ENDPOINT.USER_SERVICE.REPORT_SEARCH;
+        const response = await postData(searchApiUrl, payload);
+
+        if (
+          response?.status === 200 &&
+          response?.data?.responseStatus?.status ===
+            "Document(s) fetched successfully."
+        ) {
+          const fetchedReports = response.data.data || [];
+
+          const categorizedReports = {
+            materialTest: [],
+            radiography: [],
+            inspection: [],
+            other: [],
+          };
+
+          fetchedReports.forEach((report) => {
+            const reportData = {
+              id: report.id,
+              fileName: report.documentName,
+              description: report.description || t("No description"),
+              remarks: t("Active"),
+              fileStoreId: report.fileStoreId,
+            };
+
+            switch (report.documentType) {
+              case "MATERIAL_TEST_REPORT":
+                categorizedReports.materialTest.push(reportData);
+                break;
+              case "RADIOGRAPHY_REPORT":
+                categorizedReports.radiography.push(reportData);
+                break;
+              case "INSPECTION_REPORT":
+                categorizedReports.inspection.push(reportData);
+                break;
+              case "OTHER_REPORT":
+                categorizedReports.other.push(reportData);
+                break;
+            }
+          });
+
+          setReports(categorizedReports);
+        }
+      } catch (err) {
+        console.error("Failed to fetch reports:", err);
+        toast.error("Failed to fetch reports");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    useEffect(() => {
+      fetchReports();
+    }, []);
+
+    const handleAddReport = (reportType) => {
+      setCurrentReportType(reportType);
+      setShowFileModal(true);
+    };
+
+    const handleFileUpload = (uploadedReport) => {
+      if (uploadedReport) {
+        fetchReports();
+      }
+    };
+
+    const handleViewReport = (rowData, reportType) => {
+      alert(t("Viewing report") + `: ${rowData.fileName}`);
+    };
+
+    const handleDeleteReport = (rowData, reportType) => {
+      if (window.confirm(t("Are you sure you want to delete this report?"))) {
+        setReports((prev) => ({
+          ...prev,
+          [reportType]: prev[reportType].filter(
+            (report) => report.id !== rowData.id
+          ),
+        }));
+      }
+    };
+
+    const handleDownloadReport = (rowData, reportType) => {
+      handleDownload(rowData.fileStoreId, rowData.fileName);
+    };
+
+    const handleDownload = async (fileStoreId, fileName) => {
+      try {
+        if (!fileStoreId) return;
+        const url = `${BASE_IP}/filestore/v1/files/id?fileStoreId=${fileStoreId}`;
+
+        loaderRef.current?.show();
+
+        const accessToken = getFromLocalStorage("access_token");
+        const tokenDetails = getFromLocalStorage("tokenDetails");
+        const sessionState = tokenDetails
+          ? JSON.parse(tokenDetails)?.session_state
+          : "";
+
+        const response = await axios({
+          method: "GET",
+          url: url,
+          responseType: "blob",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            "X-Request-ID": sessionState,
+            Accept: "application/octet-stream",
+          },
+        });
+
+        if (response.data) {
+          let filename = fileName || "document";
+          const contentDisposition = response.headers["content-disposition"];
+          if (contentDisposition) {
+            const filenameMatch = contentDisposition.match(
+              /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/
+            );
+            if (filenameMatch && filenameMatch[1]) {
+              filename = filenameMatch[1].replace(/['"]/g, "");
+            }
+          }
+
+          const blob = new Blob([response.data], {
+            type:
+              response.headers["content-type"] || "application/octet-stream",
+          });
+          const blobUrl = window.URL.createObjectURL(blob);
+
+          const link = document.createElement("a");
+          link.href = blobUrl;
+          link.setAttribute("download", filename);
+          document.body.appendChild(link);
+          link.click();
+
+          setTimeout(() => {
+            document.body.removeChild(link);
+            window.URL.revokeObjectURL(blobUrl);
+          }, 100);
+        }
+      } catch (error) {
+        console.error("Error downloading file:", error);
+        toast.error("Failed to download file. Please try again.");
+      } finally {
+        loaderRef.current?.hide();
+      }
+    };
+
+    console.log("page name: ", pageName);
+    const renderReportTable = (reportType, reportData, title) => {
+      return (
+        <Collapsible title={title} openStat={true}>
+          <div style={{ padding: "1rem" }}>
+            {!viewMode && 
+            isVesselOwner  && 
+             !registrationData?.basicDetails?.isCmnGenerated
+            // pageName !== "vesselRegistration"
+             && (
+              <div className="d-flex justify-content-end mb-3">
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={() => handleAddReport(reportType)}
+                >
+                  <BsPlus size={20} /> {t("Add")}
+                </Button>
+              </div>
+            )}
+
+            <ActionTable
+              columns={REPORT_COLUMNS}
+              rowData={reportData}
+              tableHeader={null}
+              hideExportBtn={true}
+              hideSearchBar={true}
+              pagination={false}
+              onViewRow={(rowData) => handleViewReport(rowData, reportType)}
+              onDeleteRow={(rowData) => handleDeleteReport(rowData, reportType)}
+              download={(rowData) => handleDownloadReport(rowData, reportType)}
+              noDataText={t("No reports available")}
+            />
+          </div>
+        </Collapsible>
+      );
+    };
+
+    return (
+      <Card className="mt-4">
+        <Card.Body style={{ padding: 0 }}>
+          <div className="reports-section">
+            {renderReportTable(
+              "materialTest",
+              reports.materialTest,
+              t("Material Test Report")
+            )}
+            {renderReportTable(
+              "radiography",
+              reports.radiography,
+              t("Radiography Report")
+            )}
+            {renderReportTable(
+              "inspection",
+              reports.inspection,
+              t("Inspection Report")
+            )}
+            {renderReportTable("other", reports.other, t("Other Report"))}
+          </div>
+        </Card.Body>
+
+        {!viewMode && 
+        // pageName !== "vesselRegistration" && 
+        getFromLocalStorage("userRole") === USER_ROLES.VESSEL_OWNER &&
+        !registrationData?.basicDetails?.isCmnGenerated &&
+        (
+          <FileReportsUploadModal
+            show={showFileModal}
+            onHide={() => setShowFileModal(false)}
+            reportType={currentReportType}
+            applicationNumber={applicationNumber}
+            applicationInfo={additionalData}
+            onSubmit={handleFileUpload}
+          />
+        )}
+      </Card>
+    );
   }
+);
+
+export default ReportsDashboard;
+
+import React, { useState } from "react";
+import { useForm } from "react-hook-form";
+import { Modal, Form, Button, Spinner } from "react-bootstrap";
+import { useTranslation } from "react-i18next";
+import { FaTimesCircle, FaFileAlt } from "react-icons/fa";
+import { toast } from "react-toastify";
+import { postFORMdata, postData } from "../../services/http.service.ts";
+import {
+  BASE_IP,
+  URLS_ENDPOINT,
+  SERVICE_BASE,
+} from "../../utils/urlsConstants.ts";
+
+const FileReportsUploadModal = ({
+  show,
+  onHide,
+  reportType,
+  onSubmit,
+  applicationNumber,
+  applicationInfo,
+}) => {
+  const { t } = useTranslation();
+  const {
+    register,
+    handleSubmit,
+    reset,
+    formState: { errors },
+    setValue,
+  } = useForm();
+
+  const [uploadedFile, setUploadedFile] = useState(null);
+  const [uploading, setUploading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+
+  const getReportTypeMapping = (type) => {
+    const mapping = {
+      materialTest: "MATERIAL_TEST_REPORT",
+      radiography: "RADIOGRAPHY_REPORT",
+      inspection: "INSPECTION_REPORT",
+      other: "OTHER_REPORT",
+    };
+    return mapping[type] || "OTHER_REPORT";
+  };
+
+  const getReportDisplayName = (type) => {
+    const reportNames = {
+      materialTest: "Material Test Report",
+      radiography: "Radiography Report",
+      inspection: "Inspection Report",
+      other: "Other Report",
+    };
+    return reportNames[type] || "Report";
+  };
+
+  const handleFormSubmit = async (data) => {
+    if (!uploadedFile?.url) {
+      toast.error("Please upload a file first.");
+      return;
+    }
+
+    setSubmitting(true);
+
+    try {
+      const apiReportType = getReportTypeMapping(reportType);
+
+      const payload = {
+        applicationNo: applicationNumber || applicationInfo?.applicationNumber,
+        doc: [
+          {
+            id: "",
+            documentName: getReportDisplayName(reportType),
+            documentType: apiReportType,
+            applicationNumber:
+              applicationNumber || applicationInfo?.applicationNumber,
+            fileStoreId: uploadedFile?.url,
+            documentSource: apiReportType,
+            description: data?.description || "",
+            active: true,
+          },
+        ],
+      };
+
+      const uploadApiUrl =
+        SERVICE_BASE.IWT_REGISTRATION +
+        URLS_ENDPOINT.USER_SERVICE.REPORT_UPLOAD;
+      const response = await postData(uploadApiUrl, payload);
+
+      // Check both HTTP status and response status
+      if (
+        response?.status === 200 &&
+        response?.data?.responseStatus?.status ===
+          "Document saved successfully."
+      ) {
+        toast.success("Report uploaded successfully!");
+        onSubmit && onSubmit(response?.data?.data[0]);
+        resetForm();
+        onHide();
+      } else {
+        toast.error("Failed to save report. Please try again.");
+      }
+    } catch (err) {
+      console.error("Report upload failed:", err);
+      toast.error("Report upload failed. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleModalClose = () => {
+    resetForm();
+    onHide();
+  };
+
+  const resetForm = () => {
+    reset();
+    setUploadedFile(null);
+    setUploading(false);
+    setSubmitting(false);
+  };
+
+  const handleFileChange = async (e) => {
+    const file = e?.target?.files[0];
+    if (!file) return;
+
+    const maxSize = 10 * 1024 * 1024;
+    if (file.size > maxSize) {
+      toast.error("File size must be less than or equal to 10 MB.");
+      e.target.value = null;
+      return;
+    }
+
+    setUploading(true);
+
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const uploadUrl = BASE_IP + URLS_ENDPOINT.FILE_STORE_SERVICE.UPLOAD_FILE;
+      const response = await postFORMdata(uploadUrl, formData);
+
+      console.log("File upload response:", response);
+
+      const fileStoreId = response?.data?.files[0]?.fileStoreId;
+
+      setUploadedFile({ name: file.name, url: fileStoreId });
+      setValue("file", fileStoreId);
+      toast.success("File uploaded successfully!");
+    } catch (err) {
+      console.error("File upload failed:", err);
+      console.log("Error details:", err.response || err.message);
+      toast.error("File upload failed. Please try again.");
+      setUploadedFile(null);
+      e.target.value = null;
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const removeFile = () => {
+    setUploadedFile(null);
+    setValue("file", null);
+  };
+
+  return (
+    <Modal show={show} onHide={handleModalClose}>
+      <Modal.Header closeButton>
+        <Modal.Title>
+          {t("Upload")} {getReportDisplayName(reportType)}
+        </Modal.Title>
+      </Modal.Header>
+
+      <Form onSubmit={handleSubmit(handleFormSubmit)}>
+        <Modal.Body>
+          <Form.Group className="mb-3">
+            <Form.Label>
+              {t("Select File")} <span className="text-danger">*</span>
+            </Form.Label>
+
+            {uploading ? (
+              <div className="border rounded p-3 text-center bg-light">
+                <Spinner animation="border" size="sm" className="me-2" />
+                <span className="text-muted">Uploading file...</span>
+              </div>
+            ) : !uploadedFile ? (
+              <Form.Control
+                type="file"
+                onChange={handleFileChange}
+                required
+                accept=".pdf,.doc,.docx,.xls,.xlsx,.txt,.jpg,.jpeg,.png"
+              />
+            ) : (
+              <div className="border rounded p-2 bg-light">
+                <div className="d-flex align-items-center justify-content-between">
+                  <div className="d-flex align-items-center flex-grow-1">
+                    <FaFileAlt className="text-primary me-2" />
+                    <span className="text-truncate" title={uploadedFile.name}>
+                      {uploadedFile.name}
+                    </span>
+                  </div>
+                  <FaTimesCircle
+                    size={18}
+                    color="#dc3545"
+                    style={{ cursor: "pointer", marginLeft: "10px" }}
+                    onClick={removeFile}
+                    title="Remove file"
+                  />
+                </div>
+              </div>
+            )}
+          </Form.Group>
+
+          <Form.Group className="mb-3">
+            <Form.Label>{t("Description")}</Form.Label>
+            <Form.Control
+              as="textarea"
+              rows={3}
+              {...register("description")}
+              placeholder={t("Enter description")}
+            />
+          </Form.Group>
+        </Modal.Body>
+
+        <Modal.Footer>
+          <Button variant="secondary" onClick={handleModalClose}>
+            {t("Cancel")}
+          </Button>
+          <Button
+            variant="primary"
+            type="submit"
+            disabled={!uploadedFile || uploading || submitting}
+          >
+            {submitting ? (
+              <>
+                <Spinner animation="border" size="sm" className="me-2" />
+                Uploading...
+              </>
+            ) : (
+              t("Upload")
+            )}
+          </Button>
+        </Modal.Footer>
+      </Form>
+    </Modal>
+  );
+};
+
+export default FileReportsUploadModal;
+this is payload -
+{"applicationNo":"WB-REG-2025-222953","doc":[{"id":"","documentName":"Material Test Report","documentType":"MATERIAL_TEST_REPORT","applicationNumber":"WB-REG-2025-222953","fileStoreId":"b1eb5900-d7c6-41bc-8ec5-aebc0aedccbb","documentSource":"MATERIAL_TEST_REPORT","description":"","active":true}]}
+resposne-
+{
+    "responseStatus": {
+        "status": "201",
+        "message": "Operation completed successfully."
+    },
+    "data": [
+        {
+            "id": "55468173-8486-47b4-819e-530ef1fc6900",
+            "documentName": "Material Test Report",
+            "documentType": "MATERIAL_TEST_REPORT",
+            "applicationNumber": "WB-REG-2025-222953",
+            "fileStoreId": "b1eb5900-d7c6-41bc-8ec5-aebc0aedccbb",
+            "documentSource": "MATERIAL_TEST_REPORT",
+            "description": "",
+            "auditDetails": {
+                "createdBy": "55468173-8486-47b4-819e-530ef1fc6900",
+                "createdOn": "2025-08-24T22:25:31.613934088",
+                "updatedBy": "55468173-8486-47b4-819e-530ef1fc6900",
+                "updatedOn": "2025-08-24T22:25:31.613957499"
+            },
+            "active": true
+        }
+    ],
+    "errors": null,
+    "timestamp": 1756054531.615839861,
+    "pagination": null
+}
+when handleFormSubmit this function call uplaod button heat and close the model
+but now i see its not working
+i think status issue
+please fix this
+when close the model api call need to print in table
+still table data also not showing please fix this
+
