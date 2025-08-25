@@ -1,279 +1,2270 @@
-import React, { useState, useEffect } from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
-import Dropdown from "react-bootstrap/Dropdown";
-import { FaBars, FaGlobe, FaKey, FaUser, FaSignOutAlt, FaCheck, FaCaretDown } from "react-icons/fa";
-import { FiFlag } from "react-icons/fi";
-import { GiIndiaGate } from "react-icons/gi";
-import GovtLogo from "../../assets/images/GovtLogo.png";
-import ProfileImg from "../../assets/images/Profile.png";
-import InlandWaterTransport from "../../assets/images/Inland-Water-Transport.jpg";
-import { useLanguageContext } from "./LanguageContext";
+import React, { useState, useEffect, useRef } from "react";
+import { useForm, FormProvider } from "react-hook-form";
 import { useTranslation } from "react-i18next";
-import "./styles/Header.css";
-import "./styles/ChangePassword.css";
-import IWT_Icon from "../../assets/images/IWT_Icon.jpg";
-import { clearAppStorage, getUserRoleName, USER_ROLES } from "../../utils/constants.ts";
-import { getFromLocalStorage } from "../../utils/localStorageUtils";
-import ChangePassword from "./ChangePassword";
+import { NavDropdown } from "react-bootstrap";
+import { MdOutlineLanguage } from "react-icons/md";
+import './stepper-styles.css';
 
-const Header = ({ toggleSidebar, onLogout, isSidebarOpen }) => {
-  const { changeLanguage, language } = useLanguageContext();
-  const navigate = useNavigate();
-  const { t } = useTranslation();
-  const [showChangePassword, setShowChangePassword] = useState(false);
-  const [userInfo, setUserInfo] = useState({ name: "", role: "" });
+import {
+  Container,
+  Row,
+  Col,
+  Form,
+  Button,
+  Card,
+  Image,
+  Alert,
+} from "react-bootstrap";
+import {
+  FaUser,
+  FaBuilding,
+  FaFileUpload,
+  FaCheck,
+  FaArrowRight,
+  FaArrowLeft,
+  FaIdCard,
+  FaEnvelope,
+  FaPhone,
+  FaMapMarkerAlt,
+  FaUpload,
+  FaShip,
+} from "react-icons/fa";
+import "./UserRegistration.css";
+import IWT_FULL_IMG from "../../../assets/images/iwt-whole.jpg";
+import { toast } from "react-toastify";
+import {
+  getData,
+  postData,
+  postFORMdata,
+} from "../../../services/http.service.ts";
+import { URLS_ENDPOINT } from "../../../utils/urlsConstants.ts";
+import { handleErrorMessage } from "../../../utils/errorMessageHandler.js";
+import {
+  createOwnerOrBuilderPayload,
+  mapToVesselUserDetails,
+} from "../model/mapToVesselModel.ts";
+import NewLoader from "../../common/NewLoader.js";
+import InputText from "../../common/InputText.tsx";
+import InputFile from "../../common/InputFile.tsx";
+import i18n from "i18next";
+import InputSelect from "../../common/InputSelect.tsx";
+import {
+  MasterDataProvider,
+  useMasterData,
+} from "../../context/MasterDataContext.js";
+import { useLanguageContext } from "../../common/LanguageContext.js";
+import { CONSTANT_REGEX } from "../../../utils/constants.ts";
+
+const VesselOwnerRegistrationPage = () => {
+  const { i18n, t } = useTranslation();
+  const { changeLanguage } = useLanguageContext();
+  const isCompMount = useRef(true);
+
+  const { masterData } = useMasterData();
+
+
+  const [currentStep, setCurrentStep] = useState(1);
+  const [formData, setFormData] = useState({});
+  const [isSubmitted, setIsSubmitted] = useState(false);
+  const [successMessage, setSuccessMessage] = useState("");
+  const [isCompany, setIsCompany] = useState(false);
+  const [isExemptCategory, setIsExemptCategory] = useState(false);
+  const [validationMessage, setValidationMessage] = useState("");
+  const loaderRef = useRef();
+  const PUBLIC_URL = process.env.REACT_APP_PUBLIC_URL;
+  const methods = useForm({
+    mode: "onBlur",
+    defaultValues: { categoryOfOwner: "", country: "India" },
+  });
+
+  console.log("masterData-dropdown", masterData);
+  const {
+    register,
+    handleSubmit,
+    formState: { errors },
+    trigger,
+    setValue,
+    getValues,
+    watch,
+    clearErrors,
+    setError,
+  } = methods;
+
+  const totalSteps = 3;
 
   useEffect(() => {
-    const userRole = getFromLocalStorage("userRole");
-    let userName = "";
-    
-    if (userRole === USER_ROLES.VESSEL_OWNER) {
-      const ownerDetails = JSON.parse(getFromLocalStorage("ownerDetails") || "{}");
-      userName = ownerDetails.ownerCompanyName || ownerDetails.authorisedFname || "User";
-    } else if (userRole === USER_ROLES.BUILDER) {
-      const builderDetails = JSON.parse(getFromLocalStorage("builderDetails") || "{}");
-      userName = builderDetails.builderCompanyName || builderDetails.authorisedFname || "User";
-    } else {
-      const employeeDetails = JSON.parse(getFromLocalStorage("employeeDetails") || "{}");
-      userName = `${employeeDetails.firstName || ""} ${employeeDetails.lastName || ""}`.trim() || "User";
+    if (isCompMount.current) {
+      isCompMount.current = false;
+      return;
+    }
+    const fieldsWithErrors = Object.keys(errors);
+    trigger(fieldsWithErrors);
+  }, [i18n.language]);
+
+  useEffect(() => {
+    setTimeout(() => {
+      Object.keys(formData).forEach((key) => {
+        if (formData[key] !== undefined) {
+          console.log("Setting value for", key, formData[key]);
+          setValue(key, formData[key], { shouldValidate: false });
+        }
+      });
+    }, 0);
+  }, [currentStep, setValue, formData]);
+
+  const formFields = {
+    step1: [
+      {
+        name: "categoryOfOwner",
+        label: t("vesselOwnerRegistration.Category of Owner"),
+        type: "select",
+        options: [
+          ...(masterData?.ownerTypes?.map((type) => ({
+            value: type.valueCode,
+            label: type.valueLabel,
+            isCompany: type.isCompany,
+          })) || []),
+        ],
+        required: true,
+        icon: FaBuilding,
+        colSize: 6,
+        validation: { required: t("vesselOwnerRegistration.OwnerCatRequired") },
+      },
+      {
+        name: "ownerCompanyName",
+        label: t("vesselOwnerRegistration.Owner/Company Name"),
+        type: "text",
+        required: true,
+        icon: FaUser,
+        colSize: 6,
+        maxlength: 150,
+        placeholder: t("vesselOwnerRegistration.Enter owner or company name"),
+        validation: {
+          required: t("vesselOwnerRegistration.Owner name is required"),
+        },
+      },
+      {
+        name: "emailId",
+        label: t("vesselOwnerRegistration.Email ID"),
+        type: "email",
+        required: true,
+        icon: FaEnvelope,
+        maxlength: 100,
+        colSize: 6,
+        placeholder: t("vesselOwnerRegistration.Enter email address"),
+        validation: {
+          required: t("vesselOwnerRegistration.Email is required"),
+          pattern: {
+            value: /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i,
+            message: t("vesselOwnerRegistration.Invalid email address"),
+          },
+        },
+      },
+      {
+        name: "phoneNumber",
+        label: t("vesselOwnerRegistration.Phone Number"),
+        type: "text",
+        required: true,
+        icon: FaPhone,
+        colSize: 6,
+        maxlength: 10,
+        placeholder: t("vesselOwnerRegistration.Enter 10-digit phone number"),
+        validation: {
+          required: t("vesselOwnerRegistration.Phone number is required"),
+          pattern: {
+            value: /^[0-9]{10}$/,
+            message: t(
+              "vesselOwnerRegistration.Phone number must be 10 digits"
+            ),
+          },
+        },
+      },
+
+      {
+        name: "panNo",
+        label: t("vesselOwnerRegistration.PAN Number"),
+        type: "text",
+        required: !isExemptCategory,
+        icon: FaIdCard,
+        colSize: 6,
+        maxlength: 10,
+
+        placeholder: t(
+          "vesselOwnerRegistration.Enter PAN number (e.g., ABCDE1234F)"
+        ),
+        validation: !isExemptCategory ? {
+          required: t("vesselOwnerRegistration.PAN number is required"),
+          pattern: {
+            value: /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/,
+            message: t("vesselOwnerRegistration.Invalid PAN format"),
+          },
+        } : {},
+      },
+
+      {
+        name: "aadharNumber",
+        key: "aadharNo",
+        label: t("vesselOwnerRegistration.aadharNo"),
+        type: "text",
+        required: !isExemptCategory,
+        icon: FaIdCard,
+        colSize: 6,
+        maxlength: 12,
+        placeholder: t("vesselOwnerRegistration.aadharNoPhl"),
+        validation: !isExemptCategory ? {
+          required: t("vesselOwnerRegistration.aadharNoReq"),
+          pattern: {
+            value: CONSTANT_REGEX.AADHAR,
+            message: t("vesselOwnerRegistration.aadharNoInv"),
+          },
+        } : {},
+      },
+
+      {
+        name: "tradeLicenseNumber",
+        key: "tradeLicenseNo.",
+        label: t("vesselOwnerRegistration.tradeLicense"),
+        type: "text",
+        required: !isExemptCategory,
+        icon: FaIdCard,
+        colSize: 6,
+        maxlength: 50,
+        placeholder: t("vesselOwnerRegistration.tradeLicensePhl"),
+        validation: !isExemptCategory ? {
+          required: t("vesselOwnerRegistration.tradeLicenseReq"),
+          pattern: {
+            value: CONSTANT_REGEX.TRADE_LICENSE,
+            message: t("vesselOwnerRegistration.tradeLicenseInv"),
+          },
+        } : {},
+      },
+
+      {
+        name: "gstNo",
+        label: t("vesselOwnerRegistration.GST Number"),
+        type: "text",
+        required: false,
+        icon: FaIdCard,
+        colSize: 6,
+        placeholder: t(
+          "vesselOwnerRegistration.Enter GST number (if applicable)"
+        ),
+        validation: {
+          pattern: {
+            value: /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/,
+            message: t("vesselOwnerRegistration.Invalid GST format"),
+          },
+        },
+      },
+      {
+        name: "cinNo",
+        label: t("vesselOwnerRegistration.CIN Number"),
+        type: "text",
+        required: false,
+        icon: FaIdCard,
+        colSize: 6,
+        placeholder: t("vesselOwnerRegistration.Enter CIN number"),
+        validation: {
+          pattern: {
+            value: /^[A-Z]{1}[0-9]{5}[A-Z]{2}[0-9]{4}[A-Z]{3}[0-9]{6}$/,
+            message: t("vesselOwnerRegistration.Invalid CIN format"),
+          },
+        },
+        showIf: () => isCompany,
+      },
+      {
+        name: "dinNo",
+        label: t("vesselOwnerRegistration.DIN Number"),
+        type: "text",
+        required: false,
+        icon: FaIdCard,
+        colSize: 6,
+        placeholder: t("vesselOwnerRegistration.Enter DIN number"),
+        validation: {
+          pattern: {
+            value: /^[0-9]{8}$/,
+            message: t("vesselOwnerRegistration.DIN must be 8 digits"),
+          },
+        },
+        showIf: () => isCompany,
+      },
+      {
+        name: "addressLine1",
+        label: t("vesselOwnerRegistration.Address Line-1"),
+        type: "text",
+        required: true,
+        icon: FaMapMarkerAlt,
+        colSize: 6,
+        maxlength: 150,
+        placeholder: t("vesselOwnerRegistration.Enter address line 1"),
+        validation: {
+          required: t("vesselOwnerRegistration.Address is required"),
+        },
+      },
+      {
+        name: "addressLine2",
+        label: t("vesselOwnerRegistration.Address Line-2"),
+        type: "text",
+        required: false,
+        icon: FaMapMarkerAlt,
+        colSize: 6,
+        maxlength: 150,
+        placeholder: t(
+          "vesselOwnerRegistration.Enter address line 2 (optional)"
+        ),
+      },
+      {
+        name: "pin",
+        label: t("vesselOwnerRegistration.PIN"),
+        type: "text",
+        required: true,
+        icon: FaMapMarkerAlt,
+        colSize: 6,
+        maxlength: 6,
+        placeholder: t("vesselOwnerRegistration.Enter 6-digit PIN code"),
+        validation: {
+          required: t("vesselOwnerRegistration.PIN code is required"),
+          pattern: {
+            value: /^[0-9]{6}$/,
+            message: t("vesselOwnerRegistration.PIN must be 6 digits"),
+          },
+        },
+        onChange: (e, setValue, watch) => {
+          const changedValue = e?.target?.value || "";
+          if (changedValue?.length === 6) {
+            setValue("district", "");
+            setValue("state", "");
+            setValue("country", "India");
+            getDetailsByPIN(changedValue);
+          }
+        },
+      },
+      {
+        name: "district",
+        label: t("vesselOwnerRegistration.District"),
+        type: "text",
+        required: false,
+        icon: FaMapMarkerAlt,
+        colSize: 6,
+        placeholder: t("vesselOwnerRegistration.Please enter district"),
+      },
+      {
+        name: "state",
+        label: t("vesselOwnerRegistration.State / UT"),
+        type: "text",
+        required: false,
+        icon: FaMapMarkerAlt,
+        colSize: 6,
+        placeholder: t("vesselOwnerRegistration.Please enter state"),
+      },
+      {
+        name: "country",
+        label: t("vesselOwnerRegistration.Country"),
+        type: "text",
+        required: false,
+        disabled: true,
+        icon: FaMapMarkerAlt,
+        colSize: 6,
+        placeholder: t("vesselOwnerRegistration.Please enter country"),
+      },
+    ],
+    step2: [
+      {
+        name: "authorisedFname",
+        label: t("vesselOwnerRegistration.First Name"),
+        type: "text",
+        required: true,
+        icon: FaUser,
+        colSize: 6,
+        maxlength: 50,
+        placeholder: t("Enter first name"),
+        validation: {
+          required: t("vesselOwnerRegistration.First name is required"),
+        },
+      },
+      {
+        name: "authorisedLname",
+        maxlength: 50,
+        label: t("vesselOwnerRegistration.Last Name"),
+        type: "text",
+        required: true,
+        icon: FaUser,
+        colSize: 6,
+        placeholder: t("vesselOwnerRegistration.Enter last name"),
+        validation: {
+          required: t("vesselOwnerRegistration.Last name is required"),
+        },
+      },
+      {
+        name: "authorisedMob",
+        label: t("vesselOwnerRegistration.Primary Mobile Number"),
+        type: "text",
+        required: true,
+        icon: FaPhone,
+        colSize: 6,
+        maxlength: 10,
+        placeholder: t("vesselOwnerRegistration.Enter 10-digit mobile number"),
+        validation: {
+          required: t("vesselOwnerRegistration.Mobile number is required"),
+          pattern: {
+            value: /^[0-9]{10}$/,
+            message: t(
+              "vesselOwnerRegistration.Mobile number must be 10 digits"
+            ),
+          },
+        },
+      },
+      {
+        name: "authorisedEmail",
+        label: t("vesselOwnerRegistration.Email ID"),
+        type: "email",
+        required: true,
+        icon: FaEnvelope,
+        colSize: 6,
+        maxlength: 100,
+        placeholder: t("vesselOwnerRegistration.Enter email address"),
+        validation: {
+          required: t("vesselOwnerRegistration.Email is required"),
+          pattern: {
+            value: /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i,
+            message: t("vesselOwnerRegistration.Invalid email address"),
+          },
+        },
+      },
+      {
+        name: "authorizationLetter",
+        label: t("vesselOwnerRegistration.Letter of Authorization"),
+        type: "file",
+        required: false,
+        colSize: 12,
+      },
+    ],
+    step3: [
+      {
+        name: "panCardUpload",
+        label: t("vesselOwnerRegistration.PAN Card"),
+        type: "file",
+        required: false,
+        colSize: 6,
+      },
+      {
+        name: "gstCertificate",
+        label: t("vesselOwnerRegistration.GST Certificate"),
+        type: "file",
+        required: false,
+        colSize: 6,
+      },
+      {
+        name: "addressProof",
+        label: t("vesselOwnerRegistration.Address Proof"),
+        type: "file",
+        required: false,
+        colSize: 6,
+      },
+      // {
+      //   name: "companyRegistrationCertificate",
+      //   label: t("vesselOwnerRegistration.Company Registration Certificate"),
+      //   type: "file",
+      //   required: false,
+      //   colSize: 6,
+      // },
+      {
+        name: "companyRegistrationCertificate",
+        label: t("Company Registration Certificate"),
+        type: "file",
+        required: false,
+        colSize: 6,
+        showIf: () => isCompany,
+      },
+      {
+        name: "moaCertificate",
+        label: t("vesselOwnerRegistration.MOA Certificate"),
+        type: "file",
+        required: false,
+        colSize: 6,
+        validation: {},
+        showIf: () => isCompany,
+      },
+      {
+        name: "aoaCertificate",
+        label: t("vesselOwnerRegistration.AOA Certificate"),
+        type: "file",
+        required: false,
+        colSize: 6,
+        validation: {},
+        showIf: () => isCompany,
+      },
+    ],
+  };
+
+  const getDetailsByPIN = async (pinCode) => {
+    try {
+      const URL =
+        PUBLIC_URL +
+        URLS_ENDPOINT.APP_SERVICES.GET_DETAILS_BY_PINCODE +
+        pinCode;
+      loaderRef.current?.show();
+      const response = await getData(URL);
+      if (response?.status === 200 && response?.data?.length > 0) {
+        setValue("district", response?.data[0]?.district);
+        setValue("state", response?.data[0]?.stateName);
+        loaderRef?.current?.hide();
+      } else {
+        loaderRef?.current?.hide();
+        toast.info("No Data Found! Pleasee enter manually..", {
+          position: "top-right",
+        });
+      }
+    } catch (err) {
+      console.log(err);
+      loaderRef?.current?.hide();
+      handleErrorMessage(err?.response?.data);
+    }
+  };
+
+  const getCurrentStepFields = () => {
+    let fields = [];
+    switch (currentStep) {
+      case 1:
+        fields = formFields.step1;
+        break;
+      case 2:
+        fields = formFields.step2;
+        break;
+      case 3:
+        fields = formFields.step3;
+        break;
+      default:
+        fields = [];
     }
 
-    setUserInfo({
-      name: userName,
-      role: getUserRoleName(userRole) || "User"
-    });
-  }, []);
-
-  const doLogout = () => {
-    clearAppStorage();
-    navigate("/");
+    return fields.filter((field) => !field.showIf || field.showIf());
   };
+
+  const validateStep = async () => {
+    const currentFields = getCurrentStepFields();
+    const requiredFields = currentFields.filter((field) => {
+      
+      if (isExemptCategory && ["panNo", "aadharNumber", "tradeLicenseNumber"].includes(field.name)) {
+        return false;
+      }
+      return field.required;
+    });
+
+
+    requiredFields.forEach((field) => {
+      const value = getValues(field.name);
+      if (!value || value === "") {
+        setError(field.name, {
+          type: "required",
+          message: `${field.label} is required`,
+        });
+      } else if (field.validation && field.validation.pattern) {
+        const pattern = field.validation.pattern.value;
+        if (!pattern.test(value)) {
+          setError(field.name, {
+            type: "pattern",
+            message: field.validation.pattern.message,
+          });
+        }
+      }
+    });
+
+   
+    const fieldsToValidate = currentFields
+      .filter((field) => {
+        if (isExemptCategory && ["panNo", "aadharNumber", "tradeLicenseNumber"].includes(field.name)) {
+          return false;
+        }
+        return true;
+      })
+      .map((field) => field.name);
+    return await trigger(fieldsToValidate);
+  };
+
+  const handleNext = async () => {
+    const isStepValid = await validateStep();
+
+    if (isStepValid) {
+      setValidationMessage("");
+
+      const currentValues = getValues();
+
+      setFormData((prev) => {
+        const newFormData = { ...prev };
+
+        Object.keys(currentValues).forEach((key) => {
+          if (currentValues[key] !== undefined) {
+            newFormData[key] = currentValues[key];
+          }
+        });
+
+        return newFormData;
+      });
+
+      if (currentStep < totalSteps) {
+        setCurrentStep(currentStep + 1);
+        window.scrollTo(0, 0);
+      } else {
+        handleSubmit(onSubmit)();
+      }
+    }
+  };
+
+  const handlePrevious = () => {
+    const currentValues = getValues();
+
+    const fileFields = getCurrentStepFields().filter(
+      (field) => field.type === "file"
+    );
+    fileFields.forEach((field) => {
+      if (currentValues[field.name]) {
+        setFormData((prev) => ({
+          ...prev,
+          [field.name]: currentValues[field.name],
+        }));
+      }
+    });
+
+    setFormData((prev) => ({ ...prev, ...currentValues }));
+
+    setCurrentStep(Math.max(1, currentStep - 1));
+    window.scrollTo(0, 0);
+    setValidationMessage("");
+  };
+
+  const onSubmit = (data) => {
+    const finalData = { ...formData, ...data };
+
+    const payload = createOwnerOrBuilderPayload("VESSEL_OWNER", {
+      ...finalData,
+    });
+
+    const files = [
+      finalData?.addressProof,
+      finalData?.panCardUpload,
+      finalData?.gstCertificate,
+      finalData?.authorizationLetter,
+      finalData?.companyRegistrationCertificate,
+      finalData?.moaCertificate,
+      finalData?.aoaCertificate,
+    ];
+    const fd = new FormData();
+
+    fd.append(
+      "request",
+      new Blob([JSON.stringify(payload)], { type: "application/json" })
+    );
+    files?.forEach((file) => {
+      if (file) {
+        fd.append(`files`, file);
+      }
+    });
+    submitUserDetails(fd);
+  };
+
+  const submitUserDetails = async (payload) => {
+    try {
+      const URL =
+        process.env.REACT_APP_AUTH_URL +
+        URLS_ENDPOINT.USER_SERVICE.CREATE_UPDATE_USER;
+      loaderRef.current?.show();
+      const response = await postFORMdata(URL, payload);
+      const apiRes = { ...response?.data };
+      if (
+        response?.status === 200 &&
+        apiRes?.responseStatus?.status === "200"
+      ) {
+        loaderRef?.current?.hide();
+        setIsSubmitted(true);
+        setSuccessMessage(apiRes?.responseStatus?.message);
+        window.scrollTo(0, 0);
+      } else {
+        loaderRef?.current?.hide();
+        toast.info(
+          apiRes?.responseStatus?.message || "Something went wrong..",
+          { position: "top-right" }
+        );
+      }
+    } catch (err) {
+      console.log(err);
+      loaderRef?.current?.hide();
+      handleErrorMessage(err?.response?.data);
+    }
+  };
+
+  const DynamicField = ({ field }) => {
+    const handleChange = (e) => {
+      if (field?.onChange) field.onChange(e, setValue, watch);
+    };
+
+    switch (field.type) {
+      case "select":
+        return (
+          <InputSelect
+            label={field.label}
+            required={field.required}
+            name={field.name}
+            options={field.options}
+            register={register(field?.name, {
+              ...field.validation,
+            })}
+            errors={errors}
+            icon={field.icon}
+            className="mb-3"
+            onChange={(value, selObj) => {
+              setIsCompany(selObj?.isCompany || false);
+              const isExempt = value === "STATE" || value === "STATE GOVERNMENT/ PANCHAYET" || "CENTRAL" || "PRIVATE LIMITED";
+              setIsExemptCategory(isExempt);
+              setValue(field.name, value);
+              
+              if (isExempt) {
+                clearErrors(["panNo", "aadharNumber", "tradeLicenseNumber"]);
+              }
+              
+              if (errors[field.name]) {
+                clearErrors(field.name);
+              }
+              setFormData((prev) => ({
+                ...prev,
+                [field.name]: value,
+              }));
+            }}
+            value={formData[field.name] || watch(field.name)}
+            autoFocus={field.autoFocus}
+          />
+        );
+
+      
+case "file":
+  return (
+    <InputFile
+      label={field.label}
+      required={field.required}
+      name={field.name}
+      key={field.name}
+      register={register(field.name)}
+      errors={errors}
+      onChange={(e) => {
+        if (e.target.files && e.target.files[0]) {
+          const file = e.target.files[0];
+          const extension = file.name.substring(file.name.lastIndexOf("."));
+          
+          
+          const modifiedFile = new File([file], `${field.label.replace(/\s+/g, "").toLowerCase()}${extension}`, {
+            type: file.type,
+            lastModified: file.lastModified
+          });
+          
+          setValue(field.name, modifiedFile);
+          
+          setFormData((prev) => {
+            const updated = { ...prev, [field.name]: modifiedFile };
+            return updated;
+          });
+          
+          if (errors[field.name]) {
+            clearErrors(field.name);
+          }
+          
+          const validTypes = [
+            "application/pdf",
+            "image/jpeg",
+            "image/png",
+            "image/jpg",
+          ];
+          if (!validTypes.includes(file.type)) {
+            setError(field.name, {
+              type: "manual",
+              message: "Only PDF, JPG or PNG files are allowed",
+            });
+          }
+          
+          if (file.size > 2 * 1024 * 1024) {
+            setError(field.name, {
+              type: "manual",
+              message: "File size should not exceed 2MB",
+            });
+          }
+        }
+      }}
+      className="mb-3"
+      watch={watch}
+      accept=".pdf,.jpg,.jpeg,.png"
+      defaultValue={formData[field.name]}
+      autoFocus={field.autoFocus}
+    />
+  );
+
+
+      default:
+        return (
+          <InputText
+            label={field.label}
+            required={isExemptCategory && ["panNo", "aadharNumber", "tradeLicenseNumber"].includes(field.name) ? false : field.required}
+            name={field.name}
+            key={field.name}
+            type={field.type}
+            placeholder={field.placeholder}
+            register={register(field?.name, {
+              ...(isExemptCategory && ["panNo", "aadharNumber", "tradeLicenseNumber"].includes(field.name) ? {} : field.validation),
+            })}
+            onChange={handleChange}
+            errors={errors}
+            readOnly={field.readOnly}
+            icon={field.icon}
+            maxlength={field?.maxlength}
+            onKeyDown={field?.keyDown}
+            disabled={field?.disabled || false}
+            className="mb-3"
+            style={{
+              borderColor: (errors[field.name] && !(isExemptCategory && ["panNo", "aadharNumber", "tradeLicenseNumber"].includes(field.name))) ? "#dc3545" : "#ced4da",
+              backgroundColor: (errors[field.name] && !(isExemptCategory && ["panNo", "aadharNumber", "tradeLicenseNumber"].includes(field.name))) ? "#fff8f8" : "white",
+            }}
+            autoFocus={field.autoFocus}
+          />
+        );
+    }
+  };
+
+  const stepTitles = [
+    {
+      title: t("vesselOwnerRegistration.Vessel Owner Details"),
+      icon: FaBuilding,
+    },
+    {
+      title: t("vesselOwnerRegistration.Authorized Person's Details"),
+      icon: FaUser,
+    },
+    {
+      title: t("vesselOwnerRegistration.Documents Upload"),
+      icon: FaFileUpload,
+    },
+  ];
 
   return (
     <>
-      <nav className="navbar navbar-expand-lg custom-navbar fixed-top px-3">
-        <div className="d-flex align-items-center gap-2 flex-shrink-0">
-          <img
-            src={IWT_Icon}
-            alt="IWT Logo"
-            className="img-fluid mobile-logo"
-            style={{ height: "3rem", borderRadius: "5px" }}
-          />
-          {isSidebarOpen && (
-            <svg width="100%" height="46px" viewBox="0 0 800 200" xmlns="http://www.w3.org/2000/svg" className="d-none d-md-block">
-              <text x="50%" y="90" dominantBaseline="middle" textAnchor="middle"
-                fontSize="69" fill="white" fontFamily="Segoe UI, sans-serif">
-                {t("Inland Water Transport")}
-              </text>
-              <text x="50%" y="140" dominantBaseline="middle" textAnchor="middle"
-                fontSize="30" fill="white" fontFamily="Segoe UI, sans-serif">
-                {t("Transport Department, Government of West Bengal")}
-              </text>
-            </svg>
-          )}
-          <button
-            className="btn text-white me-2 sidebar-toggle"
-            onClick={toggleSidebar}
-            aria-label="Toggle Sidebar"
+      <NewLoader ref={loaderRef} />
+      <Container fluid className="registration-container py-5">
+        <div
+          style={{
+            position: "absolute",
+            top: "10px",
+            right: "10px",
+            zIndex: 1050,
+          }}
+        >
+          <NavDropdown
+            title={
+              <MdOutlineLanguage
+                className="language-icon"
+                style={{ fontSize: "1.5rem", color: "#fff" }}
+              />
+            }
+            id="language-nav-dropdown"
+            className="mx-2"
+            style={{
+              display: "inline-block",
+              marginTop: "10px",
+              zIndex: 1050,
+              position: "relative",
+            }}
           >
-            <FaBars />
-          </button>
-        </div>
-
-        <div className="flex-grow-1 d-none d-md-block"></div>
-
-        <div className="header-right">
-          <Dropdown>
-            <Dropdown.Toggle
-              variant="link"
-              className="text-white nav-link p-0 d-flex align-items-center gap-1 language-dropdown"
+            <NavDropdown.Item
+              onClick={() => changeLanguage("en")}
+              className="small-text"
+              style={{
+                color: "#000000",
+                padding: "10px 15px",
+              }}
             >
-              <FaGlobe />
-            </Dropdown.Toggle>
-            <Dropdown.Menu className="language-dropdown-menu">
-              <Dropdown.Item
-                onClick={() => changeLanguage("en")}
-                active={language === "en"}
-                className="d-flex align-items-center gap-2"
-              >
-                <FiFlag size={18} style={{ color: "#2563eb" }} />
-                <span>English</span>
-                {language === "en" && <FaCheck className="ms-auto text-success" />}
-              </Dropdown.Item>
-              <Dropdown.Item
-                onClick={() => changeLanguage("bn")}
-                active={language === "bn"}
-                className="d-flex align-items-center gap-2"
-              >
-                <GiIndiaGate size={18} style={{ color: "#f59e42" }} />
-                <span>বাংলা</span>
-                {language === "bn" && <FaCheck className="ms-auto text-success" />}
-              </Dropdown.Item>
-            </Dropdown.Menu>
-          </Dropdown>
-
-          <Dropdown align="end">
-            <Dropdown.Toggle
-              variant="link"
-              className="d-flex align-items-center text-white nav-link p-0 profile-toggle"
-              id="profile-dropdown"
+              English
+            </NavDropdown.Item>
+            <NavDropdown.Item
+              onClick={() => changeLanguage("bn")}
+              className="small-text"
+              style={{
+                color: "#000000",
+                padding: "10px 15px",
+              }}
             >
-              <div className="d-flex align-items-center">
-                <img
-                  src={ProfileImg}
-                  alt="Profile"
-                  className="rounded-circle profile-img me-2"
-                  style={{ width: "40px", height: "40px", objectFit: "cover" }}
-                />
-                <div className="d-none d-md-block user-info-text">
-                  <div className="user-name">{userInfo.name}</div>
-                  <div className="user-role">{userInfo.role}</div>
-                </div>
-                <FaCaretDown className="ms-1" />
-              </div>
-            </Dropdown.Toggle>
-            <Dropdown.Menu className="profile-dropdown-menu">
-              <div className="dropdown-header">
-                <img
-                  src={ProfileImg}
-                  alt="Profile"
-                  className="rounded-circle profile-img-lg"
-                />
-                <div className="user-info">
-                  <div className="user-name">{userInfo.name}</div>
-                  <div className="user-role">{userInfo.role}</div>
-                </div>
-              </div>
-              <Dropdown.Divider />
-              <Dropdown.Item as={Link} to="/profile" className="dropdown-item-custom">
-                <FaUser className="dropdown-icon" />
-                <span>{t("My Profile")}</span>
-              </Dropdown.Item>
-              <Dropdown.Item onClick={() => setShowChangePassword(true)} className="dropdown-item-custom">
-                <FaKey className="dropdown-icon" />
-                <span>{t("Change Password")}</span>
-              </Dropdown.Item>
-              <Dropdown.Divider />
-              <Dropdown.Item className="dropdown-item-custom logout-item" onClick={doLogout}>
-                <FaSignOutAlt className="dropdown-icon" />
-                <span>{t("Logout")}</span>
-              </Dropdown.Item>
-            </Dropdown.Menu>
-          </Dropdown>
-
-          <img
-            src={GovtLogo}
-            alt="Govt Logo"
-            className="rounded-circle d-none d-sm-block govt-logo"
-            style={{ width: "3.5rem", height: "3.5rem" }}
-          />
+              বাংলা
+            </NavDropdown.Item>
+          </NavDropdown>
         </div>
-      </nav>
+        <Row className="justify-content-center">
+          <Col lg={10} xl={9}>
+            <Card className="registration-card">
+              <Card.Header className="registration-header p-0">
+                <div className="registration-header-content">
+                  <div className="header-logo-container">
+                    <Image
+                      src={IWT_FULL_IMG}
+                      alt="IWT Logo"
+                      className="header-logo"
+                    />
+                  </div>
+                  <h3 className="header-title">
+                    {t("vesselOwnerRegistration.Vessel Owner Registration")}
+                  </h3>
+                </div>
+              </Card.Header>
 
-      <ChangePassword
-        show={showChangePassword}
-        onHide={() => setShowChangePassword(false)}
-      />
+              <Card.Body className="registration-body p-4 p-md-5">
+                {isSubmitted ? (
+                  <div className="success-container text-center py-5">
+                    <div
+                      className="success-icon-container bg-success rounded-circle d-flex align-items-center justify-content-center mx-auto mb-4"
+                      style={{
+                        width: "90px",
+                        height: "90px",
+                        boxShadow: "0 10px 20px rgba(40, 167, 69, 0.3)",
+                      }}
+                    >
+                      <FaCheck className="success-icon text-white fs-1" />
+                    </div>
+                    <h4 className="success-title text-success mb-3 fw-bold">
+                      Registration Successful!
+                    </h4>
+                    <div
+                      className="registration-id p-4 bg-light rounded mb-4"
+                      style={{ borderLeft: "4px solid #0077b6" }}
+                    >
+                      {successMessage ||
+                        "Your vessel builder registration has been submitted successfully. You will receive a confirmation email shortly."}
+                    </div>
+                    <Button
+                      variant="primary"
+                      size="lg"
+                      className="mt-2 d-flex align-items-center justify-content-center mx-auto"
+                      style={{
+                        background: "linear-gradient(135deg, #0077b6, #023e8a)",
+                        border: "none",
+                        boxShadow: "0 4px 15px rgba(0, 119, 182, 0.3)",
+                        borderRadius: "8px",
+                        padding: "12px 30px",
+                        fontWeight: "600",
+                        transition: "all 0.3s ease",
+                        minWidth: "150px",
+                        height: "50px",
+                      }}
+                      onClick={() => (window.location.href = "/")}
+                    >
+                      Go to Home
+                    </Button>
+                  </div>
+                ) : (
+                  <FormProvider {...methods}>
+                    <form>
+                      <div className="text-center mb-4">
+                        <p className="text-muted">
+                          {t(
+                            "vesselOwnerRegistration.Please complete all required information to register your vessel"
+                          )}
+                        </p>
+                      </div>
+<div className="stepper-container">
+  <div className="stepper">
+    {[1, 2, 3].map((step, index) => (
+      <React.Fragment key={step}>
+        <div className={`step ${currentStep >= step ? 'active' : ''} ${currentStep > step ? 'completed' : ''}`}>
+          <div className="step-circle">
+            {currentStep > step ? (
+              <FaCheck size={16} />
+            ) : (
+              React.createElement(stepTitles[step - 1].icon, { size: 16 })
+            )}
+          </div>
+          <div className="step-label">
+            {stepTitles[step - 1].title}
+          </div>
+        </div>
+        {index < 2 && (
+          <div className={`step-connector ${currentStep > step ? 'active' : ''}`}></div>
+        )}
+      </React.Fragment>
+    ))}
+  </div>
+</div>
 
-      <style>{`
-        .profile-toggle::after {
-          display: none !important;
-        }
-        
-        .user-info-text {
-          text-align: left;
-          line-height: 1.2;
-        }
-        
-        .user-info-text .user-name {
-          font-size: 0.9rem;
-          font-weight: 500;
-        }
-        
-        .user-info-text .user-role {
-          font-size: 0.75rem;
-          opacity: 0.8;
-        }
-        
-        .profile-dropdown-menu {
-          min-width: 250px;
-          padding: 0;
-          border: 1px solid rgba(0, 0, 0, 0.1);
-          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-          border-radius: 8px;
-          overflow: hidden;
-        }
-        
-        .dropdown-header {
-          padding: 1rem;
-          text-align: center;
-          background-color: #f8f9fa;
-          border-bottom: 1px solid #dee2e6;
-        }
-        
-        .profile-img-lg {
-          width: 80px !important;
-          height: 80px !important;
-          object-fit: cover;
-          margin-bottom: 0.75rem;
-          border: 3px solid #fff;
-          box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-        }
-        
-        .user-info {
-          margin-top: 0.5rem;
-        }
-        
-        .user-info .user-name {
-          font-weight: 600;
-          font-size: 1.1rem;
-          color: #212529;
-        }
-        
-        .user-info .user-role {
-          font-size: 0.85rem;
-          color: #6c757d;
-        }
-        
-        .dropdown-item-custom {
-          display: flex;
-          align-items: center;
-          padding: 0.75rem 1rem;
-          color: #212529;
-          transition: background-color 0.2s;
-        }
-        
-        .dropdown-item-custom:hover {
-          background-color: #f8f9fa;
-          color: #16181b;
-        }
-        
-        .dropdown-icon {
-          margin-right: 0.75rem;
-          width: 16px;
-          color: #6c757d;
-        }
-        
-        .logout-item {
-          color: #dc3545 !important;
-        }
-        
-        .logout-item .dropdown-icon {
-          color: #dc3545;
-        }
-        
-        .logout-item:hover {
-          background-color: #f8d7da !important;
-        }
-        
-        @media (max-width: 767.98px) {
-          .user-info-text {
-            display: none !important;
-          }
-        }
-      `}</style>
+                      <div className="step-content">
+                        <div className="form-section p-4 rounded mb-4">
+                          <div className="section-title">
+                            {React.createElement(
+                              stepTitles[currentStep - 1].icon,
+                              { className: "section-icon" }
+                            )}
+                            <h4 className="mb-0 fw-bold">
+                              {stepTitles[currentStep - 1].title}
+                            </h4>
+                          </div>
+
+                          <div className="form-content py-3">
+                            <Row className="g-3">
+                              {getCurrentStepFields().map((field, index) => (
+                                <Col
+                                  key={`${field.name}-${isCompany}-${isExemptCategory}`}
+                                  md={field.colSize || 12}
+                                  className="mb-0"
+                                >
+                                  <DynamicField field={field} />
+                                </Col>
+                              ))}
+                            </Row>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div
+                        className="form-navigation mt-4"
+                        style={{ display: "block" }}
+                      >
+                        {currentStep > 1 && (
+                          <Button
+                            variant="outline-secondary"
+                            onClick={handlePrevious}
+                            className="prev-btn"
+                            style={{ float: "left" }}
+                          >
+                            <FaArrowLeft className="btn-icon me-2" />{" "}
+                            {t("Previous")}
+                          </Button>
+                        )}
+
+                        <Button
+                          variant="primary"
+                          onClick={handleNext}
+                          className="next-btn"
+                          style={{ float: "right" }}
+                        >
+                          {currentStep === totalSteps
+                            ? t("Submit Registration")
+                            : t("Next")}
+                          {currentStep !== totalSteps && (
+                            <FaArrowRight className="btn-icon ms-2" />
+                          )}
+                        </Button>
+                      </div>
+                    </form>
+                  </FormProvider>
+                )}
+              </Card.Body>
+            </Card>
+          </Col>
+        </Row>
+      </Container>
     </>
   );
 };
 
-export default Header;
+export default VesselOwnerRegistrationPage;
+{
+    "ownerTypes": [
+        {
+            "uuid": "3f2d1c7a-8a4b-4e21-b0cd-1a22f6fba345",
+            "valueCode": "CENTRAL",
+            "valueLabel": "CENTRAL/UNDERTAKING/DEPARTMENT",
+            "parentId": null,
+            "sortOrder": 1,
+            "isCompany": false
+        },
+        {
+            "uuid": "b7e0e112-cfb0-4f82-bbb1-cdb2f487deda",
+            "valueCode": "FIRM",
+            "valueLabel": "FIRM",
+            "parentId": null,
+            "sortOrder": 2,
+            "isCompany": true
+        },
+        {
+            "uuid": "d132b5e0-9f70-408b-9a9a-0de78df46910",
+            "valueCode": "INDIVIDUAL",
+            "valueLabel": "INDIVIDUAL",
+            "parentId": null,
+            "sortOrder": 3,
+            "isCompany": false
+        },
+        {
+            "uuid": "82b42ee9-8ee3-4d56-bd69-476123f60d59",
+            "valueCode": "OTHERS",
+            "valueLabel": "OTHERS",
+            "parentId": null,
+            "sortOrder": 5,
+            "isCompany": false
+        },
+        {
+            "uuid": "44ca1690-1c60-4e27-b755-21cde0bfca0c",
+            "valueCode": "PRIVATE_LTD",
+            "valueLabel": "PRIVATE LIMITED/LLP",
+            "parentId": null,
+            "sortOrder": 6,
+            "isCompany": true
+        },
+        {
+            "uuid": "bc1e94b1-87ec-4f5c-b71b-81219cb9cfa4",
+            "valueCode": "STATE",
+            "valueLabel": "STATE/UNDERTAKING/DEPARTMENT",
+            "parentId": null,
+            "sortOrder": 7,
+            "isCompany": false
+        },
+        {
+            "uuid": "bc1e94b1-87ec-4f5c-b71b-81219cb9cfa6",
+            "valueCode": "STATE GOVERNMENT/ PANCHAYET",
+            "valueLabel": "STATE GOVERNMENT/LOCAL/MUNICIPAL/PANCHAYAT",
+            "parentId": null,
+            "sortOrder": 8,
+            "isCompany": true
+        }
+    ],
+    "employeeStatuses": [
+        {
+            "uuid": "84feef12-1894-4243-b845-d189c3f1ca39",
+            "valueCode": "ON_LEAVE",
+            "valueLabel": "ON LEAVE",
+            "parentId": null,
+            "sortOrder": 2
+        },
+        {
+            "uuid": "9742a2fc-d2bb-405d-973a-de0d5dadc50a",
+            "valueCode": "RESIGNED",
+            "valueLabel": "RESIGNED",
+            "parentId": null,
+            "sortOrder": 3
+        },
+        {
+            "uuid": "5475395c-607b-4a7c-81cb-a2febb59764b",
+            "valueCode": "RETIRED",
+            "valueLabel": "RETIRED",
+            "parentId": null,
+            "sortOrder": 4
+        },
+        {
+            "uuid": "5dbee836-dc3b-4827-a465-c88dcf5fb2d4",
+            "valueCode": "EMPLOYED",
+            "valueLabel": "EMPLOYED",
+            "parentId": null,
+            "sortOrder": 1
+        }
+    ],
+    "employeeTypes": [
+        {
+            "uuid": "223ab813-8874-49e1-a0bc-067d05e9e98f",
+            "valueCode": "PERMANENT",
+            "valueLabel": "PERMANENT",
+            "parentId": null,
+            "sortOrder": 1
+        },
+        {
+            "uuid": "2c1fb39c-8873-4232-a33c-686fbbb66639",
+            "valueCode": "CONTRACT",
+            "valueLabel": "CONTRACT",
+            "parentId": null,
+            "sortOrder": 2
+        },
+        {
+            "uuid": "ebafa6f0-8bde-492c-88ef-2b01c3049ca3",
+            "valueCode": "TEMPORARY",
+            "valueLabel": "TEMPORARY",
+            "parentId": null,
+            "sortOrder": 3
+        },
+        {
+            "uuid": "864169f4-d2a0-465c-bf79-c61e6f7fb33d",
+            "valueCode": "INTERN",
+            "valueLabel": "INTERN",
+            "parentId": null,
+            "sortOrder": 4
+        }
+    ],
+    "genders": [
+        {
+            "uuid": "3f76494b-13d8-4751-a006-cbad4975036c",
+            "valueCode": "MALE",
+            "valueLabel": "MALE",
+            "parentId": null,
+            "sortOrder": 1
+        },
+        {
+            "uuid": "7a454a1f-103f-4dc1-a1f9-f9e6d486a16b",
+            "valueCode": "FEMALE",
+            "valueLabel": "FEMALE",
+            "parentId": null,
+            "sortOrder": 2
+        },
+        {
+            "uuid": "d9411cc5-30b1-46ec-8415-a76ad56f1268",
+            "valueCode": "OTHER",
+            "valueLabel": "OTHER",
+            "parentId": null,
+            "sortOrder": 3
+        }
+    ],
+    "purchaseTypes": [
+        {
+            "uuid": "5973fb59-2712-468d-af3c-18b8976a805b",
+            "valueCode": "NEW",
+            "valueLabel": "New",
+            "parentId": null,
+            "sortOrder": 1
+        },
+        {
+            "uuid": "fcdab8d2-5dcf-46ad-80db-0731a1f1a794",
+            "valueCode": "USED",
+            "valueLabel": "Used",
+            "parentId": null,
+            "sortOrder": 2
+        }
+    ],
+    "supervisionAuthorites": [
+        {
+            "uuid": "897afd29-4aeb-4ddc-9ccd-6cbf853e9444",
+            "valueCode": "IWT",
+            "valueLabel": "IWT",
+            "parentId": null,
+            "sortOrder": 1
+        },
+        {
+            "uuid": "0d15d9d2-e831-490e-9361-be9e02dfa0ab",
+            "valueCode": "CLASSIFICATION SOCIETY",
+            "valueLabel": "Classification Society",
+            "parentId": null,
+            "sortOrder": 2
+        }
+    ],
+    "vesselCategories": [
+        {
+            "uuid": "ad4b3694-66e9-43df-9a8d-a79d470f100a",
+            "valueCode": "A",
+            "valueLabel": "Category A",
+            "parentId": null,
+            "sortOrder": 1
+        },
+        {
+            "uuid": "66c356a6-f432-4d93-a30d-ff715acc2cd8",
+            "valueCode": "B",
+            "valueLabel": "Category B",
+            "parentId": null,
+            "sortOrder": 2
+        },
+        {
+            "uuid": "0d551699-66bc-4c42-8e5c-d9d976a5360b",
+            "valueCode": "C",
+            "valueLabel": "Category C",
+            "parentId": null,
+            "sortOrder": 3
+        }
+    ],
+    "zones": [
+        {
+            "uuid": "a64ea04c-35a4-4730-8d29-193d7604de7c",
+            "valueCode": "ZONE 1",
+            "valueLabel": "ZONE 1",
+            "parentId": null,
+            "sortOrder": 1
+        },
+        {
+            "uuid": "40fca323-0393-41d0-87ba-fc24edce6cd0",
+            "valueCode": "ZONE 2",
+            "valueLabel": "ZONE 2",
+            "parentId": null,
+            "sortOrder": 2
+        },
+        {
+            "uuid": "b760142e-f23f-45c7-ac7f-f6fd133027c4",
+            "valueCode": "ZONE 3",
+            "valueLabel": "ZONE 3",
+            "parentId": null,
+            "sortOrder": 3
+        }
+    ],
+    "departments": [
+        {
+            "uuid": "a197d1cf-5cb1-4e07-938a-7a6e5eb0f129",
+            "valueCode": "WBTC - I",
+            "valueLabel": "WBTC - I",
+            "parentId": null,
+            "sortOrder": 1
+        },
+        {
+            "uuid": "f4c803c4-775f-4591-9934-2775f7214206",
+            "valueCode": "WBTC - II",
+            "valueLabel": "WBTC - II",
+            "parentId": null,
+            "sortOrder": 2
+        },
+        {
+            "uuid": "ab249592-9e86-47ff-b2e1-4003a72d5db4",
+            "valueCode": "WBTC - III",
+            "valueLabel": "WBTC - III",
+            "parentId": null,
+            "sortOrder": 3
+        },
+        {
+            "uuid": "b0a9c2cf-1739-4ac3-8ced-09da1dcb4b81",
+            "valueCode": "WBTC - IV",
+            "valueLabel": "WBTC - IV",
+            "parentId": null,
+            "sortOrder": 4
+        }
+    ],
+    "roles": [
+        {
+            "uuid": "ad4b3694-66e9-43df-9a8d-a79d470f100a",
+            "valueCode": "Clerk",
+            "valueLabel": "CLERK",
+            "parentId": null,
+            "sortOrder": 1
+        },
+        {
+            "uuid": "66c356a6-f432-4d93-a30d-ff715acc2cd8",
+            "valueCode": "Junior Engineer",
+            "valueLabel": "JUNIOR ENGINEER",
+            "parentId": null,
+            "sortOrder": 2
+        },
+        {
+            "uuid": "0d551699-66bc-4c42-8e5c-d9d976a5360b",
+            "valueCode": "Engineer-cum-Ship Surveyor",
+            "valueLabel": "ENGINEER CUM SHIP SURVEYOR",
+            "parentId": null,
+            "sortOrder": 3
+        },
+        {
+            "uuid": "3ab6f4a7-6a93-404b-8b5a-0b116db86e84",
+            "valueCode": "Director/Registration Authority",
+            "valueLabel": "DIRECTOR",
+            "parentId": null,
+            "sortOrder": 4
+        }
+    ],
+    "designations": [
+        {
+            "uuid": "a1f1b5d0-1111-4c21-a0d1-111111111111",
+            "valueCode": "DEPUTY_DIRECTOR",
+            "valueLabel": "Deputy Director",
+            "parentId": "ad4b3694-66e9-43df-9a8d-a79d470f100a",
+            "sortOrder": 1
+        },
+        {
+            "uuid": "a2f2b6d0-2222-4c21-b0d2-222222222222",
+            "valueCode": "ASSISTANT_DIRECTOR",
+            "valueLabel": "Assistant Director",
+            "parentId": "ad4b3694-66e9-43df-9a8d-a79d470f100a",
+            "sortOrder": 2
+        },
+        {
+            "uuid": "a3f3b7d0-3333-4c21-c0d3-333333333333",
+            "valueCode": "SURVEYOR",
+            "valueLabel": "Surveyor",
+            "parentId": "73dc4054-89e1-4c45-84e5-90db8ed3538a",
+            "sortOrder": 3
+        },
+        {
+            "uuid": "a4f4b8d0-4444-4c21-d0d4-444444444444",
+            "valueCode": "INSPECTOR",
+            "valueLabel": "Inspector",
+            "parentId": "66c356a6-f432-4d93-a30d-ff715acc2cd8",
+            "sortOrder": 4
+        },
+        {
+            "uuid": "a5f5b9d0-5555-4c21-e0d5-555555555555",
+            "valueCode": "TECHNICAL_OFFICER",
+            "valueLabel": "Technical Officer",
+            "parentId": "0d551699-66bc-4c42-8e5c-d9d976a5360b",
+            "sortOrder": 5
+        },
+        {
+            "uuid": "a6f6bad0-6666-4c21-f0d6-666666666666",
+            "valueCode": "HARBOUR_MASTER",
+            "valueLabel": "Harbour Master",
+            "parentId": "66c356a6-f432-4d93-a30d-ff715acc2cd8",
+            "sortOrder": 6
+        },
+        {
+            "uuid": "a7f7bbd0-7777-4c21-a1d7-777777777777",
+            "valueCode": "VESSEL_OPERATOR",
+            "valueLabel": "Vessel Operator",
+            "parentId": "66c356a6-f432-4d93-a30d-ff715acc2cd8",
+            "sortOrder": 7
+        },
+        {
+            "uuid": "a8f8bcd0-8888-4c21-b2d8-888888888888",
+            "valueCode": "JUNIOR_ENGINEER",
+            "valueLabel": "Junior Engineer",
+            "parentId": "3ab6f4a7-6a93-404b-8b5a-0b116db86e84",
+            "sortOrder": 8
+        },
+        {
+            "uuid": "a9f9bdd0-9999-4c21-c3d9-999999999999",
+            "valueCode": "SENIOR_ENGINEER",
+            "valueLabel": "Senior Engineer",
+            "parentId": "3ab6f4a7-6a93-404b-8b5a-0b116db86e84",
+            "sortOrder": 9
+        },
+        {
+            "uuid": "aafabed0-aaaa-4c21-d4da-aaaaaaaaaaaa",
+            "valueCode": "CLERK",
+            "valueLabel": "Clerk",
+            "parentId": "ad4b3694-66e9-43df-9a8d-a79d470f100a",
+            "sortOrder": 10
+        },
+        {
+            "uuid": "bbfbced0-bbbb-4c21-e5db-bbbbbbbbbbbb",
+            "valueCode": "ACCOUNTANT",
+            "valueLabel": "Accountant",
+            "parentId": "ad4b3694-66e9-43df-9a8d-a79d470f100a",
+            "sortOrder": 11
+        },
+        {
+            "uuid": "ccfcddf0-cccc-4c21-f6dc-cccccccccccc",
+            "valueCode": "SAFETY_OFFICER",
+            "valueLabel": "Safety Officer",
+            "parentId": "b9f9d3f4-5555-44a7-ae17-2d05de0d5ec7",
+            "sortOrder": 12
+        },
+        {
+            "uuid": "ddfddef1-dddd-4c21-a7dd-dddddddddddd",
+            "valueCode": "PORT_MANAGER",
+            "valueLabel": "Port Manager",
+            "parentId": "66c356a6-f432-4d93-a30d-ff715acc2cd8",
+            "sortOrder": 13
+        },
+        {
+            "uuid": "eefeedf2-eeee-4c21-b8de-eeeeeeeeeeee",
+            "valueCode": "ADMIN_OFFICER",
+            "valueLabel": "Admin Officer",
+            "parentId": "ad4b3694-66e9-43df-9a8d-a79d470f100a",
+            "sortOrder": 14
+        },
+        {
+            "uuid": "fff0ef03-ffff-4c21-c9df-ffffffffffff",
+            "valueCode": "CARGO_SUPERVISOR",
+            "valueLabel": "Cargo Supervisor",
+            "parentId": "66c356a6-f432-4d93-a30d-ff715acc2cd8",
+            "sortOrder": 15
+        },
+        {
+            "uuid": "0011f004-0000-4c21-dae0-000000000000",
+            "valueCode": "VESSEL_CAPTAIN",
+            "valueLabel": "Vessel Captain",
+            "parentId": "66c356a6-f432-4d93-a30d-ff715acc2cd8",
+            "sortOrder": 16
+        }
+    ],
+    "vesselTypes": [
+        {
+            "uuid": "2812076c-c7ca-461a-b05b-bde55e00e6bb",
+            "valueCode": "NON PASSENGER",
+            "valueLabel": "Non Passenger",
+            "parentId": null,
+            "sortOrder": 1
+        },
+        {
+            "uuid": "287b7c13-c70a-439b-a915-dea4eb4c65c8",
+            "valueCode": "PASSENGER",
+            "valueLabel": "Passenger",
+            "parentId": null,
+            "sortOrder": 2
+        },
+        {
+            "uuid": "7af57f39-abd4-4191-b688-2dbb40a6c389",
+            "valueCode": "BOTH",
+            "valueLabel": "Both",
+            "parentId": null,
+            "sortOrder": 3
+        }
+    ],
+    "kindOfVessels": [
+        {
+            "uuid": "1",
+            "valueCode": "PROPELLED",
+            "valueLabel": "Propelled Vessel"
+        },
+        {
+            "uuid": "2",
+            "valueCode": "NON_PROPELLED",
+            "valueLabel": "Non Propelled Vessel"
+        },
+        {
+            "uuid": "3",
+            "valueCode": "JALADHARA",
+            "valueLabel": "Jaladhara Vessel"
+        },
+        {
+            "uuid": "4",
+            "valueCode": "SPECIAL_CATEGORY",
+            "valueLabel": "Special Category Vessel"
+        }
+    ],
+    "vesselMaterials": [
+        {
+            "uuid": "5c2327a8-22ed-4fd6-97b9-6102d88f8bea",
+            "valueCode": "STEEL",
+            "valueLabel": "STEEL",
+            "parentId": null,
+            "sortOrder": 1
+        },
+        {
+            "uuid": "422ac448-0ea5-4b5b-b61a-cb934692d987",
+            "valueCode": "WOOD",
+            "valueLabel": "WOOD",
+            "parentId": null,
+            "sortOrder": 2
+        },
+        {
+            "uuid": "2db1b512-bc1b-46a3-abbd-577d2e014e55",
+            "valueCode": "FIBER_GLASS",
+            "valueLabel": "FIBER GLASS",
+            "parentId": null,
+            "sortOrder": 3
+        }
+    ],
+    "engineTypes": [
+        {
+            "uuid": "67f78bba-8553-401c-a2ba-00460e2c7f9a",
+            "valueCode": "INBOARD",
+            "valueLabel": "INBOARD",
+            "parentId": null,
+            "sortOrder": 1
+        },
+        {
+            "uuid": "87c2243d-6558-45ef-93ec-de92647a8225",
+            "valueCode": "OUTBOARD",
+            "valueLabel": "OUTBOARD",
+            "parentId": null,
+            "sortOrder": 2
+        },
+        {
+            "uuid": "0364f5e6-e26a-4269-a156-ac6e808fef64",
+            "valueCode": "ELECTRIC_MOTOR",
+            "valueLabel": "ELECTRIC MOTOR",
+            "parentId": null,
+            "sortOrder": 3
+        }
+    ],
+    "fuelTypes": [
+        {
+            "uuid": "e0e1618a-11a9-4209-bccd-7afb26634242",
+            "valueCode": "NO_FUEL",
+            "valueLabel": "NO_FUEL",
+            "parentId": null,
+            "sortOrder": 1
+        },
+        {
+            "uuid": "4bfe3ec5-b6df-4a5c-9441-46e9cfb0902e",
+            "valueCode": "DIESEL",
+            "valueLabel": "DIESEL",
+            "parentId": null,
+            "sortOrder": 2
+        },
+        {
+            "uuid": "26b646eb-4ad7-4a1e-ac74-cd0c48c895bf",
+            "valueCode": "PETROL",
+            "valueLabel": "PETROL",
+            "parentId": null,
+            "sortOrder": 3
+        },
+        {
+            "uuid": "adeaea64-ec88-4068-932a-1cb5c51b1286",
+            "valueCode": "ELECTRIC",
+            "valueLabel": "ELECTRIC",
+            "parentId": null,
+            "sortOrder": 4
+        }
+    ],
+    "incidentTypes": [
+        {
+            "uuid": "184adfa4-48d4-4118-8a28-361cd50fabec",
+            "valueCode": "ACCIDENT",
+            "valueLabel": "ACCIDENT",
+            "parentId": null,
+            "sortOrder": 1
+        },
+        {
+            "uuid": "2d9a2bfb-91a0-4ca1-9199-b9f4c7be5cf0",
+            "valueCode": "FIRE",
+            "valueLabel": "FIRE",
+            "parentId": null,
+            "sortOrder": 2
+        },
+        {
+            "uuid": "8e5d7586-0000-45ff-a0bf-02681bde7d7f",
+            "valueCode": "POLLUTION",
+            "valueLabel": "POLLUTION",
+            "parentId": null,
+            "sortOrder": 3
+        },
+        {
+            "uuid": "8428eaa0-baaa-4768-847a-760914668246",
+            "valueCode": "THEFT",
+            "valueLabel": "THEFT",
+            "parentId": null,
+            "sortOrder": 4
+        }
+    ],
+    "permitTypes": [
+        {
+            "uuid": "0234f271-8297-474e-a027-438b9e951c9a",
+            "valueCode": "COMMERCIAL",
+            "valueLabel": "COMMERCIAL",
+            "parentId": null,
+            "sortOrder": 1
+        },
+        {
+            "uuid": "468b3186-a50a-4aa1-81a8-4d095c310891",
+            "valueCode": "PRIVATE",
+            "valueLabel": "PRIVATE",
+            "parentId": null,
+            "sortOrder": 2
+        },
+        {
+            "uuid": "26b646eb-4ad7-4a1e-ac74-cd0c48c895bf",
+            "valueCode": "TOURIST",
+            "valueLabel": "TOURIST",
+            "parentId": null,
+            "sortOrder": 3
+        }
+    ],
+    "paymentModes": [
+        {
+            "uuid": "e26cc3c0-8cf8-41d4-8eed-4528b07ef415",
+            "valueCode": "CASH",
+            "valueLabel": "CASH",
+            "parentId": null,
+            "sortOrder": 1
+        },
+        {
+            "uuid": "615cdbb7-0470-4ecc-a561-dc12c2014871",
+            "valueCode": "CHEQUE",
+            "valueLabel": "CHEQUE",
+            "parentId": null,
+            "sortOrder": 2
+        },
+        {
+            "uuid": "a6d035b1-d433-4628-badb-a05489720251",
+            "valueCode": "ONLINE",
+            "valueLabel": "ONLINE",
+            "parentId": null,
+            "sortOrder": 3
+        },
+        {
+            "uuid": "5521c721-87ab-4512-99f5-75037ffe0646",
+            "valueCode": "DEMAND_DRAFT",
+            "valueLabel": "DEMAND DRAFT",
+            "parentId": null,
+            "sortOrder": 4
+        }
+    ],
+    "surveyTypes": [
+        {
+            "uuid": "a197d1cf-5cb1-4e07-938a-7a6e5eb0f128",
+            "valueCode": "INITIAL",
+            "valueLabel": "INITIAL",
+            "parentId": null,
+            "sortOrder": 1
+        },
+        {
+            "uuid": "f4c803c4-775f-4591-9934-2775f7214208",
+            "valueCode": "ANNUAL",
+            "valueLabel": "ANNUAL",
+            "parentId": null,
+            "sortOrder": 2
+        },
+        {
+            "uuid": "ab249592-9e86-47ff-b2e1-4003a72d5db9",
+            "valueCode": "SPECIAL",
+            "valueLabel": "SPECIAL",
+            "parentId": null,
+            "sortOrder": 3
+        },
+        {
+            "uuid": "b0a9c2cf-1739-4ac3-8ced-09da1dcb4b87",
+            "valueCode": "RENEWAL",
+            "valueLabel": "RENEWAL",
+            "parentId": null,
+            "sortOrder": 4
+        }
+    ],
+    "certificateTypes": [
+        {
+            "uuid": "83c46704-0b43-4d96-a080-460e3c825a65",
+            "valueCode": "REGISTRATION",
+            "valueLabel": "REGISTRATION",
+            "parentId": null,
+            "sortOrder": 1
+        },
+        {
+            "uuid": "2a06cd44-869d-49d5-a868-a3a652363436",
+            "valueCode": "SAFETY",
+            "valueLabel": "SAFETY",
+            "parentId": null,
+            "sortOrder": 2
+        },
+        {
+            "uuid": "408fe089-33d2-419d-8643-65a6c053b927",
+            "valueCode": "POLLUTION_CONTROL",
+            "valueLabel": "POLLUTION CONTROL",
+            "parentId": null,
+            "sortOrder": 3
+        }
+    ],
+    "certificateStatues": [
+        {
+            "uuid": "3e562323-1397-45b4-991b-aab4e170e058",
+            "valueCode": "ACTIVE",
+            "valueLabel": "ACTIVE",
+            "parentId": null,
+            "sortOrder": 1
+        },
+        {
+            "uuid": "38eece5e-d2ca-4978-b249-16e387d40c93",
+            "valueCode": "EXPIRED",
+            "valueLabel": "EXPIRED",
+            "parentId": null,
+            "sortOrder": 2
+        },
+        {
+            "uuid": "802c873b-cfcb-4ffe-a6cc-c4badc4f18fb",
+            "valueCode": "SUSPENDED",
+            "valueLabel": "SUSPENDED",
+            "parentId": null,
+            "sortOrder": 3
+        }
+    ],
+    "dockingLocations": [
+        {
+            "uuid": "5fb594fe-8ffa-43ba-8db7-86701b455445",
+            "valueCode": "JETTY_A",
+            "valueLabel": "JETTY A",
+            "parentId": null,
+            "sortOrder": 1
+        },
+        {
+            "uuid": "59e90ba8-729c-49d6-b420-667a6a102a2b",
+            "valueCode": "JETTY_B",
+            "valueLabel": "JETTY B",
+            "parentId": null,
+            "sortOrder": 2
+        },
+        {
+            "uuid": "19219512-d7eb-49a4-8510-baaa7e4ab8d6",
+            "valueCode": "JETTY_C",
+            "valueLabel": "JETTY C",
+            "parentId": null,
+            "sortOrder": 3
+        }
+    ],
+    "builderNames": [
+        {
+            "valueCode": "b018c3a1-068a-4464-be8c-4dd167e7aa79",
+            "valueLabel": "BlueWave Shipbuilders LLP",
+            "parentId": null,
+            "sortOrder": null
+        },
+        {
+            "valueCode": "182be8ce-cf67-48eb-a486-4a5f7182c008",
+            "valueLabel": "Titan Dockyards India Ltd.",
+            "parentId": null,
+            "sortOrder": null
+        },
+        {
+            "valueCode": "099af2c7-0fea-412d-9e4e-07a0c0ddfbb8",
+            "valueLabel": "Bayfront Vessel Constructors",
+            "parentId": null,
+            "sortOrder": null
+        },
+        {
+            "valueCode": "baf64aed-5254-45db-aca1-e9e1cbe4d4f1",
+            "valueLabel": "Maritech Fabricators & Co.",
+            "parentId": null,
+            "sortOrder": null
+        },
+        {
+            "valueCode": "10d3d5c0-45ce-4981-a187-8d38ac4eea63",
+            "valueLabel": "IndoDock Shipbuilding Pvt. Ltd.",
+            "parentId": null,
+            "sortOrder": null
+        },
+        {
+            "valueCode": "9cd65be7-9152-445c-8b6d-f1ea21b85083",
+            "valueLabel": "Neptune Marine Engineering",
+            "parentId": null,
+            "sortOrder": null
+        },
+        {
+            "valueCode": "31273b76-7690-4aad-97a1-97c3be694b1b",
+            "valueLabel": "ABC Shipbuilders Pvt Ltd",
+            "parentId": null,
+            "sortOrder": null
+        },
+        {
+            "valueCode": "bda33bca-2a0f-451e-aaf8-ac3829b72623",
+            "valueLabel": "ABC Shipbuilders Pvt Ltd",
+            "parentId": null,
+            "sortOrder": null
+        }
+    ],
+    "mortgageTypes": [
+        {
+            "valueCode": "Y",
+            "valueLabel": "Yes"
+        },
+        {
+            "valueCode": "N",
+            "valueLabel": "No"
+        }
+    ],
+    "equipmentCategories": [
+        {
+            "id": "1",
+            "equipmentName": "Accommodation/Safety",
+            "equipmentCategories": [
+                {
+                    "id": "54",
+                    "categoryCode": "ESR",
+                    "categoryLable": "Escape routes"
+                },
+                {
+                    "id": "55",
+                    "categoryCode": "WSH",
+                    "categoryLable": "Washrooms"
+                },
+                {
+                    "id": "56",
+                    "categoryCode": "TLT",
+                    "categoryLable": "Toilets"
+                },
+                {
+                    "id": "57",
+                    "categoryCode": "GAL",
+                    "categoryLable": "Galley"
+                },
+                {
+                    "id": "58",
+                    "categoryCode": "MES",
+                    "categoryLable": "Messroom"
+                },
+                {
+                    "id": "59",
+                    "categoryCode": "WTK",
+                    "categoryLable": "Water tanks"
+                },
+                {
+                    "id": "60",
+                    "categoryCode": "HCV",
+                    "categoryLable": "Heating/cooling/ventilation"
+                },
+                {
+                    "id": "61",
+                    "categoryCode": "BLK",
+                    "categoryLable": "Berth/locker"
+                },
+                {
+                    "id": "62",
+                    "categoryCode": "ACA",
+                    "categoryLable": "Access to accommodation"
+                },
+                {
+                    "id": "63",
+                    "categoryCode": "LGT",
+                    "categoryLable": "Lighting"
+                },
+                {
+                    "id": "64",
+                    "categoryCode": "MGD",
+                    "categoryLable": "Machinery guards"
+                },
+                {
+                    "id": "65",
+                    "categoryCode": "GRL",
+                    "categoryLable": "Guard rails"
+                },
+                {
+                    "id": "66",
+                    "categoryCode": "NSS",
+                    "categoryLable": "Non-slip surfaces"
+                },
+                {
+                    "id": "67",
+                    "categoryCode": "LAD",
+                    "categoryLable": "Ladders/companionways"
+                },
+                {
+                    "id": "68",
+                    "categoryCode": "NIP",
+                    "categoryLable": "Noise insulation / protection / notices"
+                },
+                {
+                    "id": "69",
+                    "categoryCode": "FFD",
+                    "categoryLable": "Foam flotation material: Density"
+                }
+            ]
+        },
+        {
+            "id": "2",
+            "equipmentName": "Navigational Equipments",
+            "equipmentCategories": [
+                {
+                    "id": "28",
+                    "categoryCode": "NLG",
+                    "categoryLable": "Navigation Lights"
+                },
+                {
+                    "id": "29",
+                    "categoryCode": "SSG",
+                    "categoryLable": "Sound Signals"
+                },
+                {
+                    "id": "30",
+                    "categoryCode": "SHP",
+                    "categoryLable": "Shapes"
+                },
+                {
+                    "id": "31",
+                    "categoryCode": "MCP",
+                    "categoryLable": "Magnetic Compass"
+                },
+                {
+                    "id": "32",
+                    "categoryCode": "AIS",
+                    "categoryLable": "Class B AIS"
+                },
+                {
+                    "id": "33",
+                    "categoryCode": "COM",
+                    "categoryLable": "Communication equipment"
+                },
+                {
+                    "id": "34",
+                    "categoryCode": "NAP",
+                    "categoryLable": "Nautical publications"
+                }
+            ]
+        },
+        {
+            "id": "3",
+            "equipmentName": "Equipments",
+            "equipmentCategories": [
+                {
+                    "id": "10",
+                    "categoryCode": "ANC",
+                    "categoryLable": "Anchors"
+                },
+                {
+                    "id": "11",
+                    "categoryCode": "ACC",
+                    "categoryLable": "Anchor cables/Chains"
+                },
+                {
+                    "id": "12",
+                    "categoryCode": "BLP",
+                    "categoryLable": "Bilge pumps"
+                },
+                {
+                    "id": "13",
+                    "categoryCode": "WIN",
+                    "categoryLable": "Winches"
+                },
+                {
+                    "id": "14",
+                    "categoryCode": "CRN",
+                    "categoryLable": "Cranes"
+                },
+                {
+                    "id": "15",
+                    "categoryCode": "DRK",
+                    "categoryLable": "Derricks"
+                },
+                {
+                    "id": "16",
+                    "categoryCode": "TOW",
+                    "categoryLable": "Towing Equipment"
+                },
+                {
+                    "id": "17",
+                    "categoryCode": "ROP",
+                    "categoryLable": "Ropes and Lines"
+                },
+                {
+                    "id": "18",
+                    "categoryCode": "CLM",
+                    "categoryLable": "Collision mat"
+                },
+                {
+                    "id": "19",
+                    "categoryCode": "GAW",
+                    "categoryLable": "Gangway"
+                },
+                {
+                    "id": "20",
+                    "categoryCode": "FEN",
+                    "categoryLable": "Fenders"
+                },
+                {
+                    "id": "21",
+                    "categoryCode": "BHK",
+                    "categoryLable": "Boat hook"
+                },
+                {
+                    "id": "22",
+                    "categoryCode": "FAK",
+                    "categoryLable": "First Aid Kit"
+                },
+                {
+                    "id": "23",
+                    "categoryCode": "BIN",
+                    "categoryLable": "Binoculars"
+                },
+                {
+                    "id": "24",
+                    "categoryCode": "WCT",
+                    "categoryLable": "Waste Containers"
+                },
+                {
+                    "id": "25",
+                    "categoryCode": "HVL",
+                    "categoryLable": "Heaving line"
+                },
+                {
+                    "id": "26",
+                    "categoryCode": "AXE",
+                    "categoryLable": "Axe"
+                },
+                {
+                    "id": "27",
+                    "categoryCode": "TOR",
+                    "categoryLable": "Torch"
+                }
+            ]
+        },
+        {
+            "id": "4",
+            "equipmentName": "Machinery/Electrical",
+            "equipmentCategories": [
+                {
+                    "id": "45",
+                    "categoryCode": "MMY",
+                    "categoryLable": "Main Machinery"
+                },
+                {
+                    "id": "46",
+                    "categoryCode": "MGN",
+                    "categoryLable": "Main Generator"
+                },
+                {
+                    "id": "47",
+                    "categoryCode": "EGN",
+                    "categoryLable": "Emergency Generator"
+                },
+                {
+                    "id": "48",
+                    "categoryCode": "MSG",
+                    "categoryLable": "Main Steering Gear"
+                },
+                {
+                    "id": "49",
+                    "categoryCode": "ASG",
+                    "categoryLable": "Auxiliary Steering Gear"
+                },
+                {
+                    "id": "50",
+                    "categoryCode": "SWB",
+                    "categoryLable": "Switchboard"
+                },
+                {
+                    "id": "51",
+                    "categoryCode": "SHC",
+                    "categoryLable": "Shore Connection"
+                },
+                {
+                    "id": "52",
+                    "categoryCode": "BAT",
+                    "categoryLable": "Batteries"
+                },
+                {
+                    "id": "53",
+                    "categoryCode": "SLS",
+                    "categoryLable": "Signal Light Switches"
+                }
+            ]
+        },
+        {
+            "id": "5",
+            "equipmentName": "Life-Saving Equipment",
+            "equipmentCategories": [
+                {
+                    "id": "43",
+                    "categoryCode": "LRE",
+                    "categoryLable": "Life raft equipment"
+                },
+                {
+                    "id": "35",
+                    "categoryCode": "LJK",
+                    "categoryLable": "Lifejackets"
+                },
+                {
+                    "id": "36",
+                    "categoryCode": "LFR",
+                    "categoryLable": "Liferafts"
+                },
+                {
+                    "id": "37",
+                    "categoryCode": "LAR",
+                    "categoryLable": "Launching arrangements"
+                },
+                {
+                    "id": "38",
+                    "categoryCode": "FLD",
+                    "categoryLable": "Flotation Devices"
+                },
+                {
+                    "id": "39",
+                    "categoryCode": "LBY",
+                    "categoryLable": "Lifebuoys"
+                },
+                {
+                    "id": "40",
+                    "categoryCode": "FLP",
+                    "categoryLable": "Flares – Parachute"
+                },
+                {
+                    "id": "41",
+                    "categoryCode": "FLH",
+                    "categoryLable": "Flares – Hand-held"
+                },
+                {
+                    "id": "42",
+                    "categoryCode": "SMS",
+                    "categoryLable": "Smoke Signals"
+                },
+                {
+                    "id": "44",
+                    "categoryCode": "EMC",
+                    "categoryLable": "Emergency Communications"
+                }
+            ]
+        },
+        {
+            "id": "6",
+            "equipmentName": "Fire Fighting Items",
+            "equipmentCategories": [
+                {
+                    "id": "1",
+                    "categoryCode": "FFP",
+                    "categoryLable": "Fire Fighting Plan"
+                },
+                {
+                    "id": "2",
+                    "categoryCode": "FPM",
+                    "categoryLable": "Fire Pumps (Mech)"
+                },
+                {
+                    "id": "3",
+                    "categoryCode": "FPH",
+                    "categoryLable": "Fire Pumps (Hand)"
+                },
+                {
+                    "id": "4",
+                    "categoryCode": "PEX",
+                    "categoryLable": "Portable extinguishers"
+                },
+                {
+                    "id": "5",
+                    "categoryCode": "FES",
+                    "categoryLable": "Fixed extinguishing system"
+                },
+                {
+                    "id": "6",
+                    "categoryCode": "FBU",
+                    "categoryLable": "Fire Buckets"
+                },
+                {
+                    "id": "7",
+                    "categoryCode": "SBX",
+                    "categoryLable": "Sand Boxes"
+                },
+                {
+                    "id": "8",
+                    "categoryCode": "HYD",
+                    "categoryLable": "Hydrants"
+                },
+                {
+                    "id": "9",
+                    "categoryCode": "HOS",
+                    "categoryLable": "Hoses"
+                },
+                {
+                    "id": "70",
+                    "categoryCode": "FIT",
+                    "categoryLable": "Fittings"
+                },
+                {
+                    "id": "71",
+                    "categoryCode": "NOZ",
+                    "categoryLable": "Nozzles"
+                },
+                {
+                    "id": "72",
+                    "categoryCode": "JSP",
+                    "categoryLable": "Jet/Spray"
+                }
+            ]
+        }
+    ],
+    "builderAuthorizations": [
+        {
+            "valueCode": "Y",
+            "valueLabel": "Yes"
+        },
+        {
+            "valueCode": "N",
+            "valueLabel": "No"
+        }
+    ],
+    "propellerTypes": [
+        {
+            "id": "1",
+            "valueCode": "FIXED",
+            "valueLabel": "Fixed Pitch"
+        },
+        {
+            "id": "2",
+            "valueCode": "VARIABLE",
+            "valueLabel": "Variable Pitch"
+        },
+        {
+            "id": "3",
+            "valueCode": "CONTROLLABLE",
+            "valueLabel": "Controllable Pitch"
+        }
+    ],
+    "crewTypes": [
+        {
+            "id": "1",
+            "valueCode": "MASTER",
+            "valueLabel": "Master"
+        },
+        {
+            "id": "2",
+            "valueCode": "CHIEF_ENGINEER",
+            "valueLabel": "Chief Engineer"
+        },
+        {
+            "id": "3",
+            "valueCode": "DECK_OFFICER",
+            "valueLabel": "Deck Officer"
+        },
+        {
+            "id": "4",
+            "valueCode": "ENGINE_OFFICER",
+            "valueLabel": "Engine Officer"
+        },
+        {
+            "id": "5",
+            "valueCode": "CREW",
+            "valueLabel": "Crew Member"
+        }
+    ]
+}
