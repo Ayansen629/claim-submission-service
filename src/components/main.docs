@@ -1,1 +1,1950 @@
-I have thoroughly read and understood all the terms and conditions as mentioned in the Schedule.
+import React, { useState, useEffect, useRef } from "react";
+import { Box, Typography, Stack } from "@mui/material";
+import { useParams, useLocation, useNavigate } from "react-router-dom";
+import Stepper from "../../../common/Stepper.jsx";
+import VesselDetails from "./VesselDetails.js";
+import Documents from "./Documents.js";
+import NoteSheet from "./NoteSheet.js";
+import { useForm } from "react-hook-form";
+import Invoicing from "../../../common/Invoicing.js";
+import PaymentModal from "../../../common/PaymentModal.js";
+import ApprovalModal from "../../../common/ApprovalModal";
+import NewVesselRegistrationSuccess from "./newVesselRegistrationSuccess.js";
+import { useTranslation } from "react-i18next";
+import { toast } from "react-toastify";
+import { Button } from "react-bootstrap";
+import { BsSticky, BsArrowLeft } from "react-icons/bs";
+// import PaymentDetailsView from "./paymentDetailsView.js";
+import { getFromLocalStorage } from "../../../../utils/localStorageUtils.js";
+import { handleErrorMessage } from "../../../../utils/errorMessageHandler.js";
+import { postData, postFORMdata } from "../../../../services/http.service.ts";
+import {
+  SERVICE_BASE,
+  URLS_ENDPOINT,
+} from "../../../../utils/urlsConstants.ts";
+import NewLoader from "../../../common/NewLoader.js";
+import { has } from "lodash";
+
+const NewVesselRegistration = () => {
+  const { t } = useTranslation();
+  const { id } = useParams();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const ownerDetails = getFromLocalStorage("ownerDetails")
+    ? JSON.parse(getFromLocalStorage("ownerDetails"))
+    : "";
+  const isEditMode = !!id && location.pathname.includes("/edit/");
+  const isViewMode = !!id && location.pathname.includes("/view/");
+  const isNormalMode = !isEditMode && !isViewMode;
+  const stepperRef = useRef();
+
+  const methods = useForm({ mode: "onTouched" });
+  const { trigger, getValues, setError, setValue, reset } = methods;
+
+  const [showModal, setShowModal] = useState(false);
+  const [paymentMode, setPaymentMode] = useState("offline");
+  const [challanFile, setChallanFile] = useState(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [showApprovalModal, setShowApprovalModal] = useState(false);
+  const [selectedAction, setSelectedAction] = useState("");
+  const [showNoteSheet, setShowNoteSheet] = useState(false);
+  const [paymentData, setPaymentData] = useState(null);
+
+  const loaderRef = useRef();
+
+  const [vesselRegisData, setVesselRegisData] = useState({});
+
+
+  const [originalGRT, setOriginalGRT] = useState(null);
+  const [fullPaymentData, setFullPaymentData] = useState({})
+  const initialNotes = [
+    {
+      id: 1,
+      title: "Initial Review",
+      content:
+        "Document verification completed successfully. All required documents are present and properly formatted.",
+      date: "2024-01-15",
+      author: "John Doe",
+    },
+    {
+      id: 2,
+      title: "Technical Assessment",
+      content:
+        "All technical drawings have been reviewed and approved by the engineering team.",
+      date: "2024-01-16",
+      author: "Jane Smith",
+    },
+  ];
+  const fetchRegistrationData = async () => {
+    if (!isEditMode && !isViewMode) return;
+
+    try {
+      loaderRef?.current?.show();
+      const payload = {
+        applicationNumbers: [id ],
+        // applicationNumber: "REG-2025-782674"
+      };
+
+      const apiUrl = SERVICE_BASE.IWT_REGISTRATION + URLS_ENDPOINT.USER_SERVICE.REGISTRATION_SEARCH_BY_ID;
+      const response = await postData(apiUrl, payload);
+
+      // if (response?.status === 200 && response?.data?.responseStatus?.status === "Registration details fetched successfully") {
+      if(response?.status === 200 ) {
+        const data = response.data.data[0];
+        setVesselRegisData(data);
+
+        const { basicDetails, vesselDetails, documents } = data;
+
+        // Owner details
+        if (basicDetails?.ownerDetails) {
+          const owner = basicDetails.ownerDetails;
+          setValue("ownerName", owner.ownerCompanyName || "");
+          setValue("ownerAddress", `${owner.addressLine1 || ""}, ${owner.addressLine2 || ""}`.replace(/^,\s*|,\s*$/g, ''));
+          setValue("mobile", owner.phoneNumber || "");
+          setValue("email", owner.emailId || "");
+          setValue("pan", owner.panNo || "");
+          setValue("aadhar", owner.aadharNumber || "");
+          setValue("tradeLicence", owner.tradeLicenseNumber || "");
+          setValue("gst", owner.gstNo || "");
+        }
+
+        // Vessel details
+        if (vesselDetails) {
+          setValue("grt", vesselDetails.grossTonnage?.toString() || "");
+          setValue("workOrderValue", vesselDetails.workOrderValue || "");
+          setValue("vesselType", vesselDetails.typeOfVessel || "");
+          setValue("category", vesselDetails.categoryOfVessel || "");
+          setValue("zone", vesselDetails.zone || "");
+          setValue("supervisionAuthority", vesselDetails.supervisionAuthority || "");
+          setValue("purchaseType", vesselDetails.purchaseType || "");
+          setValue("classificationSociety", vesselDetails.nameOfClassificationSociety || "");
+
+          if (isEditMode) {
+            setOriginalGRT(vesselDetails.grossTonnage?.toString() || "");
+          }
+        }
+
+        // Builder details
+        if (basicDetails?.builderDetails && basicDetails.builderDetails.id) {
+          const builder = basicDetails.builderDetails;
+          setValue("constructedBy", "2");
+          setValue("builder", builder.id || "");
+          setValue("builderName", builder.builderName || "");
+          setValue("builderAddress", `${builder.addressLine1 || ""}, ${builder.addressLine2 || ""}`.replace(/^,\s*|,\s*$/g, ''));
+          setValue("builderEmail", builder.emailId || "");
+          setValue("builderMobile", builder.phone || "");
+          setValue("builderTradeLicence", builder.tradeLicenseNumber || "");
+          setValue("builderGST", builder.gstNo || "");
+          setValue("builderAuth", basicDetails.builderAuthorization || "");
+        } else {
+          setValue("constructedBy", "1");
+        }
+
+        // Authorization letter
+        if (basicDetails?.authorizationLetter) {
+          const authLetter = basicDetails.authorizationLetter;
+          setValue("authLetter", { name: authLetter.documentName, size: 256000 });
+          setValue("authLetterFileStoreId", authLetter.fileStoreId);
+        }
+
+        // Documents
+        if (documents && documents.length > 0) {
+          let workOrderIndex = 1;
+          let drawingIndex = 1;
+
+          documents.forEach((doc) => {
+            if (doc.documentType === "TONNAGE_BOOKLETS") {
+              setValue("TONNAGE_BOOKLETS", { name: doc.documentName, size: 512000 });
+              setValue("TONNAGE_BOOKLETS_fileStoreId", doc.fileStoreId);
+            } else if (doc.documentType === "STABILITY_BOOKLETS") {
+              setValue("STABILITY_BOOKLETS", { name: doc.documentName, size: 768000 });
+              setValue("STABILITY_BOOKLETS_fileStoreId", doc.fileStoreId);
+            } else if (doc.documentType === "WORK_ORDER") {
+              setValue(`WORK_ORDER_file_${workOrderIndex}`, { name: doc.documentName, size: 1200000 });
+              setValue(`WORK_ORDER_desc_${workOrderIndex}`, doc.description || "Work order document");
+              setValue(`WORK_ORDER_fileStoreId_${workOrderIndex}`, doc.fileStoreId);
+              workOrderIndex++;
+            } else if (doc.documentType === "DRAWINGS") {
+              setValue(`DRAWINGS_file_${drawingIndex}`, { name: doc.documentName, size: 2100000 });
+              setValue(`DRAWINGS_desc_${drawingIndex}`, doc.description || "Technical drawing");
+              setValue(`DRAWINGS_fileStoreId_${drawingIndex}`, doc.fileStoreId);
+              drawingIndex++;
+            }
+          });
+        }
+
+        setValue("termsAccepted", true);
+      }
+    } catch (err) {
+      console.error("Failed to fetch registration data:", err);
+      toast.error("Failed to fetch registration data");
+    } finally {
+      loaderRef?.current?.hide();
+    }
+  };
+
+  useEffect(() => {
+    if (isNormalMode) {
+      reset();
+    } else if (isEditMode || isViewMode) {
+      fetchRegistrationData();
+    }
+  }, [isEditMode, isViewMode, isNormalMode, setValue, reset]);
+
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      if (!ownerDetails || !isNormalMode) return;
+
+      const userInfoFields = {
+        ownerName: ownerDetails.ownerCompanyName || "",
+        ownerAddress: [ownerDetails.addressLine1, ownerDetails.addressLine2]
+          .filter(Boolean)
+          .join(" , "),
+        mobile: ownerDetails.phoneNumber || "",
+        email: ownerDetails.emailId || "",
+        pan: ownerDetails.panNo || "",
+        gst: ownerDetails.gstNo || "",
+        category: ownerDetails.categoryOfOwner || "",
+        aadhar: ownerDetails.aadharNumber || "",
+        tradeLicence: ownerDetails.tradeLicenseNumber || "",
+      };
+
+      Object.entries(userInfoFields).forEach(([key, value]) => {
+        setValue(key, value, { shouldDirty: false, shouldTouch: false });
+      });
+    });
+
+    return () => clearTimeout(timeoutId);
+  }, []);
+
+  const validateDocuments = async () => {
+    if (isViewMode) return true;
+    if (isNormalMode) return true;
+
+    const requiredFields = [];
+    const tonnageBooklets = getValues("TONNAGE_BOOKLETS");
+    const stabilityBooklets = getValues("STABILITY_BOOKLETS");
+    const termsAccepted = getValues("termsAccepted");
+    const currentGRT = getValues("grt");
+
+    const isFilePresent = (fileObj) =>
+      !!fileObj && (fileObj.name || fileObj.filestoreId);
+
+    if (
+      isEditMode &&
+      originalGRT !== null &&
+      currentGRT !== undefined &&
+      String(currentGRT) !== String(originalGRT)
+    ) {
+      if (!isFilePresent(tonnageBooklets)) {
+        requiredFields.push("TONNAGE_BOOKLETS");
+      }
+      if (!isFilePresent(stabilityBooklets)) {
+        requiredFields.push("STABILITY_BOOKLETS");
+      }
+    }
+
+    if (!termsAccepted) {
+      // requiredFields.push("termsAccepted");
+      setError("termsAccepted", {
+        type: "required",
+        message: "Terms and Conditions must be accepted",
+      });
+      hasErrors = true;
+    }
+
+    let hasErrors = false;
+    requiredFields.forEach((fieldName) => {
+      const fieldValue = getValues(fieldName);
+      if (
+        !fieldValue ||
+        (fieldValue instanceof FileList && fieldValue.length === 0)
+      ) {
+        setError(fieldName, {
+          type: "required",
+          message: `${fieldName} is required`,
+        });
+        hasErrors = true;
+      }
+    });
+
+    return !hasErrors;
+  };
+
+  const handleActionClick = (action) => {
+    setSelectedAction(action);
+    setShowApprovalModal(true);
+  };
+
+  const handleActionSubmit = (formData) => {
+    const payload = {
+      action: selectedAction,
+      comments: formData.comments,
+    };
+
+    toast.success(`${selectedAction} action submitted successfully`);
+
+    setShowApprovalModal(false);
+    setSelectedAction("");
+  };
+
+  const handleCloseModal = () => {
+    setShowApprovalModal(false);
+    setSelectedAction("");
+  };
+
+  // const handleChallanUpload = (e) => {
+  //   setChallanFile(e.target.files?.[0] || null);
+  // };
+
+  // const handleOnlinePay = () => {
+  //   setIsLoading(true);
+  //   setShowModal(false);
+
+  //   setTimeout(() => {
+  //     setIsLoading(false);
+  //     navigate("/new-vessel/registration-success", {
+  //       state: { registrationId: "VR2024001" },
+  //     });
+  //   }, 1500);
+  // };
+
+
+
+ 
+  const handlePayNow = () => {
+      navigate(`/payment/${vesselRegisData.applicationNumber}`, {
+        state: {
+          paymentData,
+          applicationNumber: vesselRegisData.applicationNumber,
+          fullPaymentData
+        }
+      });
+
+  };
+
+  const validateVesselDetails = async () => {
+    if (isViewMode) return true;
+    const basicFields = [
+      "ownerName",
+      "ownerAddress",
+      "mobile",
+      "email",
+      "pan",
+      "aadhar",
+      "tradeLicence",
+      "gst",
+      "grt",
+      "workOrderValue",
+      "vesselType",
+      "category",
+      "purchaseType",
+      "constructedBy",
+    ];
+
+    const constructedBy = getValues("constructedBy");
+    if (constructedBy === "2") {
+      basicFields.push(
+        "builderName",
+        "builderAddress",
+        "builderEmail",
+        "builderMobile",
+        "builderTradeLicence",
+        "builderGST",
+        "builderAuth"
+      );
+
+      const authLetter = getValues("authLetter");
+      if (!authLetter && !isEditMode) {
+        basicFields.push("authLetter");
+      }
+    }
+
+    const valid = await trigger(basicFields);
+    return valid;
+  };
+
+  const tonnageRequired =
+    isEditMode &&
+    originalGRT !== null &&
+    getValues("grt") !== undefined &&
+    String(getValues("grt")) !== String(originalGRT) &&
+    !getValues("TONNAGE_BOOKLETS");
+
+  const stabilityRequired =
+    isEditMode &&
+    originalGRT !== null &&
+    getValues("grt") !== undefined &&
+    String(getValues("grt")) !== String(originalGRT) &&
+    !getValues("STABILITY_BOOKLETS");
+
+  const supervisionAuthority = methods.watch("supervisionAuthority");
+
+  const fetchPaymentDetails = async () => {
+    try {
+      const payload = {
+        category: "REG_DRAWINGAPPROVAL",
+        paymentProcess: "DRAWINGAPPROVAL",
+        application_no: vesselRegisData?.applicationNumber || ""
+      };
+
+      const apiUrl = SERVICE_BASE.IWT_REGISTRATION + URLS_ENDPOINT.VESSEL_SERVICE.PAYMENT_GENERATE;
+      const response = await postData(apiUrl, payload);
+
+      if (response?.status === 200 && response?.data?.responseStatus?.status === "FeeSlab found successfully") {
+        const apiData = response.data.data;
+
+        const formattedData = {
+          invoiceBreakupInfo: apiData.feesDetailsl?.map((fee, index) => ({
+            id: fee.id || index.toString(),
+            label: fee.category_description || fee.category_name,
+            amount: fee.totalCalucation || fee.old_data,
+            categoryHeader: fee.catHeaderName
+          })) || [],
+          summary: {
+            subTotal: apiData.totalAmount || 0,
+            cgst: apiData.cgst || 0,
+            sgst: apiData.sgst || 0,
+            igst: apiData.igst || 0,
+            totalPayable: apiData.totalAmountAtergst || 0
+          }
+        };
+
+        setPaymentData(formattedData);
+        setFullPaymentData(response.data)
+      }
+    } catch (error) {
+      console.error("Error fetching payment details:", error);
+    }
+  };
+
+  const steps = isViewMode
+    ? [
+      {
+        label: t("Vessel Details"),
+        component: (
+          <VesselDetails
+            formMethods={methods}
+            viewMode={isViewMode}
+            editMode={isEditMode}
+            vesselRegisData={vesselRegisData}
+          />
+        ),
+        validate: validateVesselDetails,
+      },
+      {
+        label: t("Documents"),
+        component: (
+          <Documents
+            formMethods={methods}
+            viewMode={isViewMode}
+            editMode={isEditMode}
+            vesselRegisData={vesselRegisData}
+          />
+        ),
+        validate: validateDocuments,
+      },
+      // {
+      //   label: t("Payment Details"),
+      //   component: (
+      //     <PaymentDetailsView
+      //       supervisionAuthority={supervisionAuthority}
+      //       formData={methods.getValues()}
+      //       vesselRegisData={vesselRegisData}
+      //     />
+      //   ),
+      //   validate: () => true,
+      // },
+    ]
+    : [
+      {
+        label: t("vesselDetails.Vessel Details"),
+        component: (
+          <VesselDetails
+            formMethods={methods}
+            viewMode={isViewMode}
+            editMode={isEditMode}
+            vesselRegisData={vesselRegisData}
+          />
+        ),
+        validate: validateVesselDetails,
+        getFormData: () => methods?.getValues(),
+      },
+      {
+        label: t("vesselDetails.Documents"),
+        component: (
+          <Documents
+            formMethods={methods}
+            viewMode={isViewMode}
+            editMode={isEditMode}
+            vesselRegisData={vesselRegisData}
+            tonnageRequired={tonnageRequired}
+            stabilityRequired={stabilityRequired}
+          />
+        ),
+        validate: validateDocuments,
+        getFormData: () => methods?.getValues(),
+      },
+      //  {
+      //   label : t("Preview"),
+      //   component: <VesselRegistrationPreview formData={methods.getValues()} isPreview={true}
+      // />
+      // },
+      {
+        label: t("vesselDetails.Invoicing"),
+        component: (
+          <Invoicing
+            supervisionAuthority={supervisionAuthority}
+            onPayNow={handlePayNow}
+            vesselRegisData={vesselRegisData}
+            paymentData={paymentData}
+          />
+        ),
+        validate: () => true,
+      },
+    ];
+
+  const extractDocuments = (formData) => {
+    const documents = [];
+    const existingDocs = vesselRegisData?.documents || [];
+    const staticDocs = [
+      { key: "TONNAGE_BOOKLETS", name: "Tonnage Booklet", description: "Tonnage document" },
+      { key: "STABILITY_BOOKLETS", name: "Stability Booklet", description: "Stability document" },
+    ];
+
+    staticDocs.forEach(({ key, name, description }) => {
+      const fileStoreId = formData?.[`${key}_fileStoreId`];
+      const fileObj = formData?.[key];
+      const existingDoc = existingDocs.find(doc => doc.documentType === key);
+      if (fileStoreId) {
+        documents.push({
+          id: existingDoc?.id || "",
+          // id:"", /// --- UPDATE API CALL
+          fileStoreId,
+          documentName: fileObj?.name || name,
+          documentType: key,
+          documentSource: key,
+          description,
+        });
+      }
+    });
+
+    const dynamicTypes = ["WORK_ORDER", "DRAWINGS"];
+    dynamicTypes.forEach((type) => {
+      Object.keys(formData)
+        .filter((key) => key.startsWith(`${type}_fileStoreId_`))
+        .forEach((storeKey) => {
+          const index = storeKey.split("_").pop();
+          const fileStoreId = formData[storeKey];
+          const description = formData[`${type}_desc_${index}`] || "";
+          const fileObj = formData?.[`${type}_file_${index}`];
+          const existingDoc = existingDocs.find(doc =>
+            doc.documentType === type && doc.documentName?.includes(index.padStart(2, '0'))
+          );
+
+          if (fileStoreId) {
+            documents.push({
+              //  id: "", /// --- UPDATE API CALL
+              id: existingDoc?.id || "",
+              fileStoreId,
+              documentName: fileObj?.name || `${type}_${index.padStart(2, '0')}.pdf`,
+              documentType: type,
+              documentSource: type,
+              description,
+            });
+          }
+        });
+    });
+    //   if (vesselRegisData && vesselRegisData?.documents?.length > 0) {
+    //   let existingDocs = new Map();
+    //   vesselRegisData?.documents?.forEach((doc) => {
+    //     existingDocs?.set(doc?.fileStoreId, doc);
+    //   });
+
+    //   const updatedCurrentDocs = documents?.map((doc) => {
+    //     const match = existingDocs?.get(doc?.fileStoreId);
+    //     if (match) {
+    //       return {
+    //         ...doc,
+    //         id: match?.id,
+    //         applicationNumber: match?.applicationNumber,
+    //       };
+    //     }
+    //     return doc;
+    //   });
+
+    //   documents = updatedCurrentDocs?.length > 0 ? [...updatedCurrentDocs] : documents;
+    // }
+
+    return documents;
+  };
+  //--- SAVE / UPDATE  API CALLS ------------
+  // const onVesselRegisFormSubmit = async (stepInfo) => {
+  //   const formValues = stepInfo?.getFormData?.() || {};
+  //   //-- First Step or Second Step
+  //   if (stepInfo.index === 0 || stepInfo.index === 1) {
+  //     let request = {
+  //       id: vesselRegisData?.id || vesselRegisData?.basicDetails?.id || "", //-- UPDATE 
+  //       applicationNumber: vesselRegisData?.applicationNumber || "", //-- UPDATE
+  //       basicDetails: {
+  //         id: vesselRegisData?.basicDetails?.id || "", //-- UPDATE
+  //         applicationNumber: vesselRegisData?.applicationNumber || "", //-- UPDATE
+  //         status: vesselRegisData?.basicDetails?.status || "", //-- UPDATE
+  //         constructedBy: formValues?.constructedBy,
+  //         ownerDetails: {
+  //           id: vesselRegisData?.basicDetails?.ownerDetails?.id || ownerDetails?.id,
+  //         },
+  //         builderDetails: {
+  //           id: vesselRegisData?.basicDetails?.builderDetails?.id || formValues?.builder || null,
+  //         },
+  //         builderAuthorization: formValues?.builderAuth,
+  //         authorizationLetter: {
+  //           id: vesselRegisData?.basicDetails?.authorizationLetter?.id || "", //-- UPDATE
+  //           fileStoreId: formValues?.authLetterFileStoreId,
+  //           documentName: "Authorization_Letter.pdf",
+  //           documentType: "AUTHORIZATION_LETTER",
+  //           documentSource: "AUTHORIZATION_LETTER",
+  //           descriptions: "",
+  //         },
+  //       },
+  //       vesselDetails: {
+  //         id: vesselRegisData?.vesselDetails?.id || "",
+  //         typeOfVessel: formValues?.vesselType,
+  //         categoryOfVessel: formValues?.category,
+  //         zone: formValues?.zone,
+  //         grossTonnage: formValues?.grt,
+  //         workOrderValue: formValues?.workOrderValue,
+  //         purchaseType: formValues?.purchaseType,
+  //         supervisionAuthority: formValues?.supervisionAuthority,
+  //         nameOfMaster: vesselRegisData?.vesselDetails?.nameOfMaster || "",
+  //         certficateNumber: vesselRegisData?.vesselDetails?.certficateNumber || "",
+  //         nameOfRegistry: vesselRegisData?.vesselDetails?.nameOfRegistry || "",
+  //         registrationNumber: vesselRegisData?.vesselDetails?.registrationNumber || "",
+  //         vesselName: vesselRegisData?.vesselDetails?.vesselName || "",
+  //         kindOfVessel: vesselRegisData?.vesselDetails?.kindOfVessel || "",
+  //         mortgage: vesselRegisData?.vesselDetails?.mortgage || "",
+  //         placeOfBuild: vesselRegisData?.vesselDetails?.placeOfBuild || "",
+  //         insuranceDetails: vesselRegisData?.vesselDetails?.insuranceDetails || "",
+  //         yearOfBuild: vesselRegisData?.vesselDetails?.yearOfBuild || null,
+  //         pniClubNo: vesselRegisData?.vesselDetails?.pniClubNo || "",
+  //         pniClubName: vesselRegisData?.vesselDetails?.pniClubName || "",
+  //         applicationNo: vesselRegisData?.applicationNumber || "",
+  //         nameOfClassificationSociety: formValues?.classificationSociety,
+  //         iwtVesselBasicDetailsTFk: vesselRegisData?.basicDetails?.id || "",
+  //         insuranceValidDate: vesselRegisData?.vesselDetails?.insuranceValidDate || "",
+  //       },
+  //     };
+
+  //     if (stepInfo.index === 1) {
+  //       request = { ...request, documents: extractDocuments(formValues) };
+  //     }
+
+  //     try {
+  //       loaderRef?.current?.show();
+  //       const URL = SERVICE_BASE.IWT_REGISTRATION + URLS_ENDPOINT.VESSEL_SERVICE.CREATE;
+
+  //       const response = await postData(URL, request);
+  //       const apiRes = { ...response?.data };
+  //       if (response?.status === 200 && apiRes?.responseStatus) {
+  //         loaderRef?.current?.hide();
+  //         setVesselRegisData((data) => {
+  //           return apiRes?.data ? { ...apiRes?.data, documents: data?.documents ? [...data?.documents] : [] } : {}
+  //         });
+  //         toast.success(
+  //           apiRes?.responseStatus?.message || "Vessel details saved successfully.",
+  //           { position: "top-right" }
+  //         );
+
+  //         if (stepInfo.index === 1) {
+  //           fetchPaymentDetails();
+  //         }
+
+  //         setTimeout(() => {
+  //           stepperRef?.current?.goToNextStep();
+  //           window.scrollTo(0, 0);
+  //         }, 1000);
+  //       } else {
+  //         loaderRef?.current?.hide();
+  //         toast.warning(
+  //           apiRes?.responseStatus?.message || "Something went wrong..",
+  //           { position: "top-right" }
+  //         );
+  //       }
+  //     } catch (err) {
+  //       loaderRef?.current?.hide();
+  //       handleErrorMessage(err?.response?.data);
+  //     }
+  //   }
+  // };
+
+
+const onVesselRegisFormSubmit = async (stepInfo) => {
+  const formValues = stepInfo?.getFormData?.() || {};
+  
+  if (stepInfo.index === 0 || stepInfo.index === 1) {
+    
+    const authLetterFile = formValues?.authLetter;
+    const authLetterFileName = authLetterFile?.name || "Authorization Letter.pdf";
+    
+    let request = {
+      id: vesselRegisData?.id || vesselRegisData?.basicDetails?.id || "",
+      applicationNumber: vesselRegisData?.applicationNumber || "",
+      basicDetails: {
+        id: vesselRegisData?.basicDetails?.id || "",
+        applicationNumber: vesselRegisData?.applicationNumber || "",
+        status: vesselRegisData?.basicDetails?.status || "",
+        constructedBy: formValues?.constructedBy,
+        ownerDetails: {
+          id: vesselRegisData?.basicDetails?.ownerDetails?.id || ownerDetails?.id,
+        },
+        builderDetails: {
+          id: vesselRegisData?.basicDetails?.builderDetails?.id || formValues?.builder || null,
+        },
+        builderAuthorization: formValues?.builderAuth,
+        authorizationLetter: {
+          id: vesselRegisData?.basicDetails?.authorizationLetter?.id || "",
+          fileStoreId: formValues?.authLetterFileStoreId,
+          documentName: authLetterFileName, 
+          documentType: "AUTHORIZATION_LETTER",
+          documentSource: "AUTHORIZATION_LETTER",
+          descriptions: "",
+        },
+      },
+      vesselDetails: {
+        id: vesselRegisData?.vesselDetails?.id || "",
+        typeOfVessel: formValues?.vesselType,
+        categoryOfVessel: formValues?.category,
+        zone: formValues?.zone,
+        grossTonnage: formValues?.grt,
+        workOrderValue: formValues?.workOrderValue,
+        purchaseType: formValues?.purchaseType,
+        supervisionAuthority: formValues?.supervisionAuthority,
+        nameOfMaster: vesselRegisData?.vesselDetails?.nameOfMaster || "",
+        certficateNumber: vesselRegisData?.vesselDetails?.certficateNumber || "",
+        nameOfRegistry: vesselRegisData?.vesselDetails?.nameOfRegistry || "",
+        registrationNumber: vesselRegisData?.vesselDetails?.registrationNumber || "",
+        vesselName: vesselRegisData?.vesselDetails?.vesselName || "",
+        kindOfVessel: vesselRegisData?.vesselDetails?.kindOfVessel || "",
+        mortgage: vesselRegisData?.vesselDetails?.mortgage || "",
+        placeOfBuild: vesselRegisData?.vesselDetails?.placeOfBuild || "",
+        insuranceDetails: vesselRegisData?.vesselDetails?.insuranceDetails || "",
+        yearOfBuild: vesselRegisData?.vesselDetails?.yearOfBuild || null,
+        pniClubNo: vesselRegisData?.vesselDetails?.pniClubNo || "",
+        pniClubName: vesselRegisData?.vesselDetails?.pniClubName || "",
+        applicationNo: vesselRegisData?.applicationNumber || "",
+        nameOfClassificationSociety: formValues?.classificationSociety,
+        iwtVesselBasicDetailsTFk: vesselRegisData?.basicDetails?.id || "",
+        insuranceValidDate: vesselRegisData?.vesselDetails?.insuranceValidDate || "",
+      },
+    };
+
+    if (stepInfo.index === 1) {
+      request = { ...request, documents: extractDocuments(formValues) };
+    }
+
+    try {
+      loaderRef?.current?.show();
+      const URL = SERVICE_BASE.IWT_REGISTRATION + URLS_ENDPOINT.VESSEL_SERVICE.CREATE;
+
+      const response = await postData(URL, request);
+      const apiRes = { ...response?.data };
+      if ((response?.status === 200 || response?.status === 201) && apiRes?.responseStatus) {
+        loaderRef?.current?.hide();
+        setVesselRegisData((data) => {
+          return apiRes?.data ? { ...apiRes?.data, documents: data?.documents ? [...data?.documents] : [] } : {}
+        });
+        toast.success(
+          apiRes?.responseStatus?.message || "Vessel details saved successfully.",
+          { position: "top-right" }
+        );
+
+        if (stepInfo.index === 1) {
+          fetchPaymentDetails();
+        }
+
+        setTimeout(() => {
+          stepperRef?.current?.goToNextStep();
+          window.scrollTo(0, 0);
+        }, 1000);
+      } else {
+        loaderRef?.current?.hide();
+        toast.warning(
+          apiRes?.responseStatus?.message || "Something went wrong..",
+          { position: "top-right" }
+        );
+      }
+    } catch (err) {
+      loaderRef?.current?.hide();
+      handleErrorMessage(err?.response?.data);
+    }
+  }
+};
+  const handleSave = () => {
+    setIsLoading(true);
+    setTimeout(() => {
+      setIsLoading(false);
+      navigate("/new-vessel/registration-success", {
+        state: { registrationId: "VR2024001" },
+      });
+    }, 1500);
+  };
+
+
+  return (
+    <>
+      <NewLoader ref={loaderRef} />
+
+      <Box
+        sx={{
+          padding: "1rem 0.5rem 0 0.5rem",
+          backgroundColor: "#f5f6fa",
+          minHeight: "100vh",
+        }}
+      >
+        <div className="d-flex flex-column flex-md-row justify-content-between align-items-start align-items-md-center mb-4 gap-3">
+          <div
+            className="d-flex align-items-center flex-grow-1"
+            style={{ gap: "16px" }}
+          >
+            <Button
+              variant="outline-primary"
+              onClick={() => navigate("/dashboard")}
+              className="d-flex align-items-center justify-content-center shadow-sm"
+              style={{
+                borderRadius: "50%",
+                width: "40px",
+                height: "40px",
+                border: "2px solid #2E57A7",
+                color: "#2E57A7",
+                backgroundColor: "#fff",
+                transition: "all 0.3s ease",
+                padding: "0",
+              }}
+              onMouseEnter={(e) => {
+                e.target.style.backgroundColor = "#2E57A7";
+                e.target.style.color = "#fff";
+                e.target.style.transform = "translateY(-2px)";
+                e.target.style.boxShadow = "0 4px 12px rgba(46, 87, 167, 0.3)";
+              }}
+              onMouseLeave={(e) => {
+                e.target.style.backgroundColor = "#fff";
+                e.target.style.color = "#2E57A7";
+                e.target.style.transform = "translateY(0)";
+                e.target.style.boxShadow = "0 2px 4px rgba(0,0,0,0.1)";
+              }}
+            >
+              <BsArrowLeft size={16} />
+            </Button>
+            <Stack spacing={0.5} className="flex-grow-1">
+              <Typography
+                sx={{
+                  fontWeight: 550,
+                  color: "#2E57A7",
+                  fontSize: { xs: "1rem", sm: "1.1rem", md: "1.2rem" },
+                  lineHeight: 1.2,
+                }}
+              >
+                {isViewMode
+                  ? t("View Vessel Registration") + ` - ${id}`
+                  : isEditMode
+                    ? t("Edit Vessel Registration") + ` - ${id}`
+                    : t("vesselDetails.New Vessel Registration")}
+              </Typography>
+              <Typography
+                sx={{
+                  color: "#666",
+                  fontSize: { xs: "0.6rem", sm: "0.65rem" },
+                  lineHeight: 1.3,
+                }}
+              >
+                {isViewMode
+                  ? t("(View vessel registration details)")
+                  : isEditMode
+                    ? t("(Update vessel registration details)")
+                    : t(
+                      "vesselDetails.(Fill in the vessel details to complete registration)"
+                    )}
+              </Typography>
+            </Stack>
+          </div>
+          {/* Note Sheet Button - Only for View Mode */}
+          {/* {isViewMode && (
+                <Button
+                  variant="primary"
+                  className="d-flex align-items-center shadow-sm flex-shrink-0"
+                  style={{
+                    background:
+                      "linear-gradient(135deg, #2466bf 0%, #1a4fa0 100%)",
+                    border: "none",
+                    borderRadius: "8px",
+                    padding: "6px 12px",
+                    fontSize: "0.8rem",
+                    fontWeight: "600",
+                    minWidth: "auto",
+                    whiteSpace: "nowrap",
+                  }}
+                  onClick={() => setShowNoteSheet(true)}
+                >
+                  <BsSticky className="me-1 me-sm-2" size={14} />
+                  <span className="d-none d-sm-inline">{t("Note Sheet")}</span>
+                  <span className="d-sm-none">{t("Notes")}</span>
+                </Button>
+              )} */}
+        </div>
+
+        <Stepper
+          ref={stepperRef}
+          steps={steps}
+          onSave={handleSave}
+          viewMode={isViewMode}
+          onPayNow={handlePayNow}
+          onSyncData={onVesselRegisFormSubmit}
+        />
+        {/* <NoteSheet
+              show={showNoteSheet}
+              onHide={() => setShowNoteSheet(false)}
+              initialNotes={initialNotes}
+            /> */}
+
+        {/* {!isViewMode && (
+          <PaymentModal
+            show={showModal}
+            onHide={() => setShowModal(false)}
+
+            
+            paymentMode={paymentMode}
+            setPaymentMode={setPaymentMode}
+            challanFile={challanFile}
+            onChallanUpload={handleChallanUpload}
+            onOnlinePay={handleOnlinePay}
+            onOfflineSubmit={handleOfflineSubmit}
+            isLoading={isLoading}
+            formMethods={methods}
+          />
+        )} */}
+
+        {isViewMode && (
+          <ApprovalModal
+            show={showApprovalModal}
+            handleClose={handleCloseModal}
+            handleSubmitData={handleActionSubmit}
+            selectedAction={selectedAction}
+          />
+        )}
+      </Box>
+    </>
+  );
+};
+
+export default NewVesselRegistration;
+import React, { useState, useEffect, useRef } from "react";
+import { Row, Col, Button, Card } from "react-bootstrap";
+import Collapsible from "../../../common/Collapsible.js";
+import { useTranslation } from "react-i18next";
+import InputFile from "../../../common/InputFile.tsx";
+import InputText from "../../../common/InputText.tsx";
+import { renameFile } from "../../../../utils/constants.ts";
+import { BsDownload, BsFileEarmarkPdf, BsPlus, BsTrash } from "react-icons/bs";
+import { BASE_IP, URLS_ENDPOINT } from "../../../../utils/urlsConstants.ts";
+import { postFORMdata } from "../../../../services/http.service.ts";
+import { FaTimesCircle } from "react-icons/fa";
+import { toast } from "react-toastify";
+import NewLoader from "../../../common/NewLoader.js";
+import axios from "axios";
+import { getFromLocalStorage } from "../../../../utils/localStorageUtils.js";
+import { deleteFile } from "../../../../utils/deleteFile.js";
+
+const Documents = ({
+  formMethods,
+  viewMode = false,
+  editMode = false,
+  vesselRegisData,
+  tonnageRequired,
+  stabilityRequired,
+}) => {
+  const { t } = useTranslation();
+  const [formData, setFormData] = useState({});
+  const [workOrderFiles, setWorkOrderFiles] = useState([{ id: 1 }]);
+  const [drawingsFiles, setDrawingsFiles] = useState([{ id: 1 }]);
+  const [regVesselData, setRegVesselData] = useState(vesselRegisData);
+  const loaderRef = useRef();
+
+  const {
+    register,
+    watch,
+    setValue,
+    clearErrors,
+    getValues,
+    setError,
+    formState: { errors },
+    unregister
+  } = formMethods;
+
+  useEffect(() => {
+    setTimeout(() => {
+      Object.keys(formData).forEach((key) => {
+        if (formData[key] !== undefined) {
+          setValue(key, formData[key], { shouldValidate: false });
+        }
+      });
+    }, 0);
+  }, [setValue, formData]);
+
+
+  useEffect(() => {
+    const initializeFiles = () => {
+      const workOrderIds = [];
+      const drawingIds = [];
+
+      if (viewMode) {
+
+        for (let i = 1; i <= 50; i++) {
+          const workOrderFile = getValues(`WORK_ORDER_file_${i}`);
+          const drawingFile = getValues(`DRAWINGS_file_${i}`);
+
+          if (workOrderFile && (workOrderFile.name || workOrderFile.size)) {
+            workOrderIds.push({ id: i });
+          }
+          if (drawingFile && (drawingFile.name || drawingFile.size)) {
+            drawingIds.push({ id: i });
+          }
+        }
+
+        setWorkOrderFiles(workOrderIds);
+        setDrawingsFiles(drawingIds);
+      } else if (editMode) {
+
+        for (let i = 1; i <= 50; i++) {
+          const workOrderFile = getValues(`WORK_ORDER_file_${i}`);
+          const drawingFile = getValues(`DRAWINGS_file_${i}`);
+
+          if (workOrderFile && (workOrderFile.name || workOrderFile.size)) {
+            workOrderIds.push({ id: i });
+          }
+          if (drawingFile && (drawingFile.name || drawingFile.size)) {
+            drawingIds.push({ id: i });
+          }
+        }
+
+
+        if (workOrderIds.length === 0) {
+          workOrderIds.push({ id: 1 });
+        }
+        if (drawingIds.length === 0) {
+          drawingIds.push({ id: 1 });
+        }
+
+        setWorkOrderFiles(workOrderIds);
+        setDrawingsFiles(drawingIds);
+      } else {
+
+        for (let i = 1; i <= 50; i++) {
+          const workOrderFile = getValues(`WORK_ORDER_file_${i}`);
+          const drawingFile = getValues(`DRAWINGS_file_${i}`);
+
+          if (workOrderFile && (workOrderFile.name || workOrderFile.size)) {
+            workOrderIds.push({ id: i });
+          }
+          if (drawingFile && (drawingFile.name || drawingFile.size)) {
+            drawingIds.push({ id: i });
+          }
+        }
+
+        if (workOrderIds.length > 0) {
+          setWorkOrderFiles(workOrderIds);
+        }
+        if (drawingIds.length > 0) {
+          setDrawingsFiles(drawingIds);
+        }
+      }
+    };
+
+
+    const timer = setTimeout(initializeFiles, 200);
+    return () => clearTimeout(timer);
+  }, [viewMode, editMode, getValues]);
+
+
+  useEffect(() => {
+    if (!viewMode && !editMode) {
+      const subscription = watch((value, { name, type }) => {
+        if (name && name.includes('_file_')) {
+          const fileType = name.includes('WORK_ORDER') ? 'WORK_ORDER' : 'DRAWINGS';
+          const fileId = parseInt(name.split('_').pop());
+
+          if (type === 'change' && value[name]) {
+            if (fileType === 'WORK_ORDER') {
+              setWorkOrderFiles(prev => {
+                const exists = prev.some(f => f.id === fileId);
+                if (!exists) {
+                  return [...prev, { id: fileId }].sort((a, b) => a.id - b.id);
+                }
+                return prev;
+              });
+            } else if (fileType === 'DRAWINGS') {
+              setDrawingsFiles(prev => {
+                const exists = prev.some(f => f.id === fileId);
+                if (!exists) {
+                  return [...prev, { id: fileId }].sort((a, b) => a.id - b.id);
+                }
+                return prev;
+              });
+            }
+          }
+        }
+      });
+
+      return () => subscription.unsubscribe();
+    }
+  }, [watch, viewMode, editMode]);
+
+  const DocumentCard = ({
+    fileName,
+    description,
+    onDownload,
+    fileSize,
+    onRemove,
+    showRemove = false,
+  }) => {
+    const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
+
+    useEffect(() => {
+      const handleResize = () => setIsMobile(window.innerWidth <= 768);
+      window.addEventListener("resize", handleResize);
+      return () => window.removeEventListener("resize", handleResize);
+    }, []);
+
+    return (
+      <Card className="mb-1 border-0 shadow-sm">
+        <Card.Body className="p-2">
+          <div className="d-flex justify-content-between align-items-center">
+            <div
+              className="d-flex align-items-center flex-grow-1 me-2"
+              style={{ minWidth: 0 }}
+            >
+              {!isMobile && (
+                <div className="bg-danger bg-opacity-10 rounded-circle p-1 me-2 flex-shrink-0">
+                  <BsFileEarmarkPdf className="text-danger" size={10} />
+                </div>
+              )}
+              <div style={{ minWidth: 0 }}>
+                <div
+                  className="text-primary fw-semibold"
+                  style={{
+                    fontSize: isMobile ? "0.8rem" : "0.7rem",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                    lineHeight: "1.3",
+                    marginBottom: isMobile ? "0" : "4px",
+                  }}
+                  title={fileName}
+                >
+                  {fileName}
+                </div>
+                {!isMobile && (
+                  <>
+                    <p
+                      className="mb-0 text-muted"
+                      style={{
+                        fontSize: "0.6rem",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {description}
+                    </p>
+                    {fileSize && (
+                      <span
+                        className="badge bg-light text-dark mt-1"
+                        style={{ fontSize: "0.55rem" }}
+                      >
+                        {(fileSize / 1024 / 1024).toFixed(1)} MB
+                      </span>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+            <div className="flex-shrink-0">
+              <Button
+                variant="outline-primary"
+                size="sm"
+                onClick={() => onDownload(fileName)}
+                className="rounded-pill d-flex align-items-center"
+                style={{
+                  minWidth: "auto",
+                  fontSize: "0.6rem",
+                  padding: isMobile ? "6px 8px" : "4px 6px",
+                }}
+              >
+                {isMobile && <BsFileEarmarkPdf className="me-1" size={12} />}
+                <BsDownload size={isMobile ? 12 : 8} />
+                {!isMobile && <span className="ms-1">{t("Download")}</span>}
+              </Button>
+              {showRemove && (
+                <Button
+                  variant="outline-danger"
+                  size="sm"
+                  onClick={onRemove}
+                  className="rounded-pill ms-1"
+                  style={{ minWidth: "auto", padding: "4px 6px" }}
+                >
+                  <BsTrash size={8} />
+                </Button>
+              )}
+            </div>
+          </div>
+        </Card.Body>
+      </Card>
+    );
+  };
+
+  const FileUploadCard = ({
+    label,
+    name,
+    fileDownloadKey,
+    onRemove,
+    showRemove = false,
+    fileIndex,
+    displayIndex,
+  }) => {
+    const fileData = watch(name);
+    const fileStoreId = watch(fileDownloadKey);
+    const hasFile = fileData && (fileData.name || fileData.size);
+
+    const handleDeleteFile = async (name) => {
+      const res = await deleteFile(fileStoreId, loaderRef);
+      console.log(fileStoreId);
+      if (res) {
+        clearErrors(name);
+        setValue(name, null);
+        setValue(name.replace("_file_", "_fileStoreId_"), null);
+      }
+    }
+
+    return (
+      <Card className="mb-2 border-2 border-dashed border-primary border-opacity-25">
+        <Card.Body className="p-2">
+          <div className="mb-2">
+            <div style={{ fontSize: "0.75rem", position: "relative" }}>
+              <InputFile
+                label={`${label} ${displayIndex}`}
+                name={name}
+                register={register(name)}
+                errors={errors}
+                onChange={(e) => {
+                  if (e?.target?.files && e?.target?.files[0]) {
+                    const file = e.target.files[0];
+
+                    if (file.size > 30 * 1024 * 1024) {
+                      setError(name, {
+                        type: "manual",
+                        message: t(
+                          "vesselDetails..File size should not exceed 30MB"
+                        ),
+                      });
+                      return;
+                    }
+
+                    const extension = file?.name?.substring(
+                      file?.name?.lastIndexOf(".")
+                    );
+                    const fileType = name.includes("WORK_ORDER")
+                      ? "WORK_ORDER"
+                      : "DRAWINGS";
+                    const fileName = `${fileType}_${String(fileIndex).padStart(
+                      2,
+                      "0"
+                    )}${extension}`;
+                    file.originalName = fileName;
+                    const renamedFile = renameFile(file, fileName);
+                    uploadFile(file, name, renamedFile, fileType, fileIndex);
+                  }
+                }}
+                watch={watch}
+                defaultValue={watch(name)}
+                clearErrors={clearErrors}
+                accept=".pdf,.jpg,.jpeg,.png"
+                className="mobile-file-input"
+                style={{ width: "100%" }}
+              />
+
+              {hasFile && !viewMode && (
+                <FaTimesCircle
+                  className="text-danger position-absolute"
+                  style={{
+                    top: "55%",
+                    right: "1.5rem",
+                    transform: "translateY(-50%)",
+                    cursor: "pointer",
+                    zIndex: 10,
+                  }}
+                  size={16}
+                  title="Remove file"
+                  onClick={() => handleDeleteFile(name)}
+                />
+              )}
+            </div>
+          </div>
+          <div className="mb-2">
+            <div style={{ fontSize: "0.75rem" }}>
+              <InputText
+                label={t("vesselDetails.Description")}
+                name={name?.replace("_file_", "_desc_")}
+                placeholder={t("vesselDetails.Enter file description")}
+                register={register(name.replace("_file_", "_desc_"))}
+                errors={errors}
+                className="mobile-text-input"
+              />
+            </div>
+          </div>
+          <div className="text-end d-flex justify-content-end gap-1">
+            {editMode && hasFile && (
+              <Button
+                variant="outline-primary"
+                size="sm"
+                onClick={() => handleDownload(fileStoreId, fileData.name)}
+                className="rounded-pill"
+                style={{ fontSize: "0.65rem", padding: "2px 6px" }}
+              >
+                <BsDownload className="me-1" size={8} />
+                <span className="d-none d-sm-inline">Download</span>
+                <span className="d-sm-none">↓</span>
+              </Button>
+            )}
+            {showRemove && (
+              <Button
+                variant="outline-danger"
+                size="sm"
+                onClick={onRemove}
+                className="rounded-pill"
+                style={{ fontSize: "0.65rem", padding: "2px 6px" }}
+              >
+                <BsTrash className="me-1" size={8} />
+                <span className="d-none d-sm-inline">Remove</span>
+                <span className="d-sm-none">×</span>
+              </Button>
+            )}
+          </div>
+        </Card.Body>
+      </Card>
+    );
+  };
+
+  const FileSection = ({ title, files, type, icon }) => {
+    const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
+
+    useEffect(() => {
+      const handleResize = () => setIsMobile(window.innerWidth <= 768);
+      window.addEventListener("resize", handleResize);
+      return () => window.removeEventListener("resize", handleResize);
+    }, []);
+
+    const filesWithData = files.filter((file) => {
+      const fileData = watch(`${type}_file_${file.id}`);
+      return fileData && (fileData.name || fileData.size);
+    });
+
+    return (
+      <Card className="h-100 shadow-sm border-0">
+        <Card.Header className="bg-light border-0 py-2">
+          <div className="d-flex justify-content-between align-items-center">
+            <h6
+              className="mb-0 text-primary fw-bold d-flex align-items-center"
+              style={{ fontSize: isMobile ? "0.8rem" : "0.75rem" }}
+            >
+              {icon}
+              <span className="ms-2">{title}</span>
+            </h6>
+            <span
+              className="badge bg-primary rounded-pill"
+              style={{ fontSize: "0.6rem" }}
+            >
+              {viewMode ? filesWithData.length : editMode ? `${filesWithData.length}/50` : files.length} files
+            </span>
+          </div>
+        </Card.Header>
+
+        <Card.Body className="p-1">
+          <div
+            style={{
+              maxHeight: isMobile ? "350px" : "250px",
+              overflowY: "auto",
+            }}
+          >
+            {viewMode ? (
+              filesWithData.length > 0 ? (
+                filesWithData.map((fileInput, index) => {
+                  const fileData = watch(`${type}_file_${fileInput.id}`);
+                  const descData = watch(`${type}_desc_${fileInput.id}`);
+
+                  return (
+                    <DocumentCard
+                      key={fileInput.id}
+                      fileName={fileData.name}
+                      description={descData || `${title} document ${index + 1}`}
+                      fileSize={fileData.size}
+                      onDownload={() => handleDownload(watch(`${type}_fileStoreId_${fileInput.id}`), watch(`${type}_file_${fileInput.id}`)?.name)}
+                    />
+                  );
+                })
+              ) : (
+                <div className="text-center py-3 text-muted">
+                  <div className="bg-light rounded-circle p-2 d-inline-flex mb-2">
+                    <BsFileEarmarkPdf size={20} className="opacity-50" />
+                  </div>
+                  <p className="mb-0" style={{ fontSize: "0.7rem" }}>
+                    No files uploaded
+                  </p>
+                </div>
+              )
+            ) : (
+              files.map((fileInput, idx) => {
+                return (
+                  <div key={fileInput.id}>
+                    <FileUploadCard
+                      label={t("vesselDetails.Choose File")}
+                      name={`${type}_file_${fileInput.id}`}
+                      fileDownloadKey={`${type}_fileStoreId_${fileInput.id}`}
+                      fileIndex={fileInput.id}
+                      displayIndex={idx + 1}
+                      onRemove={() => removeFileInput(type, fileInput.id)}
+                      showRemove={files.length > 1}
+                    />
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </Card.Body>
+
+        {!viewMode && (
+          <Card.Footer className="bg-light border-0 text-center py-1">
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => addFileInput(type)}
+              className="rounded-pill px-2"
+              style={{ fontSize: "0.65rem" }}
+              disabled={files.length >= 50}
+            >
+              <BsPlus className="me-1" size={10} />
+              <span className={isMobile ? "d-none" : ""}>Add {title}</span>
+              <span className={isMobile ? "" : "d-none"}>+</span>
+            </Button>
+          </Card.Footer>
+        )}
+      </Card>
+    );
+  };
+
+  const SingleFileSection = ({
+    title,
+    fileName,
+    onDownload,
+    fileSize,
+    icon,
+  }) => (
+    <Card className="h-100 shadow-sm border-0">
+      <Card.Header className="bg-light border-0 py-2">
+        <h6
+          className="mb-0 text-primary fw-bold d-flex align-items-center"
+          style={{ fontSize: "0.75rem" }}
+        >
+          {icon}
+          <span className="ms-2">{title}</span>
+        </h6>
+      </Card.Header>
+      <Card.Body className="p-2">
+        {fileName ? (
+          <DocumentCard
+            fileName={fileName}
+            description={`${title} document`}
+            fileSize={fileSize}
+            onDownload={() => onDownload(fileName)}
+          />
+        ) : (
+          <div className="text-center py-2 text-muted">
+            <div className="bg-light rounded-circle p-2 d-inline-flex mb-2">
+              <BsFileEarmarkPdf size={20} className="opacity-50" />
+            </div>
+            <p className="mb-0" style={{ fontSize: "0.7rem" }}>
+              No file uploaded
+            </p>
+          </div>
+        )}
+      </Card.Body>
+    </Card>
+  );
+
+  const addFileInput = (type) => {
+    if (viewMode) return;
+
+    if (type === "WORK_ORDER") {
+      if (workOrderFiles.length >= 50) return;
+
+
+      const existingIds = workOrderFiles.map(f => f.id);
+      let nextId = 1;
+      while (existingIds.includes(nextId)) {
+        nextId++;
+      }
+
+      setWorkOrderFiles(prev => [...prev, { id: nextId }].sort((a, b) => a.id - b.id));
+    } else if (type === "DRAWINGS") {
+      if (drawingsFiles.length >= 50) return;
+
+
+      const existingIds = drawingsFiles.map(f => f.id);
+      let nextId = 1;
+      while (existingIds.includes(nextId)) {
+        nextId++;
+      }
+
+      setDrawingsFiles(prev => [...prev, { id: nextId }].sort((a, b) => a.id - b.id));
+    }
+  };
+
+  const removeFileInput = async (type, id, fileDownloadKey) => {
+    if (viewMode) return;
+
+    const fileStoreId = watch(`${type}_fileStoreId_${id}`);
+    console.log("fileStoreId ", fileStoreId);
+    if (fileStoreId) {
+      const res = await deleteFile(fileStoreId, loaderRef);
+      if (!res) {
+        return;
+      }
+    }
+    if (type === "WORK_ORDER") {
+      setWorkOrderFiles(prev => prev.filter((file) => file.id !== id));
+    } else if (type === "DRAWINGS") {
+      setDrawingsFiles(prev => prev.filter((file) => file.id !== id));
+    }
+    // setValue(`${type}_file_${id}`, null);
+    // setValue(`${type}_desc_${id}`, "");
+    unregister(`${type}_file_${id}`);
+    unregister(`${type}_desc_${id}`);
+    unregister(`${type}_fileStoreId_${id}`);
+    clearErrors([`${type}_file_${id}`, `${type}_desc_${id}`]);
+
+    setValue(`${type}_file_${id}`, null);
+    setValue(`${type}_desc_${id}`, "");
+    setValue(`${type}_fileStoreId_${id}`, null);
+  };
+
+  const handleDownload = async (fileStoreId, fileName) => {
+    try {
+      if (!fileStoreId) return;
+      const url = `${BASE_IP}/filestore/v1/files/id?fileStoreId=${fileStoreId}`;
+
+      loaderRef.current?.show();
+
+      const accessToken = getFromLocalStorage("access_token");
+      const tokenDetails = getFromLocalStorage("tokenDetails");
+      const sessionState = tokenDetails
+        ? JSON.parse(tokenDetails)?.session_state
+        : "";
+
+      const response = await axios({
+        method: "GET",
+        url: url,
+        responseType: "blob",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "X-Request-ID": sessionState,
+          Accept: "application/octet-stream",
+        },
+      });
+
+      if (response.data) {
+        let filename = fileName || "document";
+        const contentDisposition = response.headers["content-disposition"];
+        if (contentDisposition) {
+          const filenameMatch = contentDisposition.match(
+            /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/
+          );
+          if (filenameMatch && filenameMatch[1]) {
+            filename = filenameMatch[1].replace(/['"]/g, "");
+          }
+        }
+
+        const blob = new Blob([response.data], {
+          type: response.headers["content-type"] || "application/octet-stream",
+        });
+        const blobUrl = window.URL.createObjectURL(blob);
+
+        const link = document.createElement("a");
+        link.href = blobUrl;
+        link.setAttribute("download", filename);
+        document.body.appendChild(link);
+        link.click();
+
+        setTimeout(() => {
+          document.body.removeChild(link);
+          window.URL.revokeObjectURL(blobUrl);
+        }, 100);
+      }
+    } catch (error) {
+      console.error("Error downloading file:", error);
+      toast.error("Failed to download file. Please try again.");
+    } finally {
+      loaderRef.current?.hide();
+    }
+  };
+
+  const uploadFile = async (
+    file,
+    formValueName,
+    renamedFile,
+    fileType,
+    fileIndex
+  ) => {
+    try {
+      loaderRef?.current?.show();
+      const formData = new FormData();
+      formData.append("file", file);
+      const uploadUrl = BASE_IP + URLS_ENDPOINT.FILE_STORE_SERVICE.UPLOAD_FILE;
+      const response = await postFORMdata(uploadUrl, formData);
+      const fileStoreId = response?.data?.files[0]?.fileStoreId;
+
+      clearErrors(formValueName);
+      setValue(formValueName, renamedFile, { shouldValidate: true });
+
+      if (fileType === 'STABILITY_BOOKLETS' || fileType === 'TONNAGE_BOOKLETS') {
+        setValue(fileType + "_fileStoreId", fileStoreId);
+      } else {
+        setValue(fileType + "_fileStoreId_" + fileIndex, fileStoreId);
+        setFormData((prev) => ({
+          ...prev,
+          [formValueName]: renamedFile,
+        }));
+      }
+
+      loaderRef?.current?.hide();
+
+    } catch (err) {
+      loaderRef?.current?.hide();
+      console.error(err);
+      setError(formValueName, {
+        type: "manual",
+        message: t("File upload failed"),
+      });
+      toast.error("File upload failed...");
+    }
+  };
+
+  const handleRemoveTonnageFile = async () => {
+    const fileStoreId = watch("TONNAGE_BOOKLETS_fileStoreId");
+    console.log("fileStoreId - ", fileStoreId);
+    const res = await deleteFile(fileStoreId, loaderRef)
+    if (res) {
+      clearErrors("TONNAGE_BOOKLETS");
+      setValue("TONNAGE_BOOKLETS", null);
+      setValue("TONNAGE_BOOKLETS_fileStoreId", null);
+    }
+  }
+
+  const handleRemoveStabilityFile = async () => {
+    const fileStoreId = watch("STABILITY_BOOKLETS_fileStoreId");
+    console.log("fileStoreId - ", fileStoreId);
+    const res = await deleteFile(fileStoreId, loaderRef)
+    if (res) {
+      clearErrors("STABILITY_BOOKLETS");
+      setValue("STABILITY_BOOKLETS", null);
+      setValue("STABILITY_BOOKLETS_fileStoreId", null);
+    }
+  }
+
+  return (
+    <>
+      <NewLoader ref={loaderRef} />
+      <style jsx>{`
+        @media (max-width: 768px) {
+          .mobile-file-input .file-upload {
+            padding: 0.5rem !important;
+          }
+
+          .mobile-file-input .file-label {
+            font-size: 0.7rem !important;
+            padding: 4px 8px !important;
+            min-width: 80px !important;
+          }
+
+          .mobile-file-input .file-name-container {
+            font-size: 0.65rem !important;
+            padding: 4px 8px !important;
+          }
+
+          .mobile-text-input .form-control {
+            font-size: 0.75rem !important;
+            padding: 0.25rem 0.5rem !important;
+          }
+
+          .mobile-text-input .form-label {
+            font-size: 0.7rem !important;
+            margin-bottom: 0.25rem !important;
+          }
+        }
+      `}</style>
+      <Collapsible title={t("vesselDetails.Documents")} openStat={true}>
+        <div style={{ padding: "1rem", backgroundColor: "#f8f9fa" }}>
+          <Row className="g-3">
+            <Col lg={6} md={12}>
+              <FileSection
+                title={t("vesselDetails.Work Order")}
+                files={workOrderFiles}
+                type="WORK_ORDER"
+                icon={<BsFileEarmarkPdf className="text-primary" size={12} />}
+              />
+            </Col>
+
+            <Col lg={6} md={12}>
+              <FileSection
+                title={t("vesselDetails.Drawings")}
+                files={drawingsFiles}
+                type="DRAWINGS"
+                icon={<BsFileEarmarkPdf className="text-success" size={12} />}
+              />
+            </Col>
+
+            <Col md={6}>
+              {viewMode ? (
+                <SingleFileSection
+                  title={t("vesselDetails.Tonnage Booklets")}
+                  fileName={watch("TONNAGE_BOOKLETS")?.name}
+                  fileSize={watch("TONNAGE_BOOKLETS")?.size}
+                  onDownload={() => handleDownload(watch("TONNAGE_BOOKLETS_fileStoreId"), watch("TONNAGE_BOOKLETS")?.name)}
+                  icon={<BsFileEarmarkPdf className="text-warning" size={12} />}
+                />
+              ) : (
+                <Card className="h-100 shadow-sm border-0">
+                  <Card.Header className="bg-light border-0 py-2">
+                    <h6
+                      className="mb-0 text-primary fw-bold d-flex align-items-center"
+                      style={{ fontSize: "0.75rem" }}
+                    >
+                      <BsFileEarmarkPdf
+                        className="text-warning me-2"
+                        size={12}
+                      />
+                      {t("vesselDetails.Tonnage Booklets")}
+                    </h6>
+                  </Card.Header>
+                  <Card.Body className="p-2">
+                    <div style={{ fontSize: "0.75rem", position: "relative" }}>
+                      <InputFile
+                        label={t("vesselDetails.Tonnage Booklets")}
+                        required={tonnageRequired}
+                        name="TONNAGE_BOOKLETS"
+                        register={register("TONNAGE_BOOKLETS")}
+                        errors={errors}
+                        style={{ width: "100%" }}
+                        onChange={(e) => {
+                          if (e.target.files && e?.target?.files[0]) {
+                            const file = e.target.files[0];
+                            if (file.size > 30 * 1024 * 1024) {
+                              setError("TONNAGE_BOOKLETS", {
+                                type: "manual",
+                                message: t("File size should not exceed 30MB"),
+                              });
+                              return;
+                            }
+                            const extension = file?.name?.substring(
+                              file?.name?.lastIndexOf(".")
+                            );
+                            const fileName = `Tonnage Booklets${extension}`;
+                            file.originalName = fileName;
+                            const renamedFile = renameFile(file, fileName);
+                            uploadFile(file, "TONNAGE_BOOKLETS", renamedFile, 'TONNAGE_BOOKLETS');
+                            // clearErrors("TONNAGE_BOOKLETS");
+                            // setValue("TONNAGE_BOOKLETS", renamedFile, {
+                            //   shouldValidate: true,
+                            // });
+                          }
+                        }}
+                        watch={watch}
+                        accept=".pdf,.jpg,.jpeg,.png"
+                        defaultValue={watch("TONNAGE_BOOKLETS")}
+                        clearErrors={clearErrors}
+                        className="mobile-file-input"
+                      />
+
+                      {watch("TONNAGE_BOOKLETS") && !viewMode && (
+                        <FaTimesCircle
+                          className="text-danger position-absolute"
+                          style={{
+                            top: "2.9rem",
+                            right: "1.5rem",
+                            cursor: "pointer",
+                            zIndex: 10,
+                          }}
+                          size={16}
+                          title="Remove file"
+                          onClick={handleRemoveTonnageFile}
+                        />
+                      )}
+                    </div>
+                    {editMode && watch("TONNAGE_BOOKLETS") && (
+                      <div className="text-end mt-2">
+                        <Button
+                          variant="outline-primary"
+                          size="sm"
+                          onClick={() => handleDownload(watch("TONNAGE_BOOKLETS_fileStoreId"), watch("TONNAGE_BOOKLETS")?.name)}
+                          className="rounded-pill"
+                          style={{ fontSize: "0.65rem", padding: "2px 6px" }}
+                        >
+                          <BsDownload className="me-1" size={8} />
+                          <span className="d-none d-sm-inline">Download</span>
+                          <span className="d-sm-none">↓</span>
+                        </Button>
+                      </div>
+                    )}
+                  </Card.Body>
+                </Card>
+              )}
+            </Col>
+
+            <Col md={6}>
+              {viewMode ? (
+                <SingleFileSection
+                  title={t("vesselDetails.Stability Booklets")}
+                  fileName={watch("STABILITY_BOOKLETS")?.name}
+                  fileSize={watch("STABILITY_BOOKLETS")?.size}
+                  onDownload={() => handleDownload(watch("STABILITY_BOOKLETS_fileStoreId"), watch("STABILITY_BOOKLETS")?.name)}
+                  icon={<BsFileEarmarkPdf className="text-info" size={12} />}
+                />
+              ) : (
+                <Card className="h-100 shadow-sm border-0">
+                  <Card.Header className="bg-light border-0 py-2">
+                    <h6
+                      className="mb-0 text-primary fw-bold d-flex align-items-center"
+                      style={{ fontSize: "0.75rem" }}
+                    >
+                      <BsFileEarmarkPdf className="text-info me-2" size={12} />
+                      {t("vesselDetails.Stability Booklets")}
+                    </h6>
+                  </Card.Header>
+                  <Card.Body className="p-2">
+                    <div style={{ fontSize: "0.75rem", position: "relative" }}>
+                      <InputFile
+                        label={t("vesselDetails.Stability Booklets")}
+                        required={stabilityRequired}
+                        name="STABILITY_BOOKLETS"
+                        register={register("STABILITY_BOOKLETS")}
+                        errors={errors}
+                        style={{ width: '100%' }}
+                        onChange={(e) => {
+                          if (e.target.files && e?.target?.files[0]) {
+                            const file = e.target.files[0];
+                            if (file.size > 30 * 1024 * 1024) {
+                              setError("STABILITY_BOOKLETS", {
+                                type: "manual",
+                                message: t("File size should not exceed 30MB"),
+                              });
+                              return;
+                            }
+                            const extension = file?.name?.substring(
+                              file?.name?.lastIndexOf(".")
+                            );
+                            const fileName = `Stability Booklets${extension}`;
+                            file.originalName = fileName;
+                            const renamedFile = renameFile(file, fileName);
+                            // clearErrors("STABILITY_BOOKLETS");
+                            // setValue("STABILITY_BOOKLETS", renamedFile, {
+                            //   shouldValidate: true,
+                            // });
+                            uploadFile(file, "STABILITY_BOOKLETS", renamedFile, 'STABILITY_BOOKLETS');
+                          }
+                        }}
+                        watch={watch}
+                        accept=".pdf,.jpg,.jpeg,.png"
+                        defaultValue={watch("STABILITY_BOOKLETS")}
+                        clearErrors={clearErrors}
+                        className="mobile-file-input"
+                      />
+
+                      {watch("STABILITY_BOOKLETS") && !viewMode && (
+                        <FaTimesCircle
+                          className="text-danger position-absolute"
+                          style={{
+                            top: "2.9rem",
+                            right: "1.5rem",
+                            cursor: "pointer",
+                            zIndex: 10,
+                          }}
+                          size={16}
+                          title="Remove file"
+                          onClick={handleRemoveStabilityFile}
+                        />
+                      )}
+                    </div>
+                    {editMode && watch("STABILITY_BOOKLETS") && (
+                      <div className="text-end mt-2">
+                        <Button
+                          variant="outline-primary"
+                          size="sm"
+                          onClick={() => handleDownload(watch("STABILITY_BOOKLETS_fileStoreId"), watch("STABILITY_BOOKLETS")?.name)}
+                          className="rounded-pill"
+                          style={{ fontSize: "0.65rem", padding: "2px 6px" }}
+                        >
+                          <BsDownload className="me-1" size={8} />
+                          <span className="d-none d-sm-inline">Download</span>
+                          <span className="d-sm-none">↓</span>
+                        </Button>
+                      </div>
+                    )}
+                  </Card.Body>
+                </Card>
+              )}
+            </Col>
+
+            <Col md={12}>
+              <Card className="shadow-sm border-0">
+                <Card.Body className="p-3">
+                  <div className="d-flex align-items-start">
+                    <input
+                      type="checkbox"
+                      id="termsAccepted"
+                      className="me-3 mt-1"
+                      {...register("termsAccepted", {
+                        required: t("You must accept the terms and conditions"),
+                      })}
+                      disabled={viewMode}
+                      checked={viewMode ? true : watch("termsAccepted")}
+                    />
+                    <div>
+                      <label
+                        htmlFor="termsAccepted"
+                        className="mb-0 fw-medium"
+                        style={{
+                          color: "#333",
+                          cursor: viewMode ? "default" : "pointer",
+                          lineHeight: "1.5",
+                          fontSize: "0.85rem",
+                        }}
+                      >
+                        {t(
+                          "vesselDetails.I have thoroughly read and understood all the terms and conditions as mentioned in the Schedule."
+                        )}
+                      </label>
+                      {errors.termsAccepted && !viewMode && (
+                        <div className="text-danger small mt-2">
+                          {t(errors.termsAccepted.message)}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </Card.Body>
+              </Card>
+            </Col>
+          </Row>
+        </div>
+      </Collapsible>
+    </>
+  );
+};
+
+export default Documents;
