@@ -1,60 +1,81 @@
-const transformEquipmentData = (equipmentData) => {
-  const transformed = {};
+const buildEquipmentPayload = (formData, existingSurveyData) => {
+  // Start with existing survey data
+  const payload = { ...existingSurveyData };
 
-  if (equipmentData && existingSurveyData?.SurveyEquipments) {
-    Object.keys(equipmentData).forEach((equipmentId) => {
-      const equipmentCategories = equipmentData[equipmentId];
+  // Update only the equipment that has condition/remarks changes
+  if (formData.equipment && existingSurveyData?.SurveyEquipments) {
+    Object.keys(formData.equipment).forEach((equipmentId) => {
+      const equipmentCategories = formData.equipment[equipmentId];
+      
       Object.keys(equipmentCategories).forEach((categoryCode) => {
         const categoryData = equipmentCategories[categoryCode];
+        
+        // Skip if no condition or remarks
+        if (!categoryData.condition && !categoryData.remarks) return;
 
-        // Only process if condition or remarks has value
-        if (!categoryData.condition && !categoryData.remarks) {
-          return;
-        }
+        const equipment = masterData?.equipmentCategories?.find(eq => eq.id == equipmentId);
+        if (!equipment) return;
 
-        const equipment = masterData?.equipmentCategories?.find(
-          (eq) => eq.id == equipmentId
+        const equipmentKeyMap = {
+          "Fire Fighting Items": "EquipmentFireFightingItems",
+          "Equipments": "Equipments", 
+          "Navigational Equipments": "EquipmentNavigationalEquipments",
+          "Life-Saving Equipment": "EquipmentLifeSavingEquipment",
+          "Machinery/Electrical": "EquipmentMachineryElectrical",
+          "Accommodation/Safety": "EquipmentAccommodationSafety",
+        };
+
+        const apiKey = equipmentKeyMap[equipment.equipmentName];
+        if (!apiKey || !payload.SurveyEquipments[apiKey]) return;
+
+        // Find and update the existing item
+        const existingItems = payload.SurveyEquipments[apiKey];
+        const itemIndex = existingItems.findIndex(item => 
+          item.categoryCode === categoryCode &&
+          item.number === parseInt(categoryData.number) &&
+          item.type === categoryData.type
         );
-        const equipmentName = equipment?.equipmentName;
 
-        if (equipmentName) {
-          const equipmentKeyMap = {
-            "Fire Fighting Items": "EquipmentFireFightingItems",
-            Equipments: "Equipments",
-            "Navigational Equipments": "EquipmentNavigationalEquipments",
-            "Life-Saving Equipment": "EquipmentLifeSavingEquipment",
-            "Machinery/Electrical": "EquipmentMachineryElectrical",
-            "Accommodation/Safety": "EquipmentAccommodationSafety",
+        if (itemIndex !== -1) {
+          // Update only condition and remarks
+          payload.SurveyEquipments[apiKey][itemIndex] = {
+            ...existingItems[itemIndex],
+            condition: categoryData.condition || existingItems[itemIndex].condition,
+            remarks: categoryData.remarks || existingItems[itemIndex].remarks,
           };
-
-          const apiKey = equipmentKeyMap[equipmentName];
-          if (apiKey) {
-            const existingItems = existingSurveyData.SurveyEquipments[apiKey] || [];
-            
-            // Find the exact existing item with condition/remarks
-            const existingItem = existingItems.find(item => 
-              item.categoryCode === categoryCode && 
-              item.number === parseInt(categoryData.number) &&
-              item.type === categoryData.type &&
-              (item.condition || item.remarks)
-            );
-
-            if (existingItem) {
-              if (!transformed[apiKey]) {
-                transformed[apiKey] = [];
-              }
-
-              transformed[apiKey].push({
-                ...existingItem,
-                condition: categoryData.condition || existingItem.condition,
-                remarks: categoryData.remarks || existingItem.remarks,
-              });
-            }
-          }
         }
       });
     });
   }
 
-  return transformed;
+  // Handle deck spaces and freeboard as before
+  if (formData.deckSpaces) {
+    payload.passengerDistributionMaxLoad = formData.deckSpaces.map((deck, index) => {
+      const existingDeck = intialSurveyData?.passengerDistributionMaxLoad?.[index] || {};
+      return {
+        id: existingDeck?.id || "",
+        iwtVesRegBasicDetailsTFk: existingSurveyData?.BasicVesselInformation?.iwtVesRegBasicDetailsTFk || "",
+        surveyId: existingSurveyData?.surveyId || "",
+        deckName: deck.deckType || "",
+        spaceType: deck.deckType || "",
+        maxPassengers: parseInt(deck.maxPassengers) || null,
+        sizeSqm: parseFloat(deck?.size) || null,
+        function: deck.function || "",
+        source: "Manual Entry",
+        condition: "Good",
+        remarks: deck.remarks || "",
+      };
+    });
+  }
+
+  if (formData.freeboard) {
+    payload.vesselFreeboardData = {
+      id: "",
+      minimumFreeboard: parseFloat(formData.freeboard.minFreeboard) || null,
+      numberOfPassengers: parseInt(formData.freeboard.numPassengers) || null,
+      cargoTonnes: parseFloat(formData.freeboard.cargo) || 0,
+    };
+  }
+
+  return payload;
 };
