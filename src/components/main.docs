@@ -1,74 +1,395 @@
-import React from "react";
-import { Navbar, Nav, NavDropdown, Form, Button } from "react-bootstrap";
-import styles from "./iwtHome2.module.css";
+import React, { useEffect, useRef, useState } from "react";
+import "./Login.css";
+import { NavDropdown } from "react-bootstrap";
+import { useForm } from "react-hook-form";
+import { Row, Col } from "react-bootstrap";
+import { useNavigate, Link } from "react-router-dom";
+import { ToastContainer, toast } from "react-toastify";
 import { useTranslation } from "react-i18next";
-import { useLanguageContext } from "../common/LanguageContext";
-import { useNavigate } from "react-router-dom";
-import { FaCheck } from "react-icons/fa";
-import { FiFlag } from "react-icons/fi";
-import { GiIndiaGate } from "react-icons/gi";
+import InputText from "../../common/InputText.tsx";
+import CustomCaptcha from "../../common/CustomCaptcha.tsx";
+import IWT_FULL_IMG from "../../../assets/images/iwt-whole.jpg";
+import { MdOutlineLanguage } from "react-icons/md";
+import { useLanguageContext } from "../../common/LanguageContext.js";
+import {
+  clearAppStorage,
+  CONSTANT_REGEX_SAMPLE,
+  USER_ROLES,
+} from "../../../utils/constants.ts";
+import { FaLock, FaUser, FaUserFriends } from "react-icons/fa";
+import { URLS_ENDPOINT } from "../../../utils/urlsConstants.ts";
+import { postData } from "../../../services/http.service.ts";
+import { setToLocalStorage } from "../../../utils/localStorageUtils.js";
+import NewLoader from "../../common/NewLoader";
+import { handleErrorMessage } from "../../../utils/errorMessageHandler.js";
+import InputSelect from "../../common/InputSelect.tsx";
 
-const HeaderHome2 = () => {
-  const { t } = useTranslation();
-  const { changeLanguage, language } = useLanguageContext();
-  let navigate = useNavigate();
+const Login = () => {
+  const isCompMount = useRef(true);
+  const { i18n, t } = useTranslation();
+  const { changeLanguage } = useLanguageContext();
+  const navigate = useNavigate();
+  const [isCaptchaValid, setIsCaptchaValid] = useState(false);
+  const [submitCaptchaAttempted, setSubmitCaptchaAttempted] = useState(false);
+  const [refreshCaptchakey, setRefreshCaptchakey] = useState(0);
+  const [formKey, setFormKey] = useState(0);
+  const loaderRef = useRef();
+
+  const {
+    register,
+    handleSubmit,
+    reset,
+    watch,
+    formState: { errors, isSubmitting },
+    setValue,
+    trigger,
+    clearErrors,
+  } = useForm({
+    defaultValues: {
+      userType: "",
+      username: "",
+      password: "",
+      captchaResponse: "",
+    },
+    mode: "onSubmit",
+  });
+
+  useEffect(() => {
+    if (isCompMount.current) {
+      isCompMount.current = false;
+      return;
+    }
+    const fieldsWithErrors = Object.keys(errors);
+    trigger(fieldsWithErrors);
+  }, [i18n.language]);
+
+  const selectedUserType = watch("userType");
+
+  const refreshCaptcha = () => {
+    setRefreshCaptchakey((prev) => prev + 1);
+  };
+
+  const handleUserTypeChange = (newUserTypeValue) => {
+    refreshCaptcha();
+    setSubmitCaptchaAttempted(false);
+    setValue("userType", newUserTypeValue);
+    clearErrors("userType");
+    setValue("username", "");
+    setValue("password", "");
+    setValue("captchaResponse", "");
+
+    setFormKey((prevKey) => prevKey + 1);
+  };
+
+  const onSubmit = async (data) => {
+    setSubmitCaptchaAttempted(true);
+
+    if (!isCaptchaValid) {
+      toast.error("Please complete the CAPTCHA.", {
+        position: "top-right",
+      });
+      return;
+    }
+
+    const payload = {
+      username: data.username?.trim(),
+      password: data.password?.trim(),
+      userType: data?.userType,
+      // userType: "Owner",
+    };
+    // if (payload.username === "admin" && payload?.password === "12345") {
+    //   toast.success("Login Successful!", { position: "top-right" });
+    //   setTimeout(() => {
+    //     navigate("/dashboard");
+    //   }, 1500);
+    // } else {
+    //   refreshCaptcha();
+    //   setSubmitCaptchaAttempted(false);
+    //   toast.error("Please provide valid details.", { position: "top-right" });
+    // }
+
+    try {
+      const LOGIN_URL =
+        process.env.REACT_APP_AUTH_URL + URLS_ENDPOINT.USER_SERVICE.LOGIN;
+      loaderRef.current?.show();
+      const response = await postData(LOGIN_URL, payload);
+      if (response?.status === 200 && response?.data?.data) {
+        console.log(response.data);
+        const {
+          tokenCreateResponse: token,
+          userBasicDetails: userDetails,
+          employeeDetails,
+          builderDetails,
+          ownerDetails,
+        } = response.data.data;
+
+        if (!userDetails?.roles?.realmRoleLevels[0] || !token?.access_token) {
+          loaderRef.current?.hide();
+          refreshCaptcha();
+          setSubmitCaptchaAttempted(false);
+          clearAppStorage();
+          toast.error("Seomthing went wrong. Please contact Admin..", {
+            position: "top-right",
+          });
+          return;
+        }
+
+        setToLocalStorage("access_token", token?.access_token);
+        setToLocalStorage("refresh_token", token?.refresh_token);
+        setToLocalStorage("expires_in", token?.expires_in);
+        setToLocalStorage("userRole", userDetails?.roles?.realmRoleLevels[0]);
+        setToLocalStorage(
+          "userDetails",
+          userDetails ? JSON.stringify(userDetails) : ""
+        );
+        setToLocalStorage("tokenDetails", token ? JSON.stringify(token) : "");
+        setToLocalStorage(
+          "employeeDetails",
+          employeeDetails ? JSON.stringify(employeeDetails) : ""
+        );
+        setToLocalStorage(
+          "builderDetails",
+          builderDetails ? JSON.stringify(builderDetails) : ""
+        );
+        setToLocalStorage(
+          "ownerDetails",
+          ownerDetails ? JSON.stringify(ownerDetails) : ""
+        );
+        toast.success("Login Successful!", { position: "top-right" });
+
+        setTimeout(() => {
+          loaderRef.current?.hide();
+          setSubmitCaptchaAttempted(false);
+          navigate("/dashboard");
+        }, 1500);
+      } else {
+        loaderRef.current?.hide();
+        refreshCaptcha();
+        setSubmitCaptchaAttempted(false);
+        toast.error("Please provide valid details.", { position: "top-right" });
+      }
+    } catch (err) {
+      loaderRef.current?.hide();
+      handleErrorMessage(err?.response?.data);
+      refreshCaptcha();
+    }
+  };
+
+  useEffect(() => {
+    clearAppStorage();
+  }, []);
 
   return (
-    <Navbar expand="lg" style={{ backgroundColor: "#0F55B2" }}>
-      <Navbar.Toggle aria-controls="navbarSupportedContent" style={{ margin: "0.7rem" }} />
-      <Navbar.Collapse id="navbarSupportedContent" className={styles.navbarCollapse}>
-        <Nav className={`me-auto d-flex align-items-center ${styles.navItems}`}>
-          <NavDropdown 
+    <section className="login-section">
+      <NewLoader ref={loaderRef} />
+      <div className="login">
+        <div className="language-select">
+          <NavDropdown
             title={
-              <span className="d-flex align-items-center">
-                {t("home2.language")}
-              </span>
-            } 
-            className={`${styles.navLinkItems}`} 
-            id="navbarDropdown"
+              <MdOutlineLanguage
+                className="language-icon"
+                style={{ fontSize: "1.5rem" }}
+              />
+            }
+            id="language-nav-dropdown"
+            className="mx-2 nav-dropdown"
+            style={{
+              display: "inline-block",
+              marginTop: "10px",
+              zIndex: 1050,
+              position: "relative", 
+            }}
           >
-            <NavDropdown.Item 
-              className={`customDropdownItem ${styles.customDropdownItem} d-flex align-items-center`} 
+            <NavDropdown.Item
               onClick={() => changeLanguage("en")}
-              active={language === "en"}
+              className="small-text nav-dropdown-item"
+              style={{
+                color: "#000000",
+                padding: "10px 15px",
+                textAlign: "center",
+                justifyContent: "center",
+                display: "block",
+              }}
             >
-              <FiFlag size={18} className="me-2" style={{ color: "#2563eb" }} />
-              <span>English</span>
-              {language === "en" && (
-                <FaCheck className="ms-auto text-success" />
-              )}
+              English
             </NavDropdown.Item>
-            <NavDropdown.Item 
-              className={`customDropdownItem ${styles.customDropdownItem} d-flex align-items-center`}
+            <NavDropdown.Item
               onClick={() => changeLanguage("bn")}
-              active={language === "bn"}
+              className="small-text nav-dropdown-item"
+              style={{
+                color: "#000000",
+                padding: "10px 15px",
+                display: "block",
+                textAlign: "center", // Center-align text
+                justifyContent: "center",
+              }}
             >
-              <GiIndiaGate size={18} className="me-2" style={{ color: "#f59e42" }} />
-              <span>বাংলা</span>
-              {language === "bn" && (
-                <FaCheck className="ms-auto text-success" />
-              )}
+              বাংলা
             </NavDropdown.Item>
           </NavDropdown>
+        </div>
+        <div className="card login-card">
+          <Row className="g-0">
+            <Col
+              md={12}
+              className="login-image-wrapper"
+              style={{ textAlign: "left" }}
+            >
+              <img src={IWT_FULL_IMG} alt="IWT" className="login-img" />
+            </Col>
+          </Row>
+          <Row className="g-0">
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "center",
+                alignItems: "center",
+              }}
+            >
+              <h2 className="text-center login-title">{t("login.signIn")}</h2>
+            </div>
+            <Col xs={12} className="p-4">
+              <form onSubmit={handleSubmit(onSubmit)} className="login-form">
+                {/* <InputRadio
+                  name="userType"
+                  options={[
+                    { label: t("login.Vessel Owner"), value: "vessel_owner" },
+                    { label: t("login.Builder"), value: "builder" },
+                    { label: t("login.Employee"), value: "employee" },
+                  ]}
+                  rules={{ required: "Please select a user type" }}
+                  register={register}
+                  errors={errors}
+                  onChange={handleUserTypeChange}
+                  className="center-screen"
+                /> */}
 
-          <span className={`text-white mx-2 ${styles.navbarSeparator}`}>|</span>
-          <Nav.Link className={`${styles.navLinkItems}`}>{t("home2.skipToMainCnt")}</Nav.Link>
-        </Nav>
+                <InputSelect
+                  name="userType"
+                  icon={FaUserFriends}
+                  label={t("login.userType")}
+                  options={[
+                    { label: t("login.selectUserType"), value: "" },
+                    { label: t("login.vesselOwner"), value: "VESSEL_OWNER" },
+                    { label: t("login.builder"), value: "VESSEL_BUILDER" },
+                    { label: t("login.employee"), value: "EMPLOYEE" },
+                    { label: t("login.crewCitizen"), value: "CREW_CITIZEN" },
+                  ]}
+                  required={true}
+                  register={register("userType", {
+                    required: t("login.userTypeRequired"),
+                  })}
+                  errors={errors}
+                  value={watch("userType") || ""}
+                  onChange={handleUserTypeChange}
+                />
 
-        <Form className={`d-flex justify-content-around ${styles.formButtons}`}>
-          <Button type="button" className={`${styles.topNavBtn} mx-2`} style={{ backgroundColor: "transparent" }}>
-            {t("home2.aMinus")}
-          </Button>
-          <Button type="button" className={`${styles.topNavBtn} mx-2`} style={{ backgroundColor: "transparent" }}>
-            {t("home2.a")}
-          </Button>
-          <Button type="button" className={`${styles.topNavBtn} mx-2`} style={{ backgroundColor: "transparent" }}>
-            {t("home2.aPlus")}
-          </Button>
-        </Form>
-      </Navbar.Collapse>
-    </Navbar>
+                <InputText
+                  key={`username-${formKey}`}
+                  type="text"
+                  name="username"
+                  required={true}
+                  label={t("login.username")}
+                  placeholder={t("login.userNamePlace")}
+                  register={register("username", {
+                    required: t("login.nameRequired"),
+                  })}
+                  errors={errors}
+                  icon={FaUser}
+                />
+
+                <InputText
+                  key={`password-${formKey}`}
+                  type="password"
+                  name="password"
+                  required={true}
+                  label={t("login.password")}
+                  placeholder={t("login.passwordPlace")}
+                  register={register("password", {
+                    required: t("login.passwordRequired"),
+                    minLength: {
+                      value: 5,
+                      message: t("login.passwordLengthValidation"),
+                    },
+                  })}
+                  errors={errors}
+                  icon={FaLock}
+                />
+
+                <Row>
+                  <Col>
+                    <CustomCaptcha
+                      onCaptchaValid={setIsCaptchaValid}
+                      isSubmitAttempted={submitCaptchaAttempted}
+                      refreshTrigger={refreshCaptchakey}
+                    />
+                  </Col>
+                </Row>
+
+                <Row className="btn-row">
+                  <Col>
+                    <button
+                      className="generic-btn-submit"
+                      type="submit"
+                      // disabled={isSubmitting}
+                      onClick={() => {
+                        setSubmitCaptchaAttempted(true);
+                      }}
+                    >
+                      {t("login.submit")}
+                    </button>
+                  </Col>
+                  <Col>
+                    <button
+                      className="generic-btn-cancel"
+                      type="button"
+                      onClick={() => {
+                        reset({
+                          userType: selectedUserType,
+                          username: "",
+                          password: "",
+                          captchaResponse: "",
+                        });
+                        refreshCaptcha();
+                        setSubmitCaptchaAttempted(false);
+                        setIsCaptchaValid(false);
+                        setFormKey((prevKey) => prevKey + 1);
+                      }}
+                    >
+                      {t("login.reset")}
+                    </button>
+                  </Col>
+                </Row>
+
+                <Row className="mt-3">
+                  <Col className="text-center f-14">
+                    <Link to="/iwt/forgot-password">
+                      {t("login.forgotPassword")}
+                    </Link>
+                  </Col>
+                </Row>
+
+                {(selectedUserType === "VESSEL_OWNER" ||
+                  selectedUserType === "VESSEL_BUILDER") && (
+                  <Row className="mt-1">
+                    <Col className="text-center f-14">
+                      <div>
+                        {t("login.newUser")}{" "}
+                        <Link to={`/iwt/register?userType=${selectedUserType}`}>
+                          {t("login.signUpNow")}
+                        </Link>
+                      </div>
+                    </Col>
+                  </Row>
+                )}
+              </form>
+            </Col>
+          </Row>
+        </div>
+      </div>
+      <ToastContainer />
+    </section>
   );
-}
+};
 
-export default HeaderHome2;
+export default Login;
