@@ -1,80 +1,61 @@
-const renderFileField = (docType, label) => {
-  if (isViewMode) {
-    return (
-      <div>
-        <label className="form-label">{t(label)}</label>
-        {fileStates[docType] ? (
-          <div className="d-flex align-items-center p-2 border rounded" style={{ backgroundColor: '#f8f9fa' }}>
-            <span className="me-2">{fileStates[docType].name}</span>
-            <button
-              type="button"
-              className="btn btn-sm btn-primary rounded-circle d-flex align-items-center justify-content-center"
-              onClick={() => handleFileDownload(
-                fileStates[docType].fileStoreId,
-                fileStates[docType].name,
-                fileStates[docType].originalName
-              )}
-              title="Download file"
-              style={{ width: '24px', height: '24px', padding: '0' }}
-            >
-              <FaDownload size={10} />
-            </button>
-          </div>
-        ) : (
-          <div className="p-2 border rounded text-muted" style={{ backgroundColor: '#f8f9fa' }}>
-            No file uploaded
-          </div>
-        )}
-      </div>
-    );
+const handleFileChange = async (e, documentType) => {
+  if (isViewMode) return;
+  const file = e?.target?.files[0];
+  if (!file) return;
+
+  const maxSize = 10 * 1024 * 1024;
+  if (file.size > maxSize) {
+    toast.error("File size must be less than or equal to 10 MB.");
+    e.target.value = null;
+    return;
   }
 
-  return (
-    <>
-      <InputFile
-        name={docType}
-        label={t(label)}
-        id={docType}
-        watch={watch}
-        defaultValue={watch(docType)}
-        register={register(docType, {
-          required: !fileStates[docType] && t(`${label} is required`),
-        })}
-        errors={errors}
-        required={!fileStates[docType]}
-        clearErrors={clearErrors}
-        onChange={(e) => handleFileChange(e, docType)}
-      />
-      {fileStates[docType] && (
-        <div className="d-flex align-items-center mt-2">
-          <small className="text-success me-2">✓ {fileStates[docType].name}</small>
-          <button
-            type="button"
-            className="btn btn-sm btn-primary rounded-circle d-flex align-items-center justify-content-center me-2"
-            onClick={() => handleFileDownload(
-              fileStates[docType].fileStoreId,
-              fileStates[docType].name,
-              fileStates[docType].originalName
-            )}
-            title="Download file"
-            style={{ width: '24px', height: '24px', padding: '0' }}
-          >
-            <FaDownload size={10} />
-          </button>
-          <button
-            type="button"
-            className="btn btn-sm btn-danger rounded-circle d-flex align-items-center justify-content-center"
-            onClick={() => handleDeleteFile(
-              fileStates[docType].fileStoreId,
-              docType
-            )}
-            title="Delete file"
-            style={{ width: '24px', height: '24px', padding: '0' }}
-          >
-            <FaTrash size={10} />
-          </button>
-        </div>
-      )}
-    </>
-  );
+  loaderRef.current?.show();
+
+  try {
+    const formData = new FormData();
+    formData.append("file", file);
+
+    const uploadUrl = BASE_IP + URLS_ENDPOINT.FILE_STORE_SERVICE.UPLOAD_FILE;
+    const response = await postFORMdata(uploadUrl, formData);
+
+    const fileStoreId = response?.data?.files[0]?.fileStoreId;
+
+    if (fileStoreId) {
+      const getDisplayFileName = (docType, originalFileName) => {
+        const fileExtension = originalFileName.split('.').pop();
+        const labelNames = {
+          "thirdPartyInsurance": "Third Party Insurance",
+          "builderCertificate": "Builder's Certificate", 
+          "instrumentOfSale": "Instrument of Sale",
+          "mortgageDetails": "Mortgage Details",
+          "pniInsurance": "Protection & Indemnity Insurance",
+          "declarationOfOwnership": "Declaration of Ownership",
+          "challan": "Challan"
+        };
+        return `${labelNames[docType]}.${fileExtension}`;
+      };
+
+      const displayName = getDisplayFileName(documentType, file.name);
+
+      setFileStates(prev => ({
+        ...prev,
+        [documentType]: {
+          name: displayName,
+          fileStoreId,
+          originalName: file.name
+        }
+      }));
+      setValue(documentType, file);
+      setValue(`${documentType}FileStoreId`, fileStoreId);
+      toast.success("File uploaded successfully!");
+    }
+  } catch (err) {
+    console.error("File upload failed:", err);
+    toast.error("File upload failed. Please try again.");
+    setFileStates(prev => ({ ...prev, [documentType]: null }));
+    e.target.value = null;
+  } finally {
+    loaderRef.current?.hide();
+  }
 };
