@@ -1,86 +1,60 @@
-import React, { useState, useEffect, useRef } from "react";
-import { useForm, FormProvider } from "react-hook-form";
-import { Container, Row, Col, Button, Card, Image, Dropdown } from "react-bootstrap";
-import {
-  FaBuilding,
-  FaFileUpload,
-  FaCheck,
-  FaArrowRight,
-  FaArrowLeft,
-  FaGlobe,
-} from "react-icons/fa";
+import React, { useEffect, useRef, useState } from "react";
+import "./Login.css";
+import { Dropdown } from "react-bootstrap";
+import { useForm } from "react-hook-form";
+import { Row, Col } from "react-bootstrap";
+import { useNavigate, Link } from "react-router-dom";
+import { ToastContainer, toast } from "react-toastify";
+import { useTranslation } from "react-i18next";
+import InputText from "../../common/InputText.tsx";
+import CustomCaptcha from "../../common/CustomCaptcha.tsx";
+import IWT_FULL_IMG from "../../../assets/images/iwt-whole.jpg";
+import { FaGlobe, FaCheck } from "react-icons/fa";
 import { FiFlag } from "react-icons/fi";
 import { GiIndiaGate } from "react-icons/gi";
-import "./UserRegistration.css";
-import i18n from "i18next";
-import IWT_FULL_IMG from "../../../assets/images/iwt-whole.jpg";
-import { toast } from "react-toastify";
-import NewLoader from "../../common/NewLoader.js";
-import { getData, postFORMdata } from "../../../services/http.service.ts";
-import { URLS_ENDPOINT } from "../../../utils/urlsConstants.ts";
-import { handleErrorMessage } from "../../../utils/errorMessageHandler.js";
-import {
-  createOwnerOrBuilderPayload,
-  mapToVesselUserDetails,
-} from "../model/mapToVesselModel.ts";
-import ApprovalModal from "../../common/ApprovalModal.js";
-import ActionDropdown from "../../common/ActionDropdown.js";
-import DynamicFormFields from "../../common/DynamicFormFields";
-import createFormFieldsConfig from "../../common/FormFieldsConfig";
-import { useTranslation } from "react-i18next";
 import { useLanguageContext } from "../../common/LanguageContext.js";
+import {
+  clearAppStorage,
+  CONSTANT_REGEX_SAMPLE,
+  USER_ROLES,
+} from "../../../utils/constants.ts";
+import { FaLock, FaUser, FaUserFriends } from "react-icons/fa";
+import { URLS_ENDPOINT } from "../../../utils/urlsConstants.ts";
+import { postData } from "../../../services/http.service.ts";
+import { setToLocalStorage } from "../../../utils/localStorageUtils.js";
+import NewLoader from "../../common/NewLoader";
+import { handleErrorMessage } from "../../../utils/errorMessageHandler.js";
+import InputSelect from "../../common/InputSelect.tsx";
 
-const VesselBuilderRegistrationPage = () => {
-  const { i18n, t } = useTranslation();
+const Login = () => {
   const isCompMount = useRef(true);
+  const { i18n, t } = useTranslation();
   const { changeLanguage, language } = useLanguageContext();
-  const [currentStep, setCurrentStep] = useState(1);
-  const [formData, setFormData] = useState({});
-  const [isSubmitted, setIsSubmitted] = useState(false);
-  const [successMessage, setSuccessMessage] = useState("");
-  const [validationMessage, setValidationMessage] = useState("");
+  const navigate = useNavigate();
+  const [isCaptchaValid, setIsCaptchaValid] = useState(false);
+  const [submitCaptchaAttempted, setSubmitCaptchaAttempted] = useState(false);
+  const [refreshCaptchakey, setRefreshCaptchakey] = useState(0);
+  const [formKey, setFormKey] = useState(0);
   const loaderRef = useRef();
-  const PUBLIC_URL = process.env.REACT_APP_PUBLIC_URL;
-  const actionsFromAPI = ["Accept", "Reject", "Send Back"];
-  const [showApprovalModal, setShowApprovalModal] = useState(false);
-  const [selectedAction, setSelectedAction] = useState("");
-
-  const handleActionClick = (action) => {
-    setSelectedAction(action);
-    setShowApprovalModal(true);
-  };
-
-  const handleActionSubmit = (formData) => {
-    const payload = {
-      action: selectedAction,
-      ...formData,
-    };
-    console.log("Submitted Data:", payload);
-    setShowApprovalModal(false);
-    setSelectedAction("");
-  };
-
-  const handleCloseModal = () => {
-    setShowApprovalModal(false);
-    setSelectedAction("");
-  };
-
-  const methods = useForm({
-    mode: "onBlur",
-    defaultValues: { country: "India" },
-  });
 
   const {
+    register,
     handleSubmit,
-    formState: { errors },
-    trigger,
-    setValue,
-    getValues,
+    reset,
     watch,
-    setError,
+    formState: { errors, isSubmitting },
+    setValue,
+    trigger,
     clearErrors,
-  } = methods;
-  const totalSteps = 2;
+  } = useForm({
+    defaultValues: {
+      userType: "",
+      username: "",
+      password: "",
+      captchaResponse: "",
+    },
+    mode: "onSubmit",
+  });
 
   useEffect(() => {
     if (isCompMount.current) {
@@ -91,285 +65,141 @@ const VesselBuilderRegistrationPage = () => {
     trigger(fieldsWithErrors);
   }, [i18n.language]);
 
-  useEffect(() => {
-    setTimeout(() => {
-      Object.keys(formData).forEach((key) => {
-        if (formData[key]) {
-          setValue(key, formData[key], { shouldValidate: false });
-        }
+  const selectedUserType = watch("userType");
+
+  const refreshCaptcha = () => {
+    setRefreshCaptchakey((prev) => prev + 1);
+  };
+
+  const handleUserTypeChange = (newUserTypeValue) => {
+    refreshCaptcha();
+    setSubmitCaptchaAttempted(false);
+    setValue("userType", newUserTypeValue);
+    clearErrors("userType");
+    setValue("username", "");
+    setValue("password", "");
+    setValue("captchaResponse", "");
+
+    setFormKey((prevKey) => prevKey + 1);
+  };
+
+  const onSubmit = async (data) => {
+    setSubmitCaptchaAttempted(true);
+
+    if (!isCaptchaValid) {
+      toast.error("Please complete the CAPTCHA.", {
+        position: "top-right",
       });
-    }, 0);
-  }, [currentStep, setValue, formData]);
+      return;
+    }
 
-  const getDetailsByPIN = async (pinCode) => {
+    const payload = {
+      username: data.username?.trim(),
+      password: data.password?.trim(),
+      userType: data?.userType,
+         // userType: "Owner",
+    };
+        // if (payload.username === "admin" && payload?.password === "12345") {
+    //   toast.success("Login Successful!", { position: "top-right" });
+    //   setTimeout(() => {
+    //     navigate("/dashboard");
+    //   }, 1500);
+    // } else {
+    //   refreshCaptcha();
+    //   setSubmitCaptchaAttempted(false);
+    //   toast.error("Please provide valid details.", { position: "top-right" });
+    // }
+
     try {
-      const URL =
-        PUBLIC_URL +
-        URLS_ENDPOINT.APP_SERVICES.GET_DETAILS_BY_PINCODE +
-        pinCode;
+      const LOGIN_URL =
+        process.env.REACT_APP_AUTH_URL + URLS_ENDPOINT.USER_SERVICE.LOGIN;
       loaderRef.current?.show();
-      const response = await getData(URL);
+      const response = await postData(LOGIN_URL, payload);
+      if (response?.status === 200 && response?.data?.data) {
+        console.log(response.data);
+        const {
+          tokenCreateResponse: token,
+          userBasicDetails: userDetails,
+          employeeDetails,
+          builderDetails,
+          ownerDetails,
+        } = response.data.data;
 
-      if (response?.status === 200 && response?.data?.length > 0) {
-        const [firstItem] = response.data;
-        setValue("district", firstItem?.district || "");
-        setValue("state", firstItem?.stateName || "");
-        loaderRef?.current?.hide();
-      } else {
-        loaderRef?.current?.hide();
-        toast.info("No Data Found! Please enter manually..", {
-          position: "top-right",
-        });
-      }
-    } catch (err) {
-      console.log(err);
-      loaderRef?.current?.hide();
-      handleErrorMessage(err?.response?.data);
-    }
-  };
-
-  const formFields = createFormFieldsConfig(getDetailsByPIN);
-
-  const getCurrentStepFields = () => {
-    switch (currentStep) {
-      case 1:
-        return formFields.step1;
-      case 2:
-        return formFields.step2;
-      default:
-        return [];
-    }
-  };
-
-  const validateStep = async () => {
-    const currentFields = getCurrentStepFields();
-    const currentValues = getValues();
-
-    const isValid = await trigger(currentFields.map((field) => field.name));
-
-    const fileFields = currentFields.filter(
-      (field) => field.type === "file" && field.required
-    );
-    let fileErrorsExist = false;
-
-    for (const field of fileFields) {
-      const file = currentValues[field.name];
-
-      if (!file) {
-        setError(field.name, {
-          type: "required",
-          message: `${field.label} is required`,
-        });
-        fileErrorsExist = true;
-        continue;
-      }
-
-      if (file instanceof File) {
-        const validTypes = [
-          "application/pdf",
-          "image/jpeg",
-          "image/png",
-          "image/jpg",
-        ];
-        if (!validTypes.includes(file.type)) {
-          setError(field.name, {
-            type: "fileType",
-            message: "Only PDF, JPG or PNG files are allowed",
+        if (!userDetails?.roles?.realmRoleLevels[0] || !token?.access_token) {
+          loaderRef.current?.hide();
+          refreshCaptcha();
+          setSubmitCaptchaAttempted(false);
+          clearAppStorage();
+          toast.error("Seomthing went wrong. Please contact Admin..", {
+            position: "top-right",
           });
-          fileErrorsExist = true;
-          continue;
+          return;
         }
 
-        if (file.size > 5 * 1024 * 1024) {
-          setError(field.name, {
-            type: "fileSize",
-            message: "File size should not exceed 5MB",
-          });
-          fileErrorsExist = true;
-          continue;
-        }
-      }
-
-      if (errors[field.name]) {
-        clearErrors(field.name);
-      }
-    }
-
-    return isValid && !fileErrorsExist;
-  };
-
-  const handleNext = async () => {
-    const isStepValid = await validateStep();
-
-    if (isStepValid) {
-      setValidationMessage("");
-      const currentValues = getValues();
-      const fileFields = getCurrentStepFields().filter(
-        (field) => field.type === "file"
-      );
-
-      fileFields.forEach((field) => {
-        if (currentValues[field.name]) {
-          setFormData((prev) => ({
-            ...prev,
-            [field.name]: currentValues[field.name],
-          }));
-        }
-      });
-
-      setFormData((prev) => ({ ...prev, ...currentValues }));
-
-      if (currentStep < totalSteps) {
-        setCurrentStep(currentStep + 1);
-        window.scrollTo(0, 0);
-      } else {
-        handleSubmit(onSubmit)();
-      }
-    } else {
-      const firstError = Object.keys(errors)[0];
-      if (firstError) {
-        const element = document.getElementsByName(firstError)[0];
-        if (element) {
-          element.scrollIntoView({ behavior: "smooth", block: "center" });
-        }
-      }
-    }
-  };
-
-  const handlePrevious = () => {
-    const currentValues = getValues();
-    const fileFields = getCurrentStepFields().filter(
-      (field) => field.type === "file"
-    );
-    fileFields.forEach((field) => {
-      if (currentValues[field.name]) {
-        setFormData((prev) => ({
-          ...prev,
-          [field.name]: currentValues[field.name],
-        }));
-      }
-    });
-
-    setFormData((prev) => ({ ...prev, ...currentValues }));
-    setCurrentStep(Math.max(1, currentStep - 1));
-    window.scrollTo(0, 0);
-    setValidationMessage("");
-  };
-
-  const onSubmit = (data) => {
-    const finalData = { ...formData, ...data };
-    const payload = createOwnerOrBuilderPayload("VESSEL_BUILDER", {
-      ...finalData,
-    });
-    const filesToUpload = [
-      finalData?.companyDetails,
-      finalData?.gstCertificate,
-      finalData?.panCardUpload,
-      finalData?.factoryLicense,
-      finalData?.addressProof,
-      finalData?.fireCertificate,
-      finalData?.esipfRegistration,
-      finalData?.iso9001,
-      finalData?.iso14001,
-      finalData?.iso45001,
-      finalData?.pollutionCertificate,
-      finalData?.experienceCertificate,
-    ].filter((file) => file);
-
-    const fd = new FormData();
-    fd.append(
-      "request",
-      new Blob([JSON.stringify(payload)], { type: "application/json" })
-    );
-    filesToUpload?.forEach((file) => {
-      if (file) {
-        fd.append(`files`, file);
-      }
-    });
-    submitUserDetails(fd);
-  };
-
-  const submitUserDetails = async (payload) => {
-    try {
-      const URL =
-        process.env.REACT_APP_AUTH_URL +
-        URLS_ENDPOINT.USER_SERVICE.CREATE_UPDATE_USER;
-      loaderRef.current?.show();
-      const response = await postFORMdata(URL, payload);
-      const apiRes = { ...response?.data };
-      if (
-        response?.status === 200 &&
-        apiRes?.responseStatus?.status === "200"
-      ) {
-        loaderRef?.current?.hide();
-        setIsSubmitted(true);
-        setSuccessMessage(apiRes?.responseStatus?.message);
-        window.scrollTo(0, 0);
-      } else {
-        loaderRef?.current?.hide();
-        toast.info(
-          apiRes?.responseStatus?.message || "Something went wrong..",
-          { position: "top-right" }
+        setToLocalStorage("access_token", token?.access_token);
+        setToLocalStorage("refresh_token", token?.refresh_token);
+        setToLocalStorage("expires_in", token?.expires_in);
+        setToLocalStorage("userRole", userDetails?.roles?.realmRoleLevels[0]);
+        setToLocalStorage(
+          "userDetails",
+          userDetails ? JSON.stringify(userDetails) : ""
         );
+        setToLocalStorage("tokenDetails", token ? JSON.stringify(token) : "");
+        setToLocalStorage(
+          "employeeDetails",
+          employeeDetails ? JSON.stringify(employeeDetails) : ""
+        );
+        setToLocalStorage(
+          "builderDetails",
+          builderDetails ? JSON.stringify(builderDetails) : ""
+        );
+        setToLocalStorage(
+          "ownerDetails",
+          ownerDetails ? JSON.stringify(ownerDetails) : ""
+        );
+        toast.success("Login Successful!", { position: "top-right" });
+
+        setTimeout(() => {
+          loaderRef.current?.hide();
+          setSubmitCaptchaAttempted(false);
+          navigate("/dashboard");
+        }, 1500);
+      } else {
+        loaderRef.current?.hide();
+        refreshCaptcha();
+        setSubmitCaptchaAttempted(false);
+        toast.error("Please provide valid details.", { position: "top-right" });
       }
     } catch (err) {
-      console.log(err, "builder-error");
-      loaderRef?.current?.hide();
+      loaderRef.current?.hide();
       handleErrorMessage(err?.response?.data);
+      refreshCaptcha();
     }
   };
 
-  const stepTitles = [
-    {
-      title: t("builderRegistration.Vessel Builder Details"),
-      icon: FaBuilding,
-    },
-    { title: t("builderRegistration.Documents Upload"), icon: FaFileUpload },
-  ];
+  useEffect(() => {
+    clearAppStorage();
+  }, []);
 
   return (
-    <>
+    <section className="login-section">
       <NewLoader ref={loaderRef} />
-      <Container fluid className="registration-container py-5">
-        <div
-          style={{
-            position: "fixed",
-            top: "20px",
-            right: "20px",
-            zIndex: 9999,
-          }}
-        >
+      <div className="login">
+        <div className="language-select">
           <Dropdown>
             <Dropdown.Toggle
               variant="link"
               className="p-0 d-flex align-items-center gap-1"
               style={{
-                color: "#fff",
+                color: "#000",
                 textDecoration: "none",
                 fontSize: "1.5rem",
-                backgroundColor: "rgba(15, 85, 178, 0.9)",
-                padding: "12px",
-                borderRadius: "8px",
-                border: "2px solid rgba(255,255,255,0.3)",
-                boxShadow: "0 4px 12px rgba(0,0,0,0.3)",
+                marginTop: "10px",
               }}
             >
               <FaGlobe />
             </Dropdown.Toggle>
-            <Dropdown.Menu 
-              className="language-dropdown-menu"
-              style={{ 
-                zIndex: 10000,
-                position: "absolute",
-                top: "100%",
-                right: "0",
-                marginTop: "8px",
-                minWidth: "150px",
-                boxShadow: "0 8px 25px rgba(0,0,0,0.15)",
-                border: "1px solid rgba(0,0,0,0.1)",
-                borderRadius: "8px",
-              }}
-            >
+            <Dropdown.Menu className="language-dropdown-menu">
               <Dropdown.Item
                 onClick={() => changeLanguage("en")}
                 active={language === "en"}
@@ -395,214 +225,167 @@ const VesselBuilderRegistrationPage = () => {
             </Dropdown.Menu>
           </Dropdown>
         </div>
-        <Row className="justify-content-center">
-          <Col md={10} xl={9}>
-            <Card className="registration-card">
-              <Card.Header className="registration-header p-0">
-                <div className="registration-header-content">
-                  <div className="header-logo-container">
-                    <Image
-                      src={IWT_FULL_IMG}
-                      alt="IWT Logo"
-                      className="header-logo"
+        <div className="card login-card">
+          <Row className="g-0">
+            <Col
+              md={12}
+              className="login-image-wrapper"
+              style={{ textAlign: "left" }}
+            >
+              <img src={IWT_FULL_IMG} alt="IWT" className="login-img" />
+            </Col>
+          </Row>
+          <Row className="g-0">
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "center",
+                alignItems: "center",
+              }}
+            >
+              <h2 className="text-center login-title">{t("login.signIn")}</h2>
+            </div>
+            <Col xs={12} className="p-4">
+              <form onSubmit={handleSubmit(onSubmit)} className="login-form">
+                {/* <InputRadio
+                  name="userType"
+                  options={[
+                    { label: t("login.Vessel Owner"), value: "vessel_owner" },
+                    { label: t("login.Builder"), value: "builder" },
+                    { label: t("login.Employee"), value: "employee" },
+                  ]}
+                  rules={{ required: "Please select a user type" }}
+                  register={register}
+                  errors={errors}
+                  onChange={handleUserTypeChange}
+                  className="center-screen"
+                /> */}
+                <InputSelect
+                  name="userType"
+                  icon={FaUserFriends}
+                  label={t("login.userType")}
+                  options={[
+                    { label: t("login.selectUserType"), value: "" },
+                    { label: t("login.vesselOwner"), value: "VESSEL_OWNER" },
+                    { label: t("login.builder"), value: "VESSEL_BUILDER" },
+                    { label: t("login.employee"), value: "EMPLOYEE" },
+                    { label: t("login.crewCitizen"), value: "CREW_CITIZEN" },
+                  ]}
+                  required={true}
+                  register={register("userType", {
+                    required: t("login.userTypeRequired"),
+                  })}
+                  errors={errors}
+                  value={watch("userType") || ""}
+                  onChange={handleUserTypeChange}
+                />
+
+                <InputText
+                  key={`username-${formKey}`}
+                  type="text"
+                  name="username"
+                  required={true}
+                  label={t("login.username")}
+                  placeholder={t("login.userNamePlace")}
+                  register={register("username", {
+                    required: t("login.nameRequired"),
+                  })}
+                  errors={errors}
+                  icon={FaUser}
+                />
+
+                <InputText
+                  key={`password-${formKey}`}
+                  type="password"
+                  name="password"
+                  required={true}
+                  label={t("login.password")}
+                  placeholder={t("login.passwordPlace")}
+                  register={register("password", {
+                    required: t("login.passwordRequired"),
+                    minLength: {
+                      value: 5,
+                      message: t("login.passwordLengthValidation"),
+                    },
+                  })}
+                  errors={errors}
+                  icon={FaLock}
+                />
+
+                <Row>
+                  <Col>
+                    <CustomCaptcha
+                      onCaptchaValid={setIsCaptchaValid}
+                      isSubmitAttempted={submitCaptchaAttempted}
+                      refreshTrigger={refreshCaptchakey}
                     />
-                  </div>
-                  <h3 className="header-title">
-                    {t("builderRegistration.Vessel Builder Registration")}
-                  </h3>
-                </div>
-              </Card.Header>
+                  </Col>
+                </Row>
 
-              <Card.Body className="registration-body p-4 p-md-5">
-                {isSubmitted ? (
-                  <div className="success-container text-center py-5">
-                    <div
-                      className="success-icon-container bg-success rounded-circle d-flex align-items-center justify-content-center mx-auto mb-4"
-                      style={{
-                        width: "90px",
-                        height: "90px",
-                        boxShadow: "0 10px 20px rgba(40, 167, 69, 0.3)",
+                <Row className="btn-row">
+                  <Col>
+                    <button
+                      className="generic-btn-submit"
+                      type="submit"
+                      // disabled={isSubmitting}
+                      onClick={() => {
+                        setSubmitCaptchaAttempted(true);
                       }}
                     >
-                      <FaCheck className="success-icon text-white fs-1" />
-                    </div>
-                    <h4 className="success-title text-success mb-3 fw-bold">
-                      Registration Successful!
-                    </h4>
-                    <div className="registration-id p-4 bg-light rounded mb-4">
-                      {successMessage ||
-                        "Your vessel builder registration has been submitted successfully. You will receive a confirmation email shortly."}
-                    </div>
-                    <Button
-                      variant="primary"
-                      size="lg"
-                      className="mt-2 d-flex align-items-center justify-content-center mx-auto"
-                      style={{
-                        background: "linear-gradient(135deg, #0077b6, #023e8a)",
-                        border: "none",
-                        boxShadow: "0 4px 15px rgba(0, 119, 182, 0.3)",
-                        borderRadius: "8px",
-                        padding: "12px 30px",
-                        fontWeight: "600",
-                        transition: "all 0.3s ease",
-                        minWidth: "150px",
-                        height: "50px",
+                      {t("login.submit")}
+                    </button>
+                  </Col>
+                  <Col>
+                    <button
+                      className="generic-btn-cancel"
+                      type="button"
+                      onClick={() => {
+                        reset({
+                          userType: selectedUserType,
+                          username: "",
+                          password: "",
+                          captchaResponse: "",
+                        });
+                        refreshCaptcha();
+                        setSubmitCaptchaAttempted(false);
+                        setIsCaptchaValid(false);
+                        setFormKey((prevKey) => prevKey + 1);
                       }}
-                      onClick={() => (window.location.href = "/")}
                     >
-                      Go to Home
-                    </Button>
-                  </div>
-                ) : (
-                  <FormProvider {...methods}>
-                    <form>
-                      <div className="text-center mb-4">
-                        <p className="text-muted">
-                          {t(
-                            "builderRegistration.Please complete all required information to register as a vessel builder"
-                          )}
-                        </p>
-                      </div>
+                      {t("login.reset")}
+                    </button>
+                  </Col>
+                </Row>
 
-                      <div className="stepper-container mb-5">
-                        <div className="stepper d-flex justify-content-between">
-                          {[1, 2].map((step) => (
-                            <React.Fragment key={step}>
-                              <div
-                                className={`step ${
-                                  currentStep >= step ? "active" : ""
-                                } ${
-                                  currentStep > step ? "completed" : ""
-                                } flex-grow-1 text-center`}
-                              >
-                                <div
-                                  className="step-icon d-flex align-items-center justify-content-center mx-auto mb-2"
-                                  style={{
-                                    width: "60px",
-                                    height: "60px",
-                                    borderRadius: "50%",
-                                    fontSize: "20px",
-                                    fontWeight: "bold",
-                                    boxShadow:
-                                      currentStep >= step
-                                        ? "0 5px 15px rgba(0, 119, 182, 0.3)"
-                                        : "0 4px 10px rgba(0, 0, 0, 0.1)",
-                                    background:
-                                      currentStep >= step
-                                        ? currentStep > step
-                                          ? "linear-gradient(135deg, #28a745, #20c997)"
-                                          : "linear-gradient(135deg, #0077b6, #023e8a)"
-                                        : "#ffffff",
-                                    border:
-                                      currentStep >= step
-                                        ? "none"
-                                        : "2px solid #e9ecef",
-                                    color:
-                                      currentStep >= step ? "#fff" : "#6c757d",
-                                    transition: "all 0.4s ease",
-                                  }}
-                                >
-                                  {currentStep > step ? (
-                                    <FaCheck size={22} />
-                                  ) : (
-                                    React.createElement(
-                                      stepTitles[step - 1].icon,
-                                      { size: 18 }
-                                    )
-                                  )}
-                                </div>
-                                <div
-                                  className="step-label fw-bold"
-                                  style={{
-                                    color:
-                                      currentStep >= step
-                                        ? currentStep > step
-                                          ? "#28a745"
-                                          : "#0077b6"
-                                        : "#6c757d",
-                                    fontSize: "0.9em",
-                                    transition: "all 0.3s ease",
-                                  }}
-                                >
-                                  {stepTitles[step - 1].title}
-                                </div>
-                              </div>
-                              {step < 2 && (
-                                <div className="step-connector flex-grow-1 d-flex align-items-center px-2">
-                                  <div
-                                    className={`connector-line w-100 ${
-                                      currentStep > step ? "active" : ""
-                                    }`}
-                                    style={{
-                                      height: "4px",
-                                      background:
-                                        currentStep > step
-                                          ? "linear-gradient(to right, #28a745, #20c997)"
-                                          : "#e9ecef",
-                                      borderRadius: "2px",
-                                      transition: "all 0.5s ease",
-                                    }}
-                                  ></div>
-                                </div>
-                              )}
-                            </React.Fragment>
-                          ))}
-                        </div>
-                      </div>
+                <Row className="mt-3">
+                  <Col className="text-center f-14">
+                    <Link to="/iwt/forgot-password">
+                      {t("login.forgotPassword")}
+                    </Link>
+                  </Col>
+                </Row>
 
-                      <div className="step-content">
-                        <div className="form-section p-4 rounded mb-4">
-                          <div className="form-content">
-                            <DynamicFormFields
-                              fields={getCurrentStepFields()}
-                              setFormData={setFormData}
-                              errors={errors}
-                              clearErrors={clearErrors}
-                            />
-                          </div>
-                        </div>
+                {(selectedUserType === "VESSEL_OWNER" ||
+                  selectedUserType === "VESSEL_BUILDER") && (
+                  <Row className="mt-1">
+                    <Col className="text-center f-14">
+                      <div>
+                        {t("login.newUser")}{" "}
+                        <Link to={`/iwt/register?userType=${selectedUserType}`}>
+                          {t("login.signUpNow")}
+                        </Link>
                       </div>
-
-                      <div
-                        className="form-navigation mt-4"
-                        style={{ display: "block" }}
-                      >
-                        {currentStep > 1 && (
-                          <Button
-                            variant="outline-secondary"
-                            onClick={handlePrevious}
-                            className="prev-btn"
-                            style={{ float: "left" }}
-                          >
-                            <FaArrowLeft className="btn-icon me-2" />{" "}
-                            {t("Previous")}
-                          </Button>
-                        )}
-
-                        <Button
-                          variant="primary"
-                          onClick={handleNext}
-                          className="next-btn"
-                          style={{ float: "right" }}
-                        >
-                          {currentStep === totalSteps
-                            ? t("Submit Registration")
-                            : t("Next")}
-                          {currentStep !== totalSteps && (
-                            <FaArrowRight className="btn-icon ms-2" />
-                          )}
-                        </Button>
-                      </div>
-                    </form>
-                  </FormProvider>
+                    </Col>
+                  </Row>
                 )}
-              </Card.Body>
-            </Card>
-          </Col>
-        </Row>
-      </Container>
-    </>
+              </form>
+            </Col>
+          </Row>
+        </div>
+      </div>
+      <ToastContainer />
+    </section>
   );
 };
 
-export default VesselBuilderRegistrationPage;
+export default Login;
