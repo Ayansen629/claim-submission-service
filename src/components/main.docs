@@ -1,13 +1,1023 @@
-const handlePayNow = () => {
-  navigate(`/payment?appNumber=${vesselRegisData.applicationNumber}`, {
-    state: {
-      paymentData,
-      applicationNumber: vesselRegisData.applicationNumber,
-      fullPaymentData,
+import React, { useState, useEffect, useRef } from "react";
+import { useSearchParams } from "react-router-dom";
+import { Box, Typography, Stack } from "@mui/material";
+import { useParams, useLocation, useNavigate } from "react-router-dom";
+import Stepper from "../../../common/Stepper.jsx";
+import VesselDetails from "./VesselDetails.js";
+import Documents from "./Documents.js";
+import NoteSheet from "./NoteSheet.js";
+import { useForm } from "react-hook-form";
+import Invoicing from "../../../common/Invoicing.js";
+import PaymentModal from "../../../common/PaymentModal.js";
+import ApprovalModal from "../../../common/ApprovalModal";
+import NewVesselRegistrationSuccess from "./newVesselRegistrationSuccess.js";
+import { useTranslation } from "react-i18next";
+import { toast } from "react-toastify";
+import { Button } from "react-bootstrap";
+import { BsSticky, BsArrowLeft } from "react-icons/bs";
+// import PaymentDetailsView from "./paymentDetailsView.js";
+import { getFromLocalStorage } from "../../../../utils/localStorageUtils.js";
+import { handleErrorMessage } from "../../../../utils/errorMessageHandler.js";
+import { postData, postFORMdata } from "../../../../services/http.service.ts";
+import {
+  SERVICE_BASE,
+  URLS_ENDPOINT,
+} from "../../../../utils/urlsConstants.ts";
+import NewLoader from "../../../common/NewLoader.js";
+
+const NewVesselRegistration = () => {
+  const { t } = useTranslation();
+  // const { id } = useParams();
+    const [searchParams] = useSearchParams();
+  const id = searchParams.get("applicationNo");
+  console.log(id,"appliction number--->vesselowner")
+  const location = useLocation();
+  const navigate = useNavigate();
+  const ownerDetails = getFromLocalStorage("ownerDetails")
+    ? JSON.parse(getFromLocalStorage("ownerDetails"))
+    : "";
+  const isEditMode = !!id && location.pathname.includes("/edit/");
+  const isViewMode = !!id && location.pathname.includes("/view/");
+  const isNormalMode = !isEditMode && !isViewMode;
+  const stepperRef = useRef();
+
+  const methods = useForm({ mode: "onTouched" });
+  const { trigger, getValues, setError, setValue, reset, clearErrors } =
+    methods;
+
+  const [showModal, setShowModal] = useState(false);
+  const [paymentMode, setPaymentMode] = useState("offline");
+  const [challanFile, setChallanFile] = useState(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [showApprovalModal, setShowApprovalModal] = useState(false);
+  const [selectedAction, setSelectedAction] = useState("");
+  const [showNoteSheet, setShowNoteSheet] = useState(false);
+  const [paymentData, setPaymentData] = useState(null);
+
+  const loaderRef = useRef();
+
+  const [vesselRegisData, setVesselRegisData] = useState({});
+
+  const [originalGRT, setOriginalGRT] = useState(null);
+  const [fullPaymentData, setFullPaymentData] = useState({});
+  const initialNotes = [
+    {
+      id: 1,
+      title: "Initial Review",
+      content:
+        "Document verification completed successfully. All required documents are present and properly formatted.",
+      date: "2024-01-15",
+      author: "John Doe",
     },
-  });
+    {
+      id: 2,
+      title: "Technical Assessment",
+      content:
+        "All technical drawings have been reviewed and approved by the engineering team.",
+      date: "2024-01-16",
+      author: "Jane Smith",
+    },
+  ];
+  const fetchRegistrationData = async () => {
+    if (!isEditMode && !isViewMode) return;
+
+    try {
+      loaderRef?.current?.show();
+      const payload = {
+        applicationNumbers: [id],
+        // applicationNumber: "REG-2025-782674"
+      };
+
+      const apiUrl =
+        SERVICE_BASE.IWT_REGISTRATION +
+        URLS_ENDPOINT.USER_SERVICE.REGISTRATION_SEARCH_BY_ID;
+      const response = await postData(apiUrl, payload);
+
+      // if (response?.status === 200 && response?.data?.responseStatus?.status === "Registration details fetched successfully") {
+      if (response?.status === 200) {
+        const data = response?.data?.data[0];
+        setVesselRegisData(data);
+
+        const { basicDetails, vesselDetails, documents } = data;
+
+        // Owner details
+        if (basicDetails?.ownerDetails) {
+          const owner = basicDetails?.ownerDetails;
+          setValue("ownerName", owner?.ownerCompanyName || "");
+          setValue(
+            "ownerAddress",
+            `${owner?.addressLine1 || ""}, ${
+              owner?.addressLine2 || ""
+            }`.replace(/^,\s*|,\s*$/g, "")
+          );
+          setValue("mobile", owner?.phoneNumber || "");
+          setValue("email", owner?.emailId || "");
+          setValue("pan", owner?.panNo || "");
+          setValue("aadhar", owner?.aadharNumber || "");
+          setValue("tradeLicence", owner?.tradeLicenseNumber || "");
+          setValue("gst", owner?.gstNo || "");
+        }
+
+        // Vessel details
+        if (vesselDetails) {
+          setValue("grt", vesselDetails.grossTonnage?.toString() || "");
+          setValue("workOrderValue", vesselDetails.workOrderValue || "");
+          setValue("vesselType", vesselDetails.typeOfVessel || "");
+          setValue("category", vesselDetails.categoryOfVessel || "");
+          setValue("zone", vesselDetails.zone || "");
+          setValue(
+            "supervisionAuthority",
+            vesselDetails.supervisionAuthority || ""
+          );
+          setValue("purchaseType", vesselDetails.purchaseType || "");
+          setValue(
+            "classificationSociety",
+            vesselDetails.nameOfClassificationSociety || ""
+          );
+
+          if (isEditMode) {
+            setOriginalGRT(vesselDetails.grossTonnage?.toString() || "");
+          }
+        }
+
+        // Builder details
+        if (basicDetails?.builderDetails && basicDetails.builderDetails.id) {
+          const builder = basicDetails.builderDetails;
+          setValue("constructedBy", "2");
+          setValue("builder", builder.id || "");
+          setValue("builderName", builder.builderName || "");
+          setValue(
+            "builderAddress",
+            `${builder.addressLine1 || ""}, ${
+              builder.addressLine2 || ""
+            }`.replace(/^,\s*|,\s*$/g, "")
+          );
+          setValue("builderEmail", builder.emailId || "");
+          setValue("builderMobile", builder.phone || "");
+          setValue("builderTradeLicence", builder.tradeLicenseNumber || "");
+          setValue("builderGST", builder.gstNo || "");
+          setValue("builderAuth", basicDetails.builderAuthorization || "");
+        } else {
+          setValue("constructedBy", "1");
+        }
+
+        // Authorization letter
+        if (basicDetails?.authorizationLetter) {
+          const authLetter = basicDetails.authorizationLetter;
+          setValue("authLetter", {
+            name: authLetter.documentName,
+            size: 256000,
+          });
+          setValue("authLetterFileStoreId", authLetter.fileStoreId);
+        }
+
+        // Documents
+        if (documents && documents.length > 0) {
+          let workOrderIndex = 1;
+          let drawingIndex = 1;
+
+          documents.forEach((doc) => {
+            if (doc.documentType === "TONNAGE_BOOKLETS") {
+              setValue("TONNAGE_BOOKLETS", {
+                name: doc.documentName,
+                size: 512000,
+              });
+              setValue("TONNAGE_BOOKLETS_fileStoreId", doc.fileStoreId);
+            } else if (doc.documentType === "STABILITY_BOOKLETS") {
+              setValue("STABILITY_BOOKLETS", {
+                name: doc.documentName,
+                size: 768000,
+              });
+              setValue("STABILITY_BOOKLETS_fileStoreId", doc.fileStoreId);
+            } else if (doc.documentType === "WORK_ORDER") {
+              setValue(`WORK_ORDER_file_${workOrderIndex}`, {
+                name: doc.documentName,
+                size: 1200000,
+              });
+              setValue(
+                `WORK_ORDER_desc_${workOrderIndex}`,
+                doc.description || "Work order document"
+              );
+              setValue(
+                `WORK_ORDER_fileStoreId_${workOrderIndex}`,
+                doc.fileStoreId
+              );
+              workOrderIndex++;
+            } else if (doc.documentType === "DRAWINGS") {
+              setValue(`DRAWINGS_file_${drawingIndex}`, {
+                name: doc.documentName,
+                size: 2100000,
+              });
+              setValue(
+                `DRAWINGS_desc_${drawingIndex}`,
+                doc.description || "Technical drawing"
+              );
+              setValue(`DRAWINGS_fileStoreId_${drawingIndex}`, doc.fileStoreId);
+              drawingIndex++;
+            }
+          });
+        }
+
+        setValue("termsAccepted", true);
+      }
+    } catch (err) {
+      console.error("Failed to fetch registration data:", err);
+      toast.error("Failed to fetch registration data");
+    } finally {
+      loaderRef?.current?.hide();
+    }
+  };
+
+  useEffect(() => {
+    if (isNormalMode) {
+      reset();
+    } else if (isEditMode || isViewMode) {
+      fetchRegistrationData();
+    }
+  }, [isEditMode, isViewMode, isNormalMode, setValue, reset]);
+
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      if (!ownerDetails || !isNormalMode) return;
+
+      const userInfoFields = {
+        ownerName: ownerDetails.ownerCompanyName || "",
+        ownerAddress: [ownerDetails.addressLine1, ownerDetails.addressLine2]
+          .filter(Boolean)
+          .join(" , "),
+        mobile: ownerDetails.phoneNumber || "",
+        email: ownerDetails.emailId || "",
+        pan: ownerDetails.panNo || "",
+        gst: ownerDetails.gstNo || "",
+        category: ownerDetails.categoryOfOwner || "",
+        aadhar: ownerDetails.aadharNumber || "",
+        tradeLicence: ownerDetails.tradeLicenseNumber || "",
+      };
+
+      Object.entries(userInfoFields).forEach(([key, value]) => {
+        setValue(key, value, { shouldDirty: false, shouldTouch: false });
+      });
+    });
+
+    return () => clearTimeout(timeoutId);
+  }, []);
+
+  const validateDocuments = async () => {
+    if (isViewMode) return true;
+    //  if (isNormalMode) return true;
+
+    let hasErrors = false;
+    const requiredFields = [];
+    const tonnageBooklets = getValues("TONNAGE_BOOKLETS");
+    const stabilityBooklets = getValues("STABILITY_BOOKLETS");
+    const termsAccepted = getValues("termsAccepted");
+    const currentGRT = getValues("grt");
+
+    const isFilePresent = (fileObj) =>
+      !!fileObj && (fileObj.name || fileObj.filestoreId);
+
+    // Check if GRT changed in edit mode
+    if (
+      isEditMode &&
+      originalGRT !== null &&
+      currentGRT !== undefined &&
+      String(currentGRT) !== String(originalGRT)
+    ) {
+      if (!isFilePresent(tonnageBooklets)) {
+        requiredFields.push("TONNAGE_BOOKLETS");
+      }
+      if (!isFilePresent(stabilityBooklets)) {
+        requiredFields.push("STABILITY_BOOKLETS");
+      }
+    }
+
+    if (!termsAccepted) {
+      setError("termsAccepted", {
+        type: "required",
+        message: "Terms and Conditions must be accepted",
+      });
+      hasErrors = true;
+    }
+
+    requiredFields.forEach((fieldName) => {
+      const fieldValue = getValues(fieldName);
+      if (
+        !fieldValue ||
+        (fieldValue instanceof FileList && fieldValue.length === 0)
+      ) {
+        setError(fieldName, {
+          type: "required",
+          message: `${fieldName} is required`,
+        });
+        hasErrors = true;
+      }
+    });
+
+    Object.keys(getValues()).forEach((fieldName) => {
+      if (
+        !requiredFields.includes(fieldName) &&
+        fieldName !== "termsAccepted"
+      ) {
+        clearErrors(fieldName);
+      }
+    });
+
+    return !hasErrors;
+  };
+
+  const handleActionClick = (action) => {
+    setSelectedAction(action);
+    setShowApprovalModal(true);
+  };
+
+  const handleActionSubmit = (formData) => {
+    const payload = {
+      action: selectedAction,
+      comments: formData.comments,
+    };
+
+    toast.success(`${selectedAction} action submitted successfully`);
+
+    setShowApprovalModal(false);
+    setSelectedAction("");
+  };
+
+  const handleCloseModal = () => {
+    setShowApprovalModal(false);
+    setSelectedAction("");
+  };
+
+  // const handleChallanUpload = (e) => {
+  //   setChallanFile(e.target.files?.[0] || null);
+  // };
+
+  // const handleOnlinePay = () => {
+  //   setIsLoading(true);
+  //   setShowModal(false);
+
+  //   setTimeout(() => {
+  //     setIsLoading(false);
+  //     navigate("/new-vessel/registration-success", {
+  //       state: { registrationId: "VR2024001" },
+  //     });
+  //   }, 1500);
+  // };
+
+  const handlePayNow = () => {
+    navigate(`/payment?paymentId=${vesselRegisData?.applicationNumber}`, {
+      state: {
+        paymentData,
+        applicationNumber: vesselRegisData.applicationNumber,
+        fullPaymentData,
+      },
+    });
+  };
+
+  const validateVesselDetails = async () => {
+    if (isViewMode) return true;
+    const basicFields = [
+      "ownerName",
+      "ownerAddress",
+      "mobile",
+      "email",
+      "pan",
+      "aadhar",
+      "tradeLicence",
+      "gst",
+      "grt",
+      "workOrderValue",
+      "vesselType",
+      "category",
+      "purchaseType",
+      "constructedBy",
+    ];
+
+    const constructedBy = getValues("constructedBy");
+    if (constructedBy === "2") {
+      basicFields.push(
+        "builderName",
+        "builderAddress",
+        "builderEmail",
+        "builderMobile",
+        "builderTradeLicence",
+        "builderGST",
+        "builderAuth"
+      );
+
+      const authLetter = getValues("authLetter");
+      if (!authLetter && !isEditMode) {
+        basicFields.push("authLetter");
+      }
+    }
+
+    const valid = await trigger(basicFields);
+    return valid;
+  };
+
+  const tonnageRequired =
+    isEditMode &&
+    originalGRT !== null &&
+    getValues("grt") !== undefined &&
+    String(getValues("grt")) !== String(originalGRT) &&
+    !getValues("TONNAGE_BOOKLETS");
+
+  const stabilityRequired =
+    isEditMode &&
+    originalGRT !== null &&
+    getValues("grt") !== undefined &&
+    String(getValues("grt")) !== String(originalGRT) &&
+    !getValues("STABILITY_BOOKLETS");
+
+  const supervisionAuthority = methods.watch("supervisionAuthority");
+
+  const fetchPaymentDetails = async () => {
+    try {
+      const payload = {
+        category: "REG_DRAWINGAPPROVAL",
+        paymentProcess: "DRAWINGAPPROVAL",
+        application_no: vesselRegisData?.applicationNumber || "",
+      };
+
+      const apiUrl =
+        SERVICE_BASE.IWT_REGISTRATION +
+        URLS_ENDPOINT.VESSEL_SERVICE.PAYMENT_GENERATE;
+      const response = await postData(apiUrl, payload);
+
+      if (
+        response?.status === 200 &&
+        response?.data?.responseStatus?.status === "FeeSlab found successfully"
+      ) {
+        const apiData = response.data.data;
+
+        const formattedData = {
+          invoiceBreakupInfo:
+            apiData.feesDetailsl?.map((fee, index) => ({
+              id: fee.id || index.toString(),
+              label: fee.category_description || fee.category_name,
+              amount: fee.totalCalucation || fee.old_data,
+              categoryHeader: fee.catHeaderName,
+            })) || [],
+          summary: {
+            subTotal: apiData.totalAmount || 0,
+            cgst: apiData.cgst || 0,
+            sgst: apiData.sgst || 0,
+            igst: apiData.igst || 0,
+            totalPayable: apiData.totalAmountAtergst || 0,
+          },
+        };
+
+        setPaymentData(formattedData);
+        setFullPaymentData(response.data);
+      }
+    } catch (error) {
+      console.error("Error fetching payment details:", error);
+    }
+  };
+
+  const steps = isViewMode
+    ? [
+        {
+          label: t("Vessel Details"),
+          component: (
+            <VesselDetails
+              formMethods={methods}
+              viewMode={isViewMode}
+              editMode={isEditMode}
+              vesselRegisData={vesselRegisData}
+            />
+          ),
+          validate: validateVesselDetails,
+        },
+        {
+          label: t("Documents"),
+          component: (
+            <Documents
+              formMethods={methods}
+              viewMode={isViewMode}
+              editMode={isEditMode}
+              vesselRegisData={vesselRegisData}
+            />
+          ),
+          validate: validateDocuments,
+        },
+        // {
+        //   label: t("Payment Details"),
+        //   component: (
+        //     <PaymentDetailsView
+        //       supervisionAuthority={supervisionAuthority}
+        //       formData={methods.getValues()}
+        //       vesselRegisData={vesselRegisData}
+        //     />
+        //   ),
+        //   validate: () => true,
+        // },
+      ]
+    : [
+        {
+          label: t("vesselDetails.Vessel Details"),
+          component: (
+            <VesselDetails
+              formMethods={methods}
+              viewMode={isViewMode}
+              editMode={isEditMode}
+              vesselRegisData={vesselRegisData}
+            />
+          ),
+          validate: validateVesselDetails,
+          getFormData: () => methods?.getValues(),
+        },
+        {
+          label: t("vesselDetails.Documents"),
+          component: (
+            <Documents
+              formMethods={methods}
+              viewMode={isViewMode}
+              editMode={isEditMode}
+              vesselRegisData={vesselRegisData}
+              tonnageRequired={tonnageRequired}
+              stabilityRequired={stabilityRequired}
+            />
+          ),
+          validate: validateDocuments,
+          getFormData: () => methods?.getValues(),
+        },
+        //  {
+        //   label : t("Preview"),
+        //   component: <VesselRegistrationPreview formData={methods.getValues()} isPreview={true}
+        // />
+        // },
+        {
+          label: t("vesselDetails.Invoicing"),
+          component: (
+            <Invoicing
+              supervisionAuthority={supervisionAuthority}
+              onPayNow={handlePayNow}
+              vesselRegisData={vesselRegisData}
+              paymentData={paymentData}
+            />
+          ),
+          validate: () => true,
+        },
+      ];
+
+  const extractDocuments = (formData) => {
+    const documents = [];
+    const existingDocs = vesselRegisData?.documents || [];
+    const staticDocs = [
+      {
+        key: "TONNAGE_BOOKLETS",
+        name: "Tonnage Booklet",
+        description: "Tonnage document",
+      },
+      {
+        key: "STABILITY_BOOKLETS",
+        name: "Stability Booklet",
+        description: "Stability document",
+      },
+    ];
+
+    staticDocs.forEach(({ key, name, description }) => {
+      const fileStoreId = formData?.[`${key}_fileStoreId`];
+      const fileObj = formData?.[key];
+      const existingDoc = existingDocs.find((doc) => doc.documentType === key);
+      if (fileStoreId) {
+        documents.push({
+          id: existingDoc?.id || "",
+          // id:"", /// --- UPDATE API CALL
+          fileStoreId,
+          documentName: fileObj?.name || name,
+          documentType: key,
+          documentSource: key,
+          description,
+        });
+      }
+    });
+
+    const dynamicTypes = ["WORK_ORDER", "DRAWINGS"];
+    dynamicTypes.forEach((type) => {
+      Object.keys(formData)
+        .filter((key) => key.startsWith(`${type}_fileStoreId_`))
+        .forEach((storeKey) => {
+          const index = storeKey.split("_").pop();
+          const fileStoreId = formData[storeKey];
+          const description = formData[`${type}_desc_${index}`] || "";
+          const fileObj = formData?.[`${type}_file_${index}`];
+          const existingDoc = existingDocs.find(
+            (doc) =>
+              doc.documentType === type &&
+              doc.documentName?.includes(index.padStart(2, "0"))
+          );
+
+          if (fileStoreId) {
+            documents.push({
+              //  id: "", /// --- UPDATE API CALL
+              id: existingDoc?.id || "",
+              fileStoreId,
+              documentName:
+                fileObj?.name || `${type}_${index.padStart(2, "0")}.pdf`,
+              documentType: type,
+              documentSource: type,
+              description,
+            });
+          }
+        });
+    });
+    //   if (vesselRegisData && vesselRegisData?.documents?.length > 0) {
+    //   let existingDocs = new Map();
+    //   vesselRegisData?.documents?.forEach((doc) => {
+    //     existingDocs?.set(doc?.fileStoreId, doc);
+    //   });
+
+    //   const updatedCurrentDocs = documents?.map((doc) => {
+    //     const match = existingDocs?.get(doc?.fileStoreId);
+    //     if (match) {
+    //       return {
+    //         ...doc,
+    //         id: match?.id,
+    //         applicationNumber: match?.applicationNumber,
+    //       };
+    //     }
+    //     return doc;
+    //   });
+
+    //   documents = updatedCurrentDocs?.length > 0 ? [...updatedCurrentDocs] : documents;
+    // }
+
+    return documents;
+  };
+  //--- SAVE / UPDATE  API CALLS ------------
+  // const onVesselRegisFormSubmit = async (stepInfo) => {
+  //   const formValues = stepInfo?.getFormData?.() || {};
+  //   //-- First Step or Second Step
+  //   if (stepInfo.index === 0 || stepInfo.index === 1) {
+  //     let request = {
+  //       id: vesselRegisData?.id || vesselRegisData?.basicDetails?.id || "", //-- UPDATE
+  //       applicationNumber: vesselRegisData?.applicationNumber || "", //-- UPDATE
+  //       basicDetails: {
+  //         id: vesselRegisData?.basicDetails?.id || "", //-- UPDATE
+  //         applicationNumber: vesselRegisData?.applicationNumber || "", //-- UPDATE
+  //         status: vesselRegisData?.basicDetails?.status || "", //-- UPDATE
+  //         constructedBy: formValues?.constructedBy,
+  //         ownerDetails: {
+  //           id: vesselRegisData?.basicDetails?.ownerDetails?.id || ownerDetails?.id,
+  //         },
+  //         builderDetails: {
+  //           id: vesselRegisData?.basicDetails?.builderDetails?.id || formValues?.builder || null,
+  //         },
+  //         builderAuthorization: formValues?.builderAuth,
+  //         authorizationLetter: {
+  //           id: vesselRegisData?.basicDetails?.authorizationLetter?.id || "", //-- UPDATE
+  //           fileStoreId: formValues?.authLetterFileStoreId,
+  //           documentName: "Authorization_Letter.pdf",
+  //           documentType: "AUTHORIZATION_LETTER",
+  //           documentSource: "AUTHORIZATION_LETTER",
+  //           descriptions: "",
+  //         },
+  //       },
+  //       vesselDetails: {
+  //         id: vesselRegisData?.vesselDetails?.id || "",
+  //         typeOfVessel: formValues?.vesselType,
+  //         categoryOfVessel: formValues?.category,
+  //         zone: formValues?.zone,
+  //         grossTonnage: formValues?.grt,
+  //         workOrderValue: formValues?.workOrderValue,
+  //         purchaseType: formValues?.purchaseType,
+  //         supervisionAuthority: formValues?.supervisionAuthority,
+  //         nameOfMaster: vesselRegisData?.vesselDetails?.nameOfMaster || "",
+  //         certficateNumber: vesselRegisData?.vesselDetails?.certficateNumber || "",
+  //         nameOfRegistry: vesselRegisData?.vesselDetails?.nameOfRegistry || "",
+  //         registrationNumber: vesselRegisData?.vesselDetails?.registrationNumber || "",
+  //         vesselName: vesselRegisData?.vesselDetails?.vesselName || "",
+  //         kindOfVessel: vesselRegisData?.vesselDetails?.kindOfVessel || "",
+  //         mortgage: vesselRegisData?.vesselDetails?.mortgage || "",
+  //         placeOfBuild: vesselRegisData?.vesselDetails?.placeOfBuild || "",
+  //         insuranceDetails: vesselRegisData?.vesselDetails?.insuranceDetails || "",
+  //         yearOfBuild: vesselRegisData?.vesselDetails?.yearOfBuild || null,
+  //         pniClubNo: vesselRegisData?.vesselDetails?.pniClubNo || "",
+  //         pniClubName: vesselRegisData?.vesselDetails?.pniClubName || "",
+  //         applicationNo: vesselRegisData?.applicationNumber || "",
+  //         nameOfClassificationSociety: formValues?.classificationSociety,
+  //         iwtVesselBasicDetailsTFk: vesselRegisData?.basicDetails?.id || "",
+  //         insuranceValidDate: vesselRegisData?.vesselDetails?.insuranceValidDate || "",
+  //       },
+  //     };
+
+  //     if (stepInfo.index === 1) {
+  //       request = { ...request, documents: extractDocuments(formValues) };
+  //     }
+
+  //     try {
+  //       loaderRef?.current?.show();
+  //       const URL = SERVICE_BASE.IWT_REGISTRATION + URLS_ENDPOINT.VESSEL_SERVICE.CREATE;
+
+  //       const response = await postData(URL, request);
+  //       const apiRes = { ...response?.data };
+  //       if (response?.status === 200 && apiRes?.responseStatus) {
+  //         loaderRef?.current?.hide();
+  //         setVesselRegisData((data) => {
+  //           return apiRes?.data ? { ...apiRes?.data, documents: data?.documents ? [...data?.documents] : [] } : {}
+  //         });
+  //         toast.success(
+  //           apiRes?.responseStatus?.message || "Vessel details saved successfully.",
+  //           { position: "top-right" }
+  //         );
+
+  //         if (stepInfo.index === 1) {
+  //           fetchPaymentDetails();
+  //         }
+
+  //         setTimeout(() => {
+  //           stepperRef?.current?.goToNextStep();
+  //           window.scrollTo(0, 0);
+  //         }, 1000);
+  //       } else {
+  //         loaderRef?.current?.hide();
+  //         toast.warning(
+  //           apiRes?.responseStatus?.message || "Something went wrong..",
+  //           { position: "top-right" }
+  //         );
+  //       }
+  //     } catch (err) {
+  //       loaderRef?.current?.hide();
+  //       handleErrorMessage(err?.response?.data);
+  //     }
+  //   }
+  // };
+
+  const onVesselRegisFormSubmit = async (stepInfo) => {
+    const formValues = stepInfo?.getFormData?.() || {};
+
+    if (stepInfo.index === 0 || stepInfo.index === 1) {
+      const authLetterFile = formValues?.authLetter;
+      const authLetterFileName =
+        authLetterFile?.name || "Authorization Letter.pdf";
+
+      let request = {
+        id: vesselRegisData?.id || vesselRegisData?.basicDetails?.id || "",
+        applicationNumber: vesselRegisData?.applicationNumber || "",
+        basicDetails: {
+          id: vesselRegisData?.basicDetails?.id || "",
+          applicationNumber: vesselRegisData?.applicationNumber || "",
+          status: vesselRegisData?.basicDetails?.status || "",
+          constructedBy: formValues?.constructedBy,
+          ownerDetails: {
+            id:
+              vesselRegisData?.basicDetails?.ownerDetails?.id ||
+              ownerDetails?.id,
+          },
+          builderDetails: {
+            id:
+              vesselRegisData?.basicDetails?.builderDetails?.id ||
+              formValues?.builder ||
+              null,
+          },
+          builderAuthorization: formValues?.builderAuth,
+          authorizationLetter: {
+            id: vesselRegisData?.basicDetails?.authorizationLetter?.id || "",
+            fileStoreId: formValues?.authLetterFileStoreId,
+            documentName: authLetterFileName,
+            documentType: "AUTHORIZATION_LETTER",
+            documentSource: "AUTHORIZATION_LETTER",
+            descriptions: "",
+          },
+        },
+        vesselDetails: {
+          id: vesselRegisData?.vesselDetails?.id || "",
+          typeOfVessel: formValues?.vesselType,
+          categoryOfVessel: formValues?.category,
+          zone: formValues?.zone,
+          grossTonnage: formValues?.grt,
+          workOrderValue: formValues?.workOrderValue,
+          purchaseType: formValues?.purchaseType,
+          supervisionAuthority: formValues?.supervisionAuthority,
+          nameOfMaster: vesselRegisData?.vesselDetails?.nameOfMaster || "",
+          certficateNumber:
+            vesselRegisData?.vesselDetails?.certficateNumber || "",
+          nameOfRegistry: vesselRegisData?.vesselDetails?.nameOfRegistry || "",
+          registrationNumber:
+            vesselRegisData?.vesselDetails?.registrationNumber || "",
+          vesselName: vesselRegisData?.vesselDetails?.vesselName || "",
+          kindOfVessel: vesselRegisData?.vesselDetails?.kindOfVessel || "",
+          mortgage: vesselRegisData?.vesselDetails?.mortgage || "",
+          placeOfBuild: vesselRegisData?.vesselDetails?.placeOfBuild || "",
+          insuranceDetails:
+            vesselRegisData?.vesselDetails?.insuranceDetails || "",
+          yearOfBuild: vesselRegisData?.vesselDetails?.yearOfBuild || null,
+          pniClubNo: vesselRegisData?.vesselDetails?.pniClubNo || "",
+          pniClubName: vesselRegisData?.vesselDetails?.pniClubName || "",
+          applicationNo: vesselRegisData?.applicationNumber || "",
+          nameOfClassificationSociety: formValues?.classificationSociety,
+          iwtVesselBasicDetailsTFk: vesselRegisData?.basicDetails?.id || "",
+          insuranceValidDate:
+            vesselRegisData?.vesselDetails?.insuranceValidDate || "",
+        },
+      };
+
+      if (stepInfo.index === 1) {
+        request = { ...request, documents: extractDocuments(formValues) };
+      }
+
+      try {
+        loaderRef?.current?.show();
+        const URL =
+          SERVICE_BASE.IWT_REGISTRATION + URLS_ENDPOINT.VESSEL_SERVICE.CREATE;
+
+        const response = await postData(URL, request);
+        const apiRes = { ...response?.data };
+        if (
+          (response?.status === 200 || response?.status === 201) &&
+          apiRes?.responseStatus
+        ) {
+          loaderRef?.current?.hide();
+          setVesselRegisData((data) => {
+            return apiRes?.data
+              ? {
+                  ...apiRes?.data,
+                  documents: data?.documents ? [...data?.documents] : [],
+                }
+              : {};
+          });
+
+          const message = request?.applicationNumber
+            ? `Vessel Registration with App No.  ${request.applicationNumber} updated successfully.`
+            : "Vessel Registration created successfully.";
+          toast.success(message, { position: "top-right" });
+
+          if (stepInfo.index === 1) {
+            fetchPaymentDetails();
+          }
+
+          setTimeout(() => {
+            stepperRef?.current?.goToNextStep();
+            window.scrollTo(0, 0);
+          }, 1000);
+        } else {
+          loaderRef?.current?.hide();
+          toast.warning(
+            apiRes?.responseStatus?.message || "Something went wrong..",
+            { position: "top-right" }
+          );
+        }
+      } catch (err) {
+        loaderRef?.current?.hide();
+        handleErrorMessage(err?.response?.data);
+      }
+    }
+  };
+  const handleSave = () => {
+    setIsLoading(true);
+    setTimeout(() => {
+      setIsLoading(false);
+      navigate("/new-vessel/registration-success", {
+        state: { registrationId: "VR2024001" },
+      });
+    }, 1500);
+  };
+
+  return (
+    <>
+      <NewLoader ref={loaderRef} />
+
+      <Box
+        sx={{
+          padding: "1rem 0.5rem 0 0.5rem",
+          backgroundColor: "#f5f6fa",
+          minHeight: "100vh",
+        }}
+      >
+        <div className="d-flex flex-column flex-md-row justify-content-between align-items-start align-items-md-center mb-4 gap-3">
+          <div
+            className="d-flex align-items-center flex-grow-1"
+            style={{ gap: "16px" }}
+          >
+            <Button
+              variant="outline-primary"
+              onClick={() => navigate("/dashboard")}
+              className="d-flex align-items-center justify-content-center shadow-sm"
+              style={{
+                borderRadius: "50%",
+                width: "40px",
+                height: "40px",
+                border: "2px solid #2E57A7",
+                color: "#2E57A7",
+                backgroundColor: "#fff",
+                transition: "all 0.3s ease",
+                padding: "0",
+              }}
+              onMouseEnter={(e) => {
+                e.target.style.backgroundColor = "#2E57A7";
+                e.target.style.color = "#fff";
+                e.target.style.transform = "translateY(-2px)";
+                e.target.style.boxShadow = "0 4px 12px rgba(46, 87, 167, 0.3)";
+              }}
+              onMouseLeave={(e) => {
+                e.target.style.backgroundColor = "#fff";
+                e.target.style.color = "#2E57A7";
+                e.target.style.transform = "translateY(0)";
+                e.target.style.boxShadow = "0 2px 4px rgba(0,0,0,0.1)";
+              }}
+            >
+              <BsArrowLeft size={16} />
+            </Button>
+            <Stack spacing={0.5} className="flex-grow-1">
+              <Typography
+                sx={{
+                  fontWeight: 550,
+                  color: "#2E57A7",
+                  fontSize: { xs: "1rem", sm: "1.1rem", md: "1.2rem" },
+                  lineHeight: 1.2,
+                }}
+              >
+                {isViewMode
+                  ? t("View Vessel Registration") + ` - ${id}`
+                  : isEditMode
+                  ? t("Edit Vessel Registration") + ` - ${id}`
+                  : t("vesselDetails.New Vessel Registration")}
+              </Typography>
+              <Typography
+                sx={{
+                  color: "#666",
+                  fontSize: { xs: "0.6rem", sm: "0.65rem" },
+                  lineHeight: 1.3,
+                }}
+              >
+                {isViewMode
+                  ? t("(View vessel registration details)")
+                  : isEditMode
+                  ? t("(Update vessel registration details)")
+                  : t(
+                      "vesselDetails.(Fill in the vessel details to complete registration)"
+                    )}
+              </Typography>
+            </Stack>
+          </div>
+          {/* Note Sheet Button - Only for View Mode */}
+          {/* {isViewMode && (
+                <Button
+                  variant="primary"
+                  className="d-flex align-items-center shadow-sm flex-shrink-0"
+                  style={{
+                    background:
+                      "linear-gradient(135deg, #2466bf 0%, #1a4fa0 100%)",
+                    border: "none",
+                    borderRadius: "8px",
+                    padding: "6px 12px",
+                    fontSize: "0.8rem",
+                    fontWeight: "600",
+                    minWidth: "auto",
+                    whiteSpace: "nowrap",
+                  }}
+                  onClick={() => setShowNoteSheet(true)}
+                >
+                  <BsSticky className="me-1 me-sm-2" size={14} />
+                  <span className="d-none d-sm-inline">{t("Note Sheet")}</span>
+                  <span className="d-sm-none">{t("Notes")}</span>
+                </Button>
+              )} */}
+        </div>
+
+        <Stepper
+          ref={stepperRef}
+          steps={steps}
+          onSave={handleSave}
+          viewMode={isViewMode}
+          onPayNow={handlePayNow}
+          onSyncData={onVesselRegisFormSubmit}
+        />
+        {/* <NoteSheet
+              show={showNoteSheet}
+              onHide={() => setShowNoteSheet(false)}
+              initialNotes={initialNotes}
+            /> */}
+
+        {/* {!isViewMode && (
+          <PaymentModal
+            show={showModal}
+            onHide={() => setShowModal(false)}
+
+            
+            paymentMode={paymentMode}
+            setPaymentMode={setPaymentMode}
+            challanFile={challanFile}
+            onChallanUpload={handleChallanUpload}
+            onOnlinePay={handleOnlinePay}
+            onOfflineSubmit={handleOfflineSubmit}
+            isLoading={isLoading}
+            formMethods={methods}
+          />
+        )} */}
+
+        {isViewMode && (
+          <ApprovalModal
+            show={showApprovalModal}
+            handleClose={handleCloseModal}
+            handleSubmitData={handleActionSubmit}
+            selectedAction={selectedAction}
+          />
+        )}
+      </Box>
+    </>
+  );
 };
 
-// In payment component
-const [searchParams] = useSearchParams();
-const applicationNumber = searchParams.get('appNumber');
+export default NewVesselRegistration;
