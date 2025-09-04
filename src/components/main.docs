@@ -1,57 +1,99 @@
-const extractDocuments = (formData) => {
-  const documents = [];
-  const existingDocs = vesselRegisData?.documents || [];
-  
-  const staticDocs = [
-    { key: "TONNAGE_BOOKLETS", name: "Tonnage Booklet", description: "Tonnage document" },
-    { key: "STABILITY_BOOKLETS", name: "Stability Booklet", description: "Stability document" },
-  ];
+const onVesselRegisFormSubmit = async (stepInfo) => {
+  const formValues = stepInfo?.getFormData?.() || {};
 
-  staticDocs.forEach(({ key, name, description }) => {
-    const fileStoreId = formData?.[`${key}_fileStoreId`];
-    const fileObj = formData?.[key];
-    const existingDoc = existingDocs.find((doc) => doc.documentType === key);
-    
-    if (fileStoreId) {
-      documents.push({
-        id: existingDoc?.id || "",
-        fileStoreId,
-        documentName: fileObj?.name || name,
-        documentType: key,
-        documentSource: key,
-        description,
-      });
+  if (stepInfo.index === 0 || stepInfo.index === 1) {
+    const authLetterFile = formValues?.authLetter;
+    const authLetterFileName = authLetterFile?.name || "Authorization Letter.pdf";
+
+    let request = {
+      id: vesselRegisData?.id || vesselRegisData?.basicDetails?.id || "",
+      applicationNumber: vesselRegisData?.applicationNumber || "",
+      basicDetails: {
+        id: vesselRegisData?.basicDetails?.id || "",
+        applicationNumber: vesselRegisData?.applicationNumber || "",
+        status: vesselRegisData?.basicDetails?.status || "",
+        constructedBy: formValues?.constructedBy,
+        ownerDetails: {
+          id: vesselRegisData?.basicDetails?.ownerDetails?.id || ownerDetails?.id,
+        },
+        builderDetails: {
+          id: vesselRegisData?.basicDetails?.builderDetails?.id || formValues?.builder || null,
+        },
+        builderAuthorization: formValues?.builderAuth,
+        authorizationLetter: {
+          id: vesselRegisData?.basicDetails?.authorizationLetter?.id || "",
+          fileStoreId: formValues?.authLetterFileStoreId,
+          documentName: authLetterFileName,
+          documentType: "AUTHORIZATION_LETTER",
+          documentSource: "AUTHORIZATION_LETTER",
+          descriptions: "",
+        },
+      },
+      vesselDetails: {
+        id: vesselRegisData?.vesselDetails?.id || "",
+        typeOfVessel: formValues?.vesselType,
+        categoryOfVessel: formValues?.category,
+        zone: formValues?.zone,
+        grossTonnage: formValues?.grt,
+        workOrderValue: formValues?.workOrderValue,
+        purchaseType: formValues?.purchaseType,
+        supervisionAuthority: formValues?.supervisionAuthority,
+        nameOfMaster: vesselRegisData?.vesselDetails?.nameOfMaster || "",
+        certficateNumber: vesselRegisData?.vesselDetails?.certficateNumber || "",
+        nameOfRegistry: vesselRegisData?.vesselDetails?.nameOfRegistry || "",
+        registrationNumber: vesselRegisData?.vesselDetails?.registrationNumber || "",
+        vesselName: vesselRegisData?.vesselDetails?.vesselName || "",
+        kindOfVessel: vesselRegisData?.vesselDetails?.kindOfVessel || "",
+        mortgage: vesselRegisData?.vesselDetails?.mortgage || "",
+        placeOfBuild: vesselRegisData?.vesselDetails?.placeOfBuild || "",
+        insuranceDetails: vesselRegisData?.vesselDetails?.insuranceDetails || "",
+        yearOfBuild: vesselRegisData?.vesselDetails?.yearOfBuild || null,
+        pniClubNo: vesselRegisData?.vesselDetails?.pniClubNo || "",
+        pniClubName: vesselRegisData?.vesselDetails?.pniClubName || "",
+        applicationNo: vesselRegisData?.applicationNumber || "",
+        nameOfClassificationSociety: formValues?.classificationSociety,
+        iwtVesselBasicDetailsTFk: vesselRegisData?.basicDetails?.id || "",
+        insuranceValidDate: vesselRegisData?.vesselDetails?.insuranceValidDate || "",
+      },
+    };
+
+    if (stepInfo.index === 1) {
+      request = { ...request, documents: extractDocuments(formValues) };
     }
-  });
 
-  const dynamicTypes = ["WORK_ORDER", "DRAWINGS"];
-  dynamicTypes.forEach((type) => {
-    Object.keys(formData)
-      .filter((key) => key.startsWith(`${type}_fileStoreId_`))
-      .forEach((storeKey) => {
-        const index = storeKey.split("_").pop();
-        const fileStoreId = formData[storeKey];
-        const description = formData[`${type}_desc_${index}`] || "";
-        const fileObj = formData?.[`${type}_file_${index}`];
+    try {
+      loaderRef?.current?.show();
+      const URL = SERVICE_BASE.IWT_REGISTRATION + URLS_ENDPOINT.VESSEL_SERVICE.CREATE;
+
+      const response = await postData(URL, request);
+      const apiRes = { ...response?.data };
+      
+      if ((response?.status === 200 || response?.status === 201) && apiRes?.responseStatus) {
+        loaderRef?.current?.hide();
         
-        // Find existing document by fileStoreId first, then by document name pattern
-        const existingDoc = existingDocs.find(
-          (doc) => doc.fileStoreId === fileStoreId || 
-          (doc.documentType === type && doc.documentName?.includes(`${type}_${index.padStart(2, "0")}`))
-        );
+        // Update vesselRegisData with response data including document IDs
+        setVesselRegisData(apiRes?.data || {});
 
-        if (fileStoreId) {
-          documents.push({
-            id: existingDoc?.id || "",
-            fileStoreId,
-            documentName: fileObj?.name || `${type}_${index.padStart(2, "0")}.pdf`,
-            documentType: type,
-            documentSource: type,
-            description,
-          });
+        const message = request?.applicationNumber
+          ? `Vessel Registration with App No. ${request.applicationNumber} updated successfully.`
+          : "Vessel Registration created successfully.";
+        toast.success(message, { position: "top-right" });
+
+        if (stepInfo.index === 1) {
+          fetchPaymentDetails();
         }
-      });
-  });
 
-  return documents;
+        setTimeout(() => {
+          stepperRef?.current?.goToNextStep();
+          window.scrollTo(0, 0);
+        }, 1000);
+      } else {
+        loaderRef?.current?.hide();
+        toast.warning(apiRes?.responseStatus?.message || "Something went wrong..", { position: "top-right" });
+      }
+    } catch (err) {
+      loaderRef?.current?.hide();
+      handleErrorMessage(err?.response?.data);
+    }
+  }
 };
