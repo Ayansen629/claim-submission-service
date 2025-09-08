@@ -1,255 +1,51 @@
-import React, { useState } from "react";
-import { useForm } from "react-hook-form";
-import { Modal, Form, Button, Spinner } from "react-bootstrap";
-import { useTranslation } from "react-i18next";
-import { FaTimesCircle, FaFileAlt } from "react-icons/fa";
-import { toast } from "react-toastify";
-import { postFORMdata, postData } from "../../services/http.service.ts";
-import {
-  BASE_IP,
-  URLS_ENDPOINT,
-  SERVICE_BASE,
-} from "../../utils/urlsConstants.ts";
+const handleFileChange = async (e) => {
+  const file = e?.target?.files[0];
+  if (!file) return;
 
-const FileReportsUploadModal = ({
-  show,
-  onHide,
-  reportType,
-  onSubmit,
-  applicationNumber,
-  applicationInfo,
-}) => {
-  const { t } = useTranslation();
-  const {
-    register,
-    handleSubmit,
-    reset,
-    formState: { errors },
-    setValue,
-  } = useForm();
+  const maxSize = 10 * 1024 * 1024;
+  if (file.size > maxSize) {
+    toast.error("File size must be less than or equal to 10 MB.");
+    e.target.value = null;
+    return;
+  }
 
-  const [uploadedFile, setUploadedFile] = useState(null);
-  const [uploading, setUploading] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
+  setUploading(true);
 
-  const getReportTypeMapping = (type) => {
-    const mapping = {
-      materialTest: "MATERIAL_TEST_REPORT",
-      radiography: "RADIOGRAPHY_REPORT",
-      inspection: "INSPECTION_REPORT",
-      other: "OTHER_REPORT",
-    };
-    return mapping[type] || "OTHER_REPORT";
-  };
+  try {
+    const formData = new FormData();
+    formData.append("file", file);
 
-  const getReportDisplayName = (type) => {
-    const reportNames = {
-      materialTest: "Material Test Report",
-      radiography: "Radiography Report",
-      inspection: "Inspection Report",
-      other: "Other Report",
-    };
-    return reportNames[type] || "Report";
-  };
+    const uploadUrl = BASE_IP + URLS_ENDPOINT.FILE_STORE_SERVICE.UPLOAD_FILE;
+    const response = await postFORMdata(uploadUrl, formData);
 
-  const handleFormSubmit = async (data) => {
-    if (!uploadedFile?.url) {
-      toast.error("Please upload a file first.");
-      return;
-    }
+    console.log("File upload response:", response);
 
-    setSubmitting(true);
+    const fileStoreId = response?.data?.files[0]?.fileStoreId;
+    
+    // Get file extension
+    const fileExtension = file.name.substring(file.name.lastIndexOf('.'));
+    
+    // Create display name with report type and extension (only for modal display)
+    const reportDisplayName = getReportDisplayName(reportType)
+      .toLowerCase()
+      .replace(/\s+/g, ''); // Remove spaces and convert to lowercase
+    const displayFileName = `${reportDisplayName}${fileExtension}`;
 
-    try {
-      const apiReportType = getReportTypeMapping(reportType);
-
-      const payload = {
-        applicationNo: applicationNumber || applicationInfo?.applicationNumber,
-        doc: [
-          {
-            id: "",
-            documentName: uploadedFile?.name || getReportDisplayName(reportType),
-            documentType: apiReportType,
-            applicationNumber:
-              applicationNumber || applicationInfo?.applicationNumber,
-            fileStoreId: uploadedFile?.url,
-            documentSource: apiReportType,
-            description: data?.description || "",
-            active: true,
-          },
-        ],
-      };
-
-      const uploadApiUrl =
-        SERVICE_BASE.IWT_REGISTRATION +
-        URLS_ENDPOINT.USER_SERVICE.REPORT_UPLOAD;
-      const response = await postData(uploadApiUrl, payload);
-
-      if (
-        response?.status === 200 &&
-        (response?.data?.responseStatus?.status === "201" ||
-         response?.data?.responseStatus?.status === "Document saved successfully.")
-      ) {
-        toast.success("Report uploaded successfully!");
-        onSubmit && onSubmit(response?.data?.data[0]);
-        resetForm();
-        onHide();
-      } else {
-        toast.error("Failed to save report. Please try again.");
-      }
-    } catch (err) {
-      console.error("Report upload failed:", err);
-      toast.error("Report upload failed. Please try again.");
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const handleModalClose = () => {
-    resetForm();
-    onHide();
-  };
-
-  const resetForm = () => {
-    reset();
+    // Store both original name and display name
+    setUploadedFile({ 
+      name: displayFileName, // For modal display
+      originalName: file.name, // For API payload
+      url: fileStoreId 
+    });
+    setValue("file", fileStoreId);
+    toast.success("File uploaded successfully!");
+  } catch (err) {
+    console.error("File upload failed:", err);
+    console.log("Error details:", err.response || err.message);
+    toast.error("File upload failed. Please try again.");
     setUploadedFile(null);
+    e.target.value = null;
+  } finally {
     setUploading(false);
-    setSubmitting(false);
-  };
-
-  const handleFileChange = async (e) => {
-    const file = e?.target?.files[0];
-    if (!file) return;
-
-    const maxSize = 10 * 1024 * 1024;
-    if (file.size > maxSize) {
-      toast.error("File size must be less than or equal to 10 MB.");
-      e.target.value = null;
-      return;
-    }
-
-    setUploading(true);
-
-    try {
-      const formData = new FormData();
-      formData.append("file", file);
-
-      const uploadUrl = BASE_IP + URLS_ENDPOINT.FILE_STORE_SERVICE.UPLOAD_FILE;
-      const response = await postFORMdata(uploadUrl, formData);
-
-      console.log("File upload response:", response);
-
-      const fileStoreId = response?.data?.files[0]?.fileStoreId;
-      
-      // Get file extension
-      const fileExtension = file.name.substring(file.name.lastIndexOf('.'));
-      
-      // Create display name with report type and extension
-      const reportDisplayName = getReportDisplayName(reportType)
-        .toLowerCase()
-        .replace(/\s+/g, ''); // Remove spaces and convert to lowercase
-      const displayFileName = `${reportDisplayName}${fileExtension}`;
-
-      setUploadedFile({ name: displayFileName, url: fileStoreId });
-      setValue("file", fileStoreId);
-      toast.success("File uploaded successfully!");
-    } catch (err) {
-      console.error("File upload failed:", err);
-      console.log("Error details:", err.response || err.message);
-      toast.error("File upload failed. Please try again.");
-      setUploadedFile(null);
-      e.target.value = null;
-    } finally {
-      setUploading(false);
-    }
-  };
-
-  const removeFile = () => {
-    setUploadedFile(null);
-    setValue("file", null);
-  };
-
-  return (
-    <Modal show={show} onHide={handleModalClose}>
-      <Modal.Header closeButton>
-        <Modal.Title>
-          {t("Upload")} {getReportDisplayName(reportType)}
-        </Modal.Title>
-      </Modal.Header>
-
-      <Form onSubmit={handleSubmit(handleFormSubmit)}>
-        <Modal.Body>
-          <Form.Group className="mb-3">
-            <Form.Label>
-              {t("Select File")} <span className="text-danger">*</span>
-            </Form.Label>
-
-            {uploading ? (
-              <div className="border rounded p-3 text-center bg-light">
-                <Spinner animation="border" size="sm" className="me-2" />
-                <span className="text-muted">Uploading file...</span>
-              </div>
-            ) : !uploadedFile ? (
-              <Form.Control
-                type="file"
-                onChange={handleFileChange}
-                required
-                accept=".pdf,.doc,.docx,.xls,.xlsx,.txt,.jpg,.jpeg,.png"
-              />
-            ) : (
-              <div className="border rounded p-2 bg-light">
-                <div className="d-flex align-items-center justify-content-between">
-                  <div className="d-flex align-items-center flex-grow-1">
-                    <FaFileAlt className="text-primary me-2" />
-                    <span className="text-truncate" title={uploadedFile.name}>
-                      {uploadedFile.name}
-                    </span>
-                  </div>
-                  <FaTimesCircle
-                    size={18}
-                    color="#dc3545"
-                    style={{ cursor: "pointer", marginLeft: "10px" }}
-                    onClick={removeFile}
-                    title="Remove file"
-                  />
-                </div>
-              </div>
-            )}
-          </Form.Group>
-
-          <Form.Group className="mb-3">
-            <Form.Label>{t("Description")}</Form.Label>
-            <Form.Control
-              as="textarea"
-              rows={3}
-              {...register("description")}
-              placeholder={t("Enter description")}
-            />
-          </Form.Group>
-        </Modal.Body>
-
-        <Modal.Footer>
-          <Button variant="secondary" onClick={handleModalClose}>
-            {t("Cancel")}
-          </Button>
-          <Button
-            variant="primary"
-            type="submit"
-            disabled={!uploadedFile || uploading || submitting}
-          >
-            {submitting ? (
-              <>
-                <Spinner animation="border" size="sm" className="me-2" />
-                Uploading...
-              </>
-            ) : (
-              t("Upload")
-            )}
-          </Button>
-        </Modal.Footer>
-      </Form>
-    </Modal>
-  );
+  }
 };
-
-export default FileReportsUploadModal;
