@@ -1,18 +1,141 @@
-import { useMasterData } from "../../context/MasterDataContext.js";
-
+import React, { useState, useEffect, useRef } from "react";
+import { useForm, FormProvider } from "react-hook-form";
+import { Container, Row, Col, Button, Card, Badge } from "react-bootstrap";
+import {
+  FaFileUpload,
+  FaArrowLeft,
+  FaArrowRight,
+  FaArrowAltCircleLeft,
+  FaCheckCircle,
+  FaUser,
+  FaBuilding,
+} from "react-icons/fa";
+import { BsFileEarmarkPdf, BsDownload } from "react-icons/bs";
+import { useNavigate, useParams, useLocation } from "react-router-dom";
+import ActionDropdown from "../../../common/ActionDropdown";
+import ApprovalModal from "../../../common/ApprovalModal";
+import "./userViewPage.css";
+import NewLoader from "../../../common/NewLoader";
+import DynamicViewFields from "../../../common/DynamicViewFields";
+import { useTranslation } from "react-i18next";
+import { getFromLocalStorage } from "../../../../utils/localStorageUtils";
+import {
+  SERVICE_BASE,
+  URLS_ENDPOINT,
+} from "../../../../utils/urlsConstants.ts";
+import { toast } from "react-toastify";
+import { postData } from "../../../../services/http.service.ts";
+import { handleErrorMessage } from "../../../../utils/errorMessageHandler";
+import { getDocumentsForOwner } from "../../../public/user-registration/registration-docs.config.js";
+import { useMasterData } from "../../../context/MasterDataContext.js";
 const UserViewPage = () => {
   const { t } = useTranslation();
-  const { masterData } = useMasterData(); // Add this line
-  // ... existing code ...
+    const { masterData } = useMasterData()
+  const { type, id } = useParams();
+  const location = useLocation();
+  const applicationInfo = location.state?.application;
+  const userRole = getFromLocalStorage("userRole");
+  const userDetails = getFromLocalStorage("userDetails")
+    ? JSON.parse(getFromLocalStorage("userDetails"))
+    : "";
+  const [currentStep, setCurrentStep] = useState(1);
+  const [formData, setFormData] = useState({});
+  const [isLoading, setIsLoading] = useState(true);
+  const [showApprovalModal, setShowApprovalModal] = useState(false);
+  const [selectedAction, setSelectedAction] = useState("");
+  const [completedSteps, setCompletedSteps] = useState(new Set());
+  const navigate = useNavigate();
+  const [actionsFromAPI, setActionsFromAPI] = useState([]);
+  const loaderRef = useRef();
 
-  // Add this helper function
+  const isOwner = applicationInfo?.userType === "VESSEL_OWNER";
+  const isBuilder = applicationInfo?.userType === "VESSEL_BUILDER";
+  const totalSteps = isOwner ? 3 : 2;
+
+  const mapFilesByFieldName = (fileStoreMap = []) => {
+    const mappingConfig = {
+      pancard: "panCardUpload",
+      gstcertificate: "gstCertificate", 
+      addressproof: "addressProof",
+      letterofauthorization: "authorizationLetter",
+      companyregistrationcertificate: "companyRegistrationCertificate",
+      moacertificate: "moaCertificate",
+      aoacertificate: "aoaCertificate",
+      tradelicense: "tradeLicenseUpload",
+      aadhaar: "aadhaarUpload",
+      "driving license": "dlUpload",
+      // Company specific documents
+      "cos_reg_cert": "cosRegCertUpload",
+      "cos_resolution": "cosResolutionUpload",
+      "be_cos_reg_docs": "beCosRegDocsUpload",
+      "be_cos_gov_docs": "beCosGovDocsUpload",
+      "be_cos_resolution": "beCosResolutionUpload",
+      "comp_reg_cert": "compRegCertUpload",
+      "comp_moa_aoa": "compMoaAoaUpload",
+      "comp_board_resolution": "compBoardResUpload",
+      "partner_reg_cert": "partnerRegCertUpload",
+      "partner_deed": "partnerDeedUpload",
+      "trust_reg_cert": "trustRegCertUpload",
+      "trust_deed": "trustDeedUpload",
+      "fdi_reg_cert": "fdiRegCertUpload",
+      "fdi_resolution": "fdiResolutionUpload",
+      "fdi_proof": "fdiProofUpload",
+      "vsl_bareboat": "vslBareboatUpload",
+      "vsl_charterer_proof": "vslChartererProofUpload",
+      "state_aoa": "stateAoaUpload",
+      "state_moa": "stateMoaUpload",
+      "cent_aoa": "centralAoaUpload",
+      "cent_moa": "centralMoaUpload",
+      "local_aoa": "localAoaUpload",
+      "local_moa": "localMoaUpload",
+      "other_pan": "otherPanUpload",
+      "other_gst": "otherGstUpload",
+      // Builder documents
+      "company details": "companyDetails",
+      "pan card": "panCardUpload",
+      "factory license": "factoryLicense",
+      "fire certificate": "fireCertificate",
+      "esipf registration": "esipfRegistration",
+      "iso 9001": "iso9001",
+      "iso 14001": "iso14001",
+      "iso 45001": "iso45001",
+      "pollution certificate": "pollutionCertificate",
+      "experience certificate": "experienceCertificate",
+      "address proof": "addressProof",
+      "gst certificate": "gstCertificate",
+    };
+
+    const regularFiles = {};
+    const additionalFiles = [];
+
+    fileStoreMap.forEach(file => {
+      const fieldName = file?.fieldName?.toLowerCase();
+      if (!fieldName) return;
+
+      // Check if it's an additional document
+      if (fieldName.includes('additional_docs')) {
+        additionalFiles.push(file);
+        return;
+      }
+
+      
+      const matchedKey = Object.keys(mappingConfig).find(key =>
+        fieldName.includes(key)
+      );
+
+      if (matchedKey) {
+        regularFiles[mappingConfig[matchedKey]] = file;
+      }
+    });
+
+    return { regularFiles, additionalFiles };
+  };
   const getOwnerCategoryLabel = (categoryCode) => {
     const ownerType = masterData?.ownerTypes?.find(
       type => type.valueCode === categoryCode
     );
     return ownerType?.valueLabel || categoryCode;
   };
-
   useEffect(() => {
     setIsLoading(true);
     loaderRef.current?.show?.();
@@ -25,15 +148,1561 @@ const UserViewPage = () => {
         const { regularFiles, additionalFiles } = mapFilesByFieldName(ownerData.fileStoreMap);
 
         processedData = {
-          categoryOfOwner: getOwnerCategoryLabel(ownerData.categoryOfOwner), // Change this line
+          categoryOfOwner: getOwnerCategoryLabel(ownerData.categoryOfOwner),
+
+          // categoryOfOwner:ownerData.categoryOfOwner,
+          categoryOfOwnerCode: ownerData.categoryOfOwner,
           ownerCompanyName: ownerData.ownerCompanyName,
-          // ... rest of the existing code remains same
+          emailId: ownerData.emailId,
+          phoneNumber: ownerData.phoneNumber,
+          panNo: ownerData.panNo,
+          gstNo: ownerData.gstNo,
+          addressLine1: ownerData.addressLine1,
+          addressLine2: ownerData.addressLine2,
+          pin: ownerData.pin,
+          district: ownerData.district,
+          state: ownerData.state,
+          country: ownerData.country,
+          authorisedFname: ownerData.authorisedFname,
+          authorisedLname: ownerData.authorisedLname,
+          authorisedMob: ownerData.authorisedMob,
+          authorisedEmail: ownerData.authorisedEmail,
+          aadharNumber: ownerData.aadharNumber,
+          tradeLicenseNumber: ownerData.tradeLicenseNumber,
+          cinNo: ownerData.cinNo,
+          dinNo: ownerData.dinNo,
+          registrationNumber: applicationInfo.userBasicDetails.registrationNumber,
+          status: applicationInfo.userBasicDetails.isActive ? "Approved" : "Pending Review",
+          fileStoreMap: ownerData.fileStoreMap || [],
+          additionalDocuments: additionalFiles,
+          ...regularFiles,
+        };
+      } else if (isBuilder && applicationInfo.builderDetails) {
+        const builderData = applicationInfo.builderDetails;
+        const { regularFiles, additionalFiles } = mapFilesByFieldName(builderData.fileStoreMap);
+
+        processedData = {
+          builderName: builderData.builderName,
+          emailId: builderData.emailId,
+          phoneNumber: builderData.phone,
+          panNo: builderData.panNo,
+          gstNo: builderData.gstNo,
+          addressLine1: builderData.addressLine1,
+          addressLine2: builderData.addressLine2,
+          pin: builderData.pin,
+          district: builderData.district,
+          state: builderData.state,
+          country: builderData.country,
+          registrationNumber: applicationInfo.userBasicDetails.registrationNumber,
+          status: applicationInfo.userBasicDetails.isActive ? "Approved" : "Pending Review",
+          fileStoreMap: builderData.fileStoreMap || [],
+          additionalDocuments: additionalFiles,
+          ...regularFiles,
         };
       }
-      // ... rest of the existing code remains same
-    }
-    // ... rest of the existing code remains same
-  }, [applicationInfo, isOwner, isBuilder, masterData]); // Add masterData to dependencies
 
-  // ... rest of the existing code remains same
+      setFormData(processedData);
+      setActionsFromAPI(
+        applicationInfo?.processActionMapResponce?.processs[0]?.actions || []
+      );
+      setCompletedSteps(new Set([1]));
+    }
+
+    setTimeout(() => {
+      setIsLoading(false);
+      loaderRef.current?.hide?.();
+    }, 500);
+  }, [applicationInfo, isOwner, isBuilder,masterData]);
+
+  const methods = useForm({ defaultValues: { country: "India" } });
+  const { setValue } = methods;
+
+  useEffect(() => {
+    if (!isLoading && Object.keys(formData)?.length > 0) {
+      Object?.keys(formData)?.forEach((key) => {
+        if (formData[key] !== undefined && formData[key] !== null) {
+          setValue(key, formData[key]);
+        }
+      });
+    }
+  }, [isLoading, formData, setValue]);
+
+  const handleActionClick = (action) => {
+    setSelectedAction(action);
+    setShowApprovalModal(true);
+  };
+
+  const workflowApplicationSubmit = async (modalFormData) => {
+    loaderRef?.current?.show();
+
+    try {
+      const URL = `${SERVICE_BASE.IWT_WORKFLOW}${URLS_ENDPOINT.WORK_FLOW_SERVICE.WORKFLOW_ACTION}`;
+
+      const userName =
+        userDetails?.userName ||
+        JSON.parse(getFromLocalStorage("userDetails"))?.userName ||
+        "";
+
+      const payload = {
+        applicationNo: applicationInfo?.userBasicDetails?.registrationNumber,
+        processId: applicationInfo?.processActionMapResponce?.processs?.[0]?.processId,
+        actionId: selectedAction?.actionId,
+        assignerRole: userRole,
+        assignerName: userName,
+        fileId: modalFormData?.document?.url ?? "",
+        remarks: modalFormData?.reason ?? "",
+      };
+
+      const { status, data } = await postData(URL, payload);
+      const { responseStatus } = data || {};
+
+      if (status === 200 && responseStatus?.status === "200") {
+        toast.success(responseStatus?.message || "Action submitted successfully");
+        handleCloseModal();
+
+        setTimeout(() => navigate("/user-registration/view"), 2000);
+      } else {
+        toast.info(responseStatus?.message || "Something went wrong..", {
+          position: "top-right",
+        });
+      }
+    } catch (err) {
+      console.error(err);
+      handleErrorMessage(err?.response?.data);
+    } finally {
+      loaderRef?.current?.hide();
+    }
+  };
+
+  const handleCloseModal = () => {
+    setShowApprovalModal(false);
+    setSelectedAction("");
+  };
+
+  const getFormFieldsConfig = () => {
+    if (isOwner) {
+      return {
+        step1: [
+          {
+            name: "categoryOfOwner",
+            label: t("vesselOwnerRegistration.Category of Owner"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "ownerCompanyName",
+            label: t("vesselOwnerRegistration.Owner/Company Name"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "emailId",
+            label: t("vesselOwnerRegistration.Email ID"),
+            type: "email",
+            colSize: 6,
+          },
+          {
+            name: "phoneNumber",
+            label: t("vesselOwnerRegistration.Phone Number"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "panNo",
+            label: t("vesselOwnerRegistration.PAN Number"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "aadharNumber",
+            label: t("vesselOwnerRegistration.aadharNo"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "tradeLicenseNumber",
+            label: t("vesselOwnerRegistration.tradeLicense"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "gstNo",
+            label: t("vesselOwnerRegistration.GST Number"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "cinNo",
+            label: t("vesselOwnerRegistration.CIN Number"),
+            type: "text",
+            colSize: 6,
+            showIf: () => ["COMPANY", "FIRM", "PRIVATE_LTD"].includes(formData.categoryOfOwner),
+          },
+          {
+            name: "dinNo",
+            label: t("vesselOwnerRegistration.DIN Number"),
+            type: "text",
+            colSize: 6,
+            showIf: () => ["COMPANY", "FIRM", "PRIVATE_LTD"].includes(formData.categoryOfOwner),
+          },
+          {
+            name: "addressLine1",
+            label: t("vesselOwnerRegistration.Address Line-1"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "addressLine2",
+            label: t("vesselOwnerRegistration.Address Line-2"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "pin",
+            label: t("vesselOwnerRegistration.PIN"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "district",
+            label: t("vesselOwnerRegistration.District"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "state",
+            label: t("vesselOwnerRegistration.State / UT"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "country",
+            label: t("vesselOwnerRegistration.Country"),
+            type: "text",
+            colSize: 6,
+          },
+        ],
+        step2: [
+          {
+            name: "authorisedFname",
+            label: t("vesselOwnerRegistration.First Name"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "authorisedLname",
+            label: t("vesselOwnerRegistration.Last Name"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "authorisedMob",
+            label: t("vesselOwnerRegistration.Primary Mobile Number"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "authorisedEmail",
+            label: t("vesselOwnerRegistration.Email ID"),
+            type: "email",
+            colSize: 6,
+          },
+          {
+            name: "authorizationLetter",
+            label: t("vesselOwnerRegistration.Letter of Authorization"),
+            type: "file",
+            colSize: 6,
+          },
+        ],
+        step3: [
+        
+          ...getDocumentsForOwner({categoryOfOwner: formData.categoryOfOwner}, null, t).map(doc => ({
+            ...doc,
+            type: "file",
+            disabled: true,
+            inputClassName: "disabled-field",
+          })),
+         
+          {
+            name: "additionalDocuments",
+            label: t("vesselOwnerRegistration.Additional_Documents"),
+            type: "additional_docs",
+            colSize: 12,
+          },
+        ],
+      };
+    } else {
+      return {
+        step1: [
+          {
+            name: "builderName",
+            label: t("builderRegistration.builderName"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "emailId",
+            label: t("builderRegistration.Email ID"),
+            type: "email",
+            colSize: 6,
+          },
+          {
+            name: "phoneNumber",
+            label: t("builderRegistration.Phone Number"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "panNo",
+            label: t("builderRegistration.PAN Number"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "gstNo",
+            label: t("builderRegistration.GST Number"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "addressLine1",
+            label: t("builderRegistration.Address Line-1"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "addressLine2",
+            label: t("builderRegistration.Address Line-2"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "pin",
+            label: t("builderRegistration.PIN"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "district",
+            label: t("builderRegistration.District"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "state",
+            label: t("builderRegistration.State / UT"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "country",
+            label: t("builderRegistration.Country"),
+            type: "text",
+            colSize: 6,
+          },
+        ],
+        step2: [
+          {
+            name: "companyDetails",
+            label: t("builderRegistration.Company Details"),
+            type: "file",
+            colSize: 6,
+          },
+          {
+            name: "gstCertificate",
+            label: t("builderRegistration.GST Certificate"),
+            type: "file",
+            colSize: 6,
+          },
+          {
+            name: "panCardUpload",
+            label: t("builderRegistration.PAN Card"),
+            type: "file",
+            colSize: 6,
+          },
+          {
+            name: "factoryLicense",
+            label: t("builderRegistration.Factory License"),
+            type: "file",
+            colSize: 6,
+          },
+          {
+            name: "addressProof",
+            label: t("builderRegistration.Address Proof"),
+            type: "file",
+            colSize: 6,
+          },
+          {
+            name: "fireCertificate",
+            label: t("builderRegistration.Fire Certificate"),
+            type: "file",
+            colSize: 6,
+          },
+          {
+            name: "esipfRegistration",
+            label: t("builderRegistration.ESIPF Registration"),
+            type: "file",
+            colSize: 6,
+          },
+          {
+            name: "iso9001",
+            label: t("builderRegistration.ISO 9001 Certificate"),
+            type: "file",
+            colSize: 6,
+          },
+          {
+            name: "iso14001",
+            label: t("builderRegistration.ISO 14001 Certificate"),
+            type: "file",
+            colSize: 6,
+          },
+          {
+            name: "iso45001",
+            label: t("builderRegistration.ISO 45001 Certificate"),
+            type: "file",
+            colSize: 6,
+          },
+          {
+            name: "pollutionCertificate",
+            label: t("builderRegistration.Pollution Certificate"),
+            type: "file",
+            colSize: 6,
+          },
+          {
+            name: "experienceCertificate",
+            label: t("builderRegistration.Experience Certificate"),
+            type: "file",
+            colSize: 6,
+          },
+          // // Additional documents for builder
+          // {
+          //   name: "additionalDocuments",
+          //   label: t("builderRegistration.Additional Documents"),
+          //   type: "additional_docs",
+          //   colSize: 12,
+          // },
+        ],
+      };
+    }
+  };
+
+  const formFields = getFormFieldsConfig();
+
+  const getDisabledFormFieldsConfig = () => {
+    const config = {};
+    Object.keys(formFields).forEach((stepKey) => {
+      config[stepKey] = formFields[stepKey].map((field) => ({
+        ...field,
+        disabled: true,
+        inputClassName: "disabled-field",
+      }));
+    });
+    return config;
+  };
+
+  const disabledFormFields = getDisabledFormFieldsConfig();
+
+  const getCurrentStepFields = () => {
+    let fields = [];
+    switch (currentStep) {
+      case 1:
+        fields = disabledFormFields.step1;
+        break;
+      case 2:
+        fields = disabledFormFields.step2;
+        break;
+      case 3:
+        fields = disabledFormFields.step3 || [];
+        break;
+      default:
+        fields = [];
+    }
+
+    // Filter fields based on showIf condition
+    return fields.filter((field) => !field.showIf || field.showIf());
+  };
+
+  const handleNext = () => {
+    if (currentStep < totalSteps) {
+      setCompletedSteps((prev) => new Set([...prev, currentStep]));
+      setCurrentStep(currentStep + 1);
+      window.scrollTo(0, 0);
+    }
+  };
+
+  const handlePrevious = () => {
+    setCurrentStep(Math.max(1, currentStep - 1));
+    window.scrollTo(0, 0);
+  };
+
+  const handleBackToList = () => {
+    navigate("/user-registration/view");
+  };
+
+  const getStatusBadge = (status) => {
+    const statusMap = {
+      "Pending Review": "warning",
+      Pending: "warning",
+      Approved: "success",
+      Completed: "success",
+      Rejected: "danger",
+      Processing: "info",
+    };
+    return (
+      <Badge bg={statusMap[status] || "secondary"} className="status-badge">
+        {status}
+      </Badge>
+    );
+  };
+
+  const getStepIcon = (stepNumber) => {
+    if (completedSteps.has(stepNumber)) {
+      return <FaCheckCircle className="text-white" size={12} />;
+    }
+
+    if (isOwner) {
+      const ownerIcons = [FaUser, FaUser, FaFileUpload];
+      return currentStep === stepNumber
+        ? React.createElement(ownerIcons[stepNumber - 1], {
+          className: "text-white",
+          size: 12,
+        })
+        : stepNumber;
+    } else {
+      const builderIcons = [FaBuilding, FaFileUpload];
+      return currentStep === stepNumber
+        ? React.createElement(builderIcons[stepNumber - 1], {
+          className: "text-white",
+          size: 12,
+        })
+        : stepNumber;
+    }
+  };
+
+  const getStepTitles = () => {
+    if (isOwner) {
+      return [
+        t("vesselOwnerRegistration.Vessel Owner Details"),
+        t("vesselOwnerRegistration.Authorized Person's Details"),
+        t("vesselOwnerRegistration.Documents Upload"),
+      ];
+    } else {
+      return [
+        t("builderRegistration.Vessel Builder Details"),
+        t("builderRegistration.Documents Upload"),
+      ];
+    }
+  };
+
+  const stepTitles = getStepTitles();
+
+  if (isLoading) {
+    return <NewLoader ref={loaderRef} />;
+  }
+
+  return (
+    <>
+      <Container fluid className="py-4 officer-view-container">
+        <Row className="justify-content-center">
+          <Col size={12}>
+            <Card className="shadow-lg border-0 modern-card">
+              <Card.Header className="modern-header">
+                <div className="header-content">
+                  <div className="header-left">
+                    <button
+                      className="back-btn"
+                      style={{ width: "2.4rem" }}
+                      onClick={handleBackToList}
+                    >
+                      <FaArrowAltCircleLeft
+                        style={{ verticalAlign: "baseline" }}
+                        size={16}
+                      />
+                    </button>
+                  </div>
+
+                  <div className="header-center">
+                    <h2 className="app-title">Application Review</h2>
+                    <div className="app-details">
+                      <div className="app-number">
+                        <span className="app-label">ID:</span>
+                        <span className="app-id">
+                          {formData.registrationNumber || "N/A"}
+                        </span>
+                      </div>
+                      <div className="user-type">
+                        <span className="type-badge">
+                          {isOwner ? "Owner" : "Builder"}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                    {/* <div className="header-right">
+                    {getStatusBadge(formData.status)}
+                  </div> */}
+                </div>
+              </Card.Header>
+
+              <Card.Body className="modern-body">
+                <div className="stepper-container">
+                  {Array.from({ length: totalSteps }, (_, i) => i + 1).map(
+                    (step, index) => (
+                      <React.Fragment key={step}>
+                        <div
+                          className={`stepper-step ${currentStep === step ? "active" : ""
+                            } ${completedSteps.has(step) ? "completed" : ""}`}
+                        >
+                          <div className="step-circle">{getStepIcon(step)}</div>
+                          <div className="step-label">
+                            {stepTitles[step - 1]}
+                          </div>
+                        </div>
+
+                        {index < totalSteps - 1 && (
+                          <div className="step-connector"></div>
+                        )}
+                      </React.Fragment>
+                    )
+                  )}
+                </div>
+
+                <FormProvider {...methods}>
+                  <form>
+                    <div className="form-section">
+                      <Row className="g-3">
+                        <DynamicViewFields
+                          fields={getCurrentStepFields()}
+                          setFormData={setFormData}
+                          formData={formData}
+                        />
+                      </Row>
+                    </div>
+
+                    <div className="form-actions">
+                      {currentStep > 1 && (
+                        <Button
+                          variant="outline-secondary"
+                          onClick={handlePrevious}
+                          className="action-btn prev-btn"
+                        >
+                          <FaArrowLeft size={12} className="me-2" /> Previous
+                        </Button>
+                      )}
+
+                      {currentStep < totalSteps ? (
+                        <Button
+                          variant="primary"
+                          onClick={handleNext}
+                          className="action-btn next-btn"
+                          style={
+                            currentStep === 1 ? { marginLeft: "auto" } : {}
+                          }
+                        >
+                          Next <FaArrowRight size={12} className="ms-2" />
+                        </Button>
+                      ) : (
+                        <ActionDropdown
+                          actions={actionsFromAPI}
+                          onActionClick={handleActionClick}
+                          variant="success"
+                          className="action-dropdown"
+                        />
+                      )}
+                    </div>
+                  </form>
+                </FormProvider>
+              </Card.Body>
+            </Card>
+          </Col>
+        </Row>
+
+        <ApprovalModal
+          show={showApprovalModal}
+          handleClose={handleCloseModal}
+          handleSubmitData={workflowApplicationSubmit}
+          selectedAction={selectedAction}
+        />
+      </Container>
+    </>
+  );
+};
+
+export default UserViewPage;
+import { forwardRef, useEffect, useState } from "react";
+import { Button, Card } from "react-bootstrap";
+import { BsDownload, BsFileEarmarkPdf, BsPlus, BsTrash } from "react-icons/bs";
+import styles from "../private/vessel-registration/new-vessel/Documents.module.css";
+import { useTranslation } from "react-i18next";
+import { BASE_IP, URLS_ENDPOINT } from "../../utils/urlsConstants.ts";
+import { getFromLocalStorage } from "../../utils/localStorageUtils.js";
+import axios from "axios";
+import { toast } from "react-toastify";
+import { deleteFile } from "../../utils/deleteFile.js";
+import InputFile from "./InputFile.tsx";
+import { renameFile } from "../../utils/constants.ts";
+import { postFORMdata } from "../../services/http.service.ts";
+import { FaTimesCircle } from "react-icons/fa";
+import InputText from "./InputText.tsx";
+
+const DocumentCard = ({
+    fileName,
+    description,
+    onDownload,
+    fileSize,
+    onRemove,
+    showRemove = false,
+    t,
+}) => {
+    const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
+
+    useEffect(() => {
+        const handleResize = () => setIsMobile(window.innerWidth <= 768);
+        window.addEventListener("resize", handleResize);
+        return () => window.removeEventListener("resize", handleResize);
+    }, []);
+
+    return (
+        <Card className="mb-1 border-0 shadow-sm">
+            <Card.Body className="p-2">
+                <div className="d-flex justify-content-between align-items-center">
+                    <div
+                        className="d-flex align-items-center flex-grow-1 me-2"
+                        style={{ minWidth: 0 }}
+                    >
+                        {!isMobile && (
+                            <div className="bg-danger bg-opacity-10 rounded-circle p-1 me-2 flex-shrink-0">
+                                <BsFileEarmarkPdf className="text-danger" size={10} />
+                            </div>
+                        )}
+                        <div style={{ minWidth: 0 }}>
+                            <div
+                                className="text-primary fw-semibold"
+                                style={{
+                                    fontSize: isMobile ? "0.8rem" : "0.7rem",
+                                    overflow: "hidden",
+                                    textOverflow: "ellipsis",
+                                    whiteSpace: "nowrap",
+                                    lineHeight: "1.3",
+                                    marginBottom: isMobile ? "0" : "4px",
+                                }}
+                                title={fileName}
+                            >
+                                {fileName}
+                            </div>
+                            {!isMobile && (
+                                <>
+                                    <p
+                                        className="mb-0 text-muted"
+                                        style={{
+                                            fontSize: "0.6rem",
+                                            overflow: "hidden",
+                                            textOverflow: "ellipsis",
+                                            whiteSpace: "nowrap",
+                                        }}
+                                    >
+                                        {description}
+                                    </p>
+                                    {fileSize && (
+                                        <span
+                                            className="badge bg-light text-dark mt-1"
+                                            style={{ fontSize: "0.55rem" }}
+                                        >
+                                            {(fileSize / 1024 / 1024).toFixed(1)} MB
+                                        </span>
+                                    )}
+                                </>
+                            )}
+                        </div>
+                    </div>
+                    <div className="flex-shrink-0">
+                        <Button
+                            variant="outline-primary"
+                            size="sm"
+                            onClick={() => onDownload(fileName)}
+                            className="rounded-pill d-flex align-items-center"
+                            style={{
+                                minWidth: "auto",
+                                fontSize: "0.6rem",
+                                padding: isMobile ? "6px 8px" : "4px 6px",
+                            }}
+                        >
+                            {isMobile && <BsFileEarmarkPdf className="me-1" size={12} />}
+                            <BsDownload size={isMobile ? 12 : 8} />
+                            {!isMobile && <span className="ms-1">{t("Download")}</span>}
+                        </Button>
+                        {showRemove && (
+                            <Button
+                                variant="outline-danger"
+                                size="sm"
+                                onClick={onRemove}
+                                className="rounded-pill ms-1"
+                                style={{ minWidth: "auto", padding: "4px 6px" }}
+                            >
+                                <BsTrash size={8} />
+                            </Button>
+                        )}
+                    </div>
+                </div>
+            </Card.Body>
+        </Card>
+    );
+};
+
+const FileUploadCard = forwardRef(({
+    label,
+    name,
+    fileDownloadKey,
+    onRemove,
+    showRemove = false,
+    fileIndex,
+    displayIndex,
+    watch,
+    clearErrors,
+    setValue,
+    register,
+    errors,
+    setError,
+    t,
+    uploadFile,
+    viewMode,
+    editMode,
+    handleDownload,
+    type,
+    isRegistrationMode = false
+}, loaderRef) => {
+    const fileData = watch(name);
+    const fileStoreId = watch(fileDownloadKey);
+    const hasFile = fileData && (fileData.name || fileData.size);
+
+    const handleDeleteFile = async (name) => {
+        // In registration mode, just clear the file without API call
+        if (isRegistrationMode) {
+            clearErrors(name);
+            setValue(name, null);
+            setValue(name.replace("_file_", "_fileStoreId_"), null);
+            return;
+        }
+
+        // For logged-in users, call API to delete
+        const res = await deleteFile(fileStoreId, loaderRef);
+        if (res) {
+            clearErrors(name);
+            setValue(name, null);
+            setValue(name.replace("_file_", "_fileStoreId_"), null);
+        }
+    }
+
+    return (
+        <Card className="mb-2 border-2 border-dashed border-primary border-opacity-25">
+            <Card.Body className="p-2">
+                <div className="mb-2">
+                    <div style={{ fontSize: "0.75rem", position: "relative" }}>
+                        <InputFile
+                            label={`${label} ${displayIndex}`}
+                            name={name}
+                            register={register(name)}
+                            errors={errors}
+                            onChange={(e) => {
+                                if (e?.target?.files && e?.target?.files[0]) {
+                                    const file = e.target.files[0];
+
+                                    if (file.size > 30 * 1024 * 1024) {
+                                        setError(name, {
+                                            type: "manual",
+                                            message: t(
+                                                "vesselDetails..File size should not exceed 30MB"
+                                            ),
+                                        });
+                                        return;
+                                    }
+
+                                    const extension = file?.name?.substring(
+                                        file?.name?.lastIndexOf(".")
+                                    );
+                                    const fileType = name.includes(type)
+                                        ? type
+                                        : "UNKNOWN";
+                                    const fileName = `${fileType}_${String(fileIndex).padStart(
+                                        2,
+                                        "0"
+                                    )}${extension}`;
+                                    file.originalName = fileName;
+                                    const renamedFile = renameFile(file, fileName);
+                                    uploadFile(file, name, renamedFile, fileType, fileIndex);
+                                }
+                            }}
+                            watch={watch}
+                            defaultValue={watch(name)}
+                            clearErrors={clearErrors}
+                            accept=".pdf,.jpg,.jpeg,.png"
+                            className="mobile-file-input"
+                            style={{ width: "100%" }}
+                        />
+
+                        {hasFile && !viewMode && (
+                            <FaTimesCircle
+                                className="text-danger position-absolute"
+                                style={{
+                                    top: "55%",
+                                    right: "1.5rem",
+                                    transform: "translateY(-50%)",
+                                    cursor: "pointer",
+                                    zIndex: 10,
+                                }}
+                                size={16}
+                                title="Remove file"
+                                onClick={() => handleDeleteFile(name)}
+                            />
+                        )}
+                    </div>
+                </div>
+                <div className="mb-2">
+                    <div style={{ fontSize: "0.75rem" }}>
+                        <InputText
+                            label={t("vesselOwnerRegistration.Description")}
+                            name={name?.replace("_file_", "_desc_")}
+                            placeholder={t("vesselOwnerRegistration.Enter_file_description")}
+                            register={register(name.replace("_file_", "_desc_"))}
+                            errors={errors}
+                            className="mobile-text-input"
+                        />
+                    </div>
+                </div>
+                <div className="text-end d-flex justify-content-end gap-1">
+                    {editMode && hasFile && (
+                        <Button
+                            variant="outline-primary"
+                            size="sm"
+                            onClick={() => handleDownload(fileStoreId, fileData.name)}
+                            className="rounded-pill"
+                            style={{ fontSize: "0.65rem", padding: "2px 6px" }}
+                        >
+                            <BsDownload className="me-1" size={8} />
+                            <span className="d-none d-sm-inline">Download</span>
+                            <span className="d-sm-none">↓</span>
+                        </Button>
+                    )}
+                    {showRemove && (
+                        <Button
+                            variant="outline-danger"
+                            size="sm"
+                            onClick={onRemove}
+                            className="rounded-pill"
+                            style={{ fontSize: "0.65rem", padding: "2px 6px" }}
+                        >
+                            <BsTrash className="me-1" size={8} />
+                            <span className="d-none d-sm-inline">Remove</span>
+                            <span className="d-sm-none">×</span>
+                        </Button>
+                    )}
+                </div>
+            </Card.Body>
+        </Card>
+    );
+});
+
+const MultiFile = forwardRef(({ title, files, type, icon, watch, viewMode, editMode, clearErrors, register, errors, setError, setValue, unregister, localFiles, setFiles, isRegistrationMode = false }, loaderRef) => {
+    const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
+    const { t } = useTranslation();
+
+    useEffect(() => {
+        const handleResize = () => setIsMobile(window.innerWidth <= 768);
+        window.addEventListener("resize", handleResize);
+        return () => window.removeEventListener("resize", handleResize);
+    }, []);
+
+    const filesWithData = files.filter((file) => {
+        const fileData = watch(`${type}_file_${file.id}`);
+        return fileData && (fileData.name || fileData.size);
+    });
+
+    const addFileInput = (type) => {
+        if (viewMode) return;
+        if (files.length >= 50) return;
+
+        const existingIds = files.map(f => f.id);
+        let nextId = 1;
+        while (existingIds.includes(nextId)) {
+            nextId++;
+        }
+
+        setFiles(prev => [...prev, { id: nextId }].sort((a, b) => a.id - b.id));
+    };
+
+    const handleDownload = async (fileStoreId, fileName) => {
+        try {
+            if (!fileStoreId) return;
+            const url = `${BASE_IP}/filestore/v1/files/id?fileStoreId=${fileStoreId}`;
+
+            loaderRef.current?.show();
+
+            const accessToken = getFromLocalStorage("access_token");
+            const tokenDetails = getFromLocalStorage("tokenDetails");
+            const sessionState = tokenDetails
+                ? JSON.parse(tokenDetails)?.session_state
+                : "";
+
+            const response = await axios({
+                method: "GET",
+                url: url,
+                responseType: "blob",
+                headers: {
+                    Authorization: `Bearer ${accessToken}`,
+                    "X-Request-ID": sessionState,
+                    Accept: "application/octet-stream",
+                },
+            });
+
+            if (response.data) {
+                let filename = fileName || "document";
+                const contentDisposition = response.headers["content-disposition"];
+                if (contentDisposition) {
+                    const filenameMatch = contentDisposition.match(
+                        /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/
+                    );
+                    if (filenameMatch && filenameMatch[1]) {
+                        filename = filenameMatch[1].replace(/['"]/g, "");
+                    }
+                }
+
+                const blob = new Blob([response.data], {
+                    type: response.headers["content-type"] || "application/octet-stream",
+                });
+                const blobUrl = window.URL.createObjectURL(blob);
+
+                const link = document.createElement("a");
+                link.href = blobUrl;
+                link.setAttribute("download", filename);
+                document.body.appendChild(link);
+                link.click();
+
+                setTimeout(() => {
+                    document.body.removeChild(link);
+                    window.URL.revokeObjectURL(blobUrl);
+                }, 100);
+            }
+        } catch (error) {
+            console.error("Error downloading file:", error);
+            toast.error("Failed to download file. Please try again.");
+        } finally {
+            loaderRef.current?.hide();
+        }
+    };
+
+    const uploadFile = async (
+        file,
+        formValueName,
+        renamedFile,
+        fileType,
+        fileIndex
+    ) => {
+        try {
+            loaderRef?.current?.show();
+            
+            // If registration mode, just store file locally
+            if (isRegistrationMode) {
+                clearErrors(formValueName);
+                setValue(formValueName, renamedFile, { shouldValidate: true });
+                setValue(fileType + "_fileStoreId_" + fileIndex, `temp_${Date.now()}_${fileIndex}`);
+                toast.success("File selected successfully!");
+                loaderRef?.current?.hide();
+                return;
+            }
+            
+            // For logged-in users, call API
+            const formData = new FormData();
+            formData.append("file", file);
+            const uploadUrl = BASE_IP + URLS_ENDPOINT.FILE_STORE_SERVICE.UPLOAD_FILE;
+            const response = await postFORMdata(uploadUrl, formData);
+            const fileStoreId = response?.data?.files[0]?.fileStoreId;
+
+            clearErrors(formValueName);
+            setValue(formValueName, renamedFile, { shouldValidate: true });
+
+            if (fileType === 'STABILITY_BOOKLETS' || fileType === 'TONNAGE_BOOKLETS') {
+                setValue(fileType + "_fileStoreId", fileStoreId);
+            } else {
+                setValue(fileType + "_fileStoreId_" + fileIndex, fileStoreId);
+            }
+
+            toast.success("File uploaded successfully!");
+            loaderRef?.current?.hide();
+
+        } catch (err) {
+            loaderRef?.current?.hide();
+            console.error(err);
+            setError(formValueName, {
+                type: "manual",
+                message: t("File upload failed"),
+            });
+            toast.error("File upload failed...");
+        }
+    };
+
+    const removeFileInput = async (type, id, fileDownloadKey) => {
+        if (viewMode) return;
+
+        // In registration mode, just remove from state without API call
+        if (isRegistrationMode) {
+            setFiles(prev => prev.filter((file) => file.id !== id));
+            
+            unregister(`${type}_file_${id}`);
+            unregister(`${type}_desc_${id}`);
+            unregister(`${type}_fileStoreId_${id}`);
+            clearErrors([`${type}_file_${id}`, `${type}_desc_${id}`]);
+
+            setValue(`${type}_file_${id}`, null);
+            setValue(`${type}_desc_${id}`, "");
+            setValue(`${type}_fileStoreId_${id}`, null);
+            return;
+        }
+
+        // For logged-in users, call API to delete
+        const fileStoreId = watch(`${type}_fileStoreId_${id}`);
+        if (fileStoreId) {
+            const res = await deleteFile(fileStoreId, loaderRef);
+            if (!res) {
+                return;
+            }
+        }
+        
+        setFiles(prev => prev.filter((file) => file.id !== id));
+
+        unregister(`${type}_file_${id}`);
+        unregister(`${type}_desc_${id}`);
+        unregister(`${type}_fileStoreId_${id}`);
+        clearErrors([`${type}_file_${id}`, `${type}_desc_${id}`]);
+
+        setValue(`${type}_file_${id}`, null);
+        setValue(`${type}_desc_${id}`, "");
+        setValue(`${type}_fileStoreId_${id}`, null);
+    };
+
+    return (
+        <Card className="h-100 shadow-sm border-0">
+            <Card.Header className="bg-light border-0 py-2">
+                <div className="d-flex justify-content-between align-items-start">
+                    <div className="d-flex justify-content-start align-items-start p-1">
+                        <h6
+                            className="mb-0 text-primary fw-bold d-flex align-items-center"
+                            style={{ fontSize: isMobile ? "0.8rem" : "0.75rem" }}
+                        >
+                            {icon}
+                            <span className="ms-2">{title}</span>
+                        </h6>
+                        <span
+                            className="ms-2 badge bg-primary rounded-pill"
+                            style={{ fontSize: "0.6rem" }}
+                        >
+                            {viewMode ? filesWithData.length : editMode ? `${filesWithData.length}/50` : files.length} files
+                        </span>
+                    </div>
+                    <div className="d-flex justify-content-end align-items-start">
+                        {!viewMode && (
+                            <Button
+                                variant="primary"
+                                size="sm"
+                                onClick={() => addFileInput(type)}
+                                className={`${styles.addBtn} ms-2 badge bg-primary rounded-pill`}
+                                style={{ fontSize: "0.6rem" }}
+                                disabled={files.length >= 50}
+                            >
+                                <BsPlus className="me-1" size={10} />
+                                <span className={isMobile ? "d-none" : ""}>Add</span>
+                                <span className={isMobile ? "" : "d-none"}>+</span>
+                            </Button>
+                        )}
+                    </div>
+                </div>
+            </Card.Header>
+
+            <Card.Body className="p-1">
+                <div
+                    style={{
+                        maxHeight: isMobile ? "350px" : "250px",
+                        overflowY: "auto",
+                    }}
+                >
+                    {viewMode ? (
+                        filesWithData.length > 0 ? (
+                            filesWithData.map((fileInput, index) => {
+                                const fileData = watch(`${type}_file_${fileInput.id}`);
+                                const descData = watch(`${type}_desc_${fileInput.id}`);
+
+                                return (
+                                    <DocumentCard
+                                        key={fileInput.id}
+                                        fileName={fileData.name}
+                                        description={descData || `${title} document ${index + 1}`}
+                                        fileSize={fileData.size}
+                                        onDownload={() => handleDownload(watch(`${type}_fileStoreId_${fileInput.id}`), watch(`${type}_file_${fileInput.id}`)?.name)}
+                                        t={t}
+                                    />
+                                );
+                            })
+                        ) : (
+                            <div className="text-center py-3 text-muted">
+                                <div className="bg-light rounded-circle p-2 d-inline-flex mb-2">
+                                    <BsFileEarmarkPdf size={20} className="opacity-50" />
+                                </div>
+                                <p className="mb-0" style={{ fontSize: "0.7rem" }}>
+                                    No files uploaded
+                                </p>
+                            </div>
+                        )
+                    ) : (
+                        files.map((fileInput, idx) => {
+                            return (
+                                <div key={fileInput.id}>
+                                    <FileUploadCard
+                                        label={t("vesselOwnerRegistration.Choose_File")}
+                                        name={`${type}_file_${fileInput.id}`}
+                                        fileDownloadKey={`${type}_fileStoreId_${fileInput.id}`}
+                                        fileIndex={fileInput.id}
+                                        displayIndex={idx + 1}
+                                        onRemove={() => removeFileInput(type, fileInput.id)}
+                                        showRemove={files.length > 1}
+                                        watch={watch}
+                                        clearErrors={clearErrors}
+                                        setValue={setValue}
+                                        register={register}
+                                        errors={errors}
+                                        setError={setError}
+                                        t={t}
+                                        uploadFile={uploadFile}
+                                        viewMode={viewMode}
+                                        editMode={editMode}
+                                        handleDownload={handleDownload}
+                                        type={type}
+                                        isRegistrationMode={isRegistrationMode}
+                                        ref={loaderRef}
+                                    />
+                                </div>
+                            );
+                        })
+                    )}
+                </div>
+            </Card.Body>
+        </Card>
+    );
+});
+
+export default MultiFile;
+export const OWNER_DOC_CONFIG = {
+  baseDocuments: [
+    {
+      name: "panCardUpload",
+      code: "PAN",
+      label: "PAN Card",
+      labelKey: "PAN Card",
+      type: "file",
+      required: (formData) =>
+        formData?.categoryOfOwner?.toLowerCase() === "indv",
+      colSize: 6,
+    },
+    {
+      name: "gstUpload",
+      code: "GST",
+      label: "GST Certificate",
+      labelKey: "GST Certificate",
+      type: "file",
+      required: () => false,
+      colSize: 6,
+    },
+    {
+      name: "tradeLicenseUpload",
+      code: "TRADE_LICENSE",
+      label: "Trade License",
+      labelKey: "Trade License",
+      type: "file",
+      required: () => false,
+      colSize: 6,
+    },
+  ],
+
+  categoryDocuments: {
+    INDV: [
+      {
+        name: "aadhaarUpload",
+        code: "AADHAAR",
+        label: "Aadhaar Card",
+        labelKey: "Aadhaar Card",
+        type: "file",
+        required: () => true,
+        colSize: 6,
+      },
+      {
+        name: "dlUpload",
+        code: "DL",
+        label: "Driving License",
+        labelKey: "DL",
+        type: "file",
+        required: () => false,
+        colSize: 6,
+      },
+    ],
+    COS: [
+      {
+        name: "cosRegCertUpload",
+        code: "COS_REG_CERT",
+        label: "Certificate of Registration of Co-operative Society",
+        labelKey: "COS_REG_CERT",
+        type: "file",
+        required: () => true,
+        colSize: 6,
+      },
+      {
+        name: "cosResolutionUpload",
+        code: "COS_RESOLUTION",
+        label: "Board or General Body Resolution",
+        labelKey: "COS_RESOLUTION",
+        type: "file",
+        required: () => true,
+        colSize: 6,
+      },
+    ],
+    BE_COS: [
+      {
+        name: "beCosRegDocsUpload",
+        code: "BE_COS_REG_DOCS",
+        label: "Relevant Registration/Incorporation Documents",
+        labelKey: "BE_COS_REG_DOCS",
+        type: "file",
+        required: () => true,
+        colSize: 6,
+      },
+      {
+        name: "beCosGovDocsUpload",
+        code: "BE_COS_GOV_DOCS",
+        label: "Governing Documents",
+        labelKey: "BE_COS_GOV_DOCS",
+        type: "file",
+        required: () => true,
+        colSize: 6,
+      },
+      {
+        name: "beCosResolutionUpload",
+        code: "BE_COS_RESOLUTION",
+        label: "Board Resolution Authorizing Ownership",
+        labelKey: "BE_COS_RESOLUTION",
+        type: "file",
+        required: () => true,
+        colSize: 6,
+      },
+    ],
+    COMPANY: [
+      {
+        name: "compRegCertUpload",
+        code: "COMP_REG_CERT",
+        label: "Certificate of Registration",
+        labelKey: "COMP_REG_CERT",
+        type: "file",
+        required: () => true,
+        colSize: 6,
+      },
+      {
+        name: "compMoaAoaUpload",
+        code: "COMP_MOA_AOA",
+        label: "Memorandum & Articles of Association",
+        labelKey: "COMP_MOA_AOA",
+        type: "file",
+        required: () => true,
+        colSize: 6,
+      },
+      {
+        name: "compBoardResUpload",
+        code: "COMP_BOARD_RESOLUTION",
+        label: "Board Resolution",
+        labelKey: "COMP_BOARD_RESOLUTION",
+        type: "file",
+        required: () => true,
+        colSize: 6,
+      },
+    ],
+    PARTNER_FIRM: [
+      {
+        name: "partnerRegCertUpload",
+        code: "PARTNER_REG_CERT",
+        label: "Registration Certificate",
+        labelKey: "PARTNER_REG_CERT",
+        type: "file",
+        required: () => true,
+        colSize: 6,
+      },
+      {
+        name: "partnerDeedUpload",
+        code: "PARTNER_DEED",
+        label: "Partnership Deed / LLP Agreement",
+        labelKey: "PARTNER_DEED",
+        type: "file",
+        required: () => true,
+        colSize: 6,
+      },
+    ],
+    TRUST_SOC: [
+      {
+        name: "trustRegCertUpload",
+        code: "TRUST_REG_CERT",
+        label: "Registration Certificate under relevant Act",
+        labelKey: "TRUST_REG_CERT",
+        type: "file",
+        required: () => true,
+        colSize: 6,
+      },
+      {
+        name: "trustDeedUpload",
+        code: "TRUST_DEED",
+        label: "Trust Deed / Society Bylaws",
+        labelKey: "TRUST_DEED",
+        type: "file",
+        required: () => true,
+        colSize: 6,
+      },
+    ],
+    LBC_FDI: [
+      {
+        name: "fdiRegCertUpload",
+        code: "FDI_REG_CERT",
+        label: "Certificate of Incorporation / Registration",
+        labelKey: "FDI_REG_CERT",
+        type: "file",
+        required: () => true,
+        colSize: 6,
+      },
+      {
+        name: "fdiResolutionUpload",
+        code: "FDI_RESOLUTION",
+        label: "Board Resolution / Governing Body Approval",
+        labelKey: "FDI_RESOLUTION",
+        type: "file",
+        required: () => true,
+        colSize: 6,
+      },
+      {
+        name: "fdiProofUpload",
+        code: "FDI_PROOF",
+        label: "Proof of adherence to FDI policy limits",
+        labelKey: "FDI_PROOF",
+        type: "file",
+        required: () => true,
+        colSize: 6,
+      },
+    ],
+    FOREIGN_VSL: [
+      {
+        name: "vslBareboatUpload",
+        code: "VSL_BAREBOAT",
+        label: "Bareboat Charter-cum-Demise Agreement",
+        labelKey: "VSL_BAREBOAT",
+        type: "file",
+        required: () => true,
+        colSize: 6,
+      },
+      {
+        name: "vslChartererProofUpload",
+        code: "VSL_CHARTERER_PROOF",
+        label: "Proof of Indian Charterer’s Eligibility",
+        labelKey: "VSL_CHARTERER_PROOF",
+        type: "file",
+        required: () => true,
+        colSize: 6,
+      },
+    ],
+    STATE_DEPT: [
+      {
+        name: "stateAoaUpload",
+        code: "STATE_AOA",
+        label: "Articles of Association",
+        labelKey: "STATE_AOA",
+        type: "file",
+        required: () => true,
+        colSize: 6,
+      },
+      {
+        name: "stateMoaUpload",
+        code: "STATE_MOA",
+        label: "Memorandum of Association",
+        labelKey: "STATE_MOA",
+        type: "file",
+        required: () => true,
+        colSize: 6,
+      },
+    ],
+    CENTRAL_DEPT: [
+      {
+        name: "centralAoaUpload",
+        code: "CENT_AOA",
+        label: "Articles of Association",
+        labelKey: "CENT_AOA",
+        type: "file",
+        required: () => true,
+        colSize: 6,
+      },
+      {
+        name: "centralMoaUpload",
+        code: "CENT_MOA",
+        label: "Memorandum of Association",
+        labelKey: "CENT_MOA",
+        type: "file",
+        required: () => true,
+        colSize: 6,
+      },
+    ],
+    LOCAL_BODY: [
+      {
+        name: "localAoaUpload",
+        code: "LOCAL_AOA",
+        label: "Articles of Association",
+        labelKey: "LOCAL_AOA",
+        type: "file",
+        required: () => true,
+        colSize: 6,
+      },
+      {
+        name: "localMoaUpload",
+        code: "LOCAL_MOA",
+        label: "Memorandum of Association",
+        labelKey: "LOCAL_MOA",
+        type: "file",
+        required: () => true,
+        colSize: 6,
+      },
+    ],
+    OTHER: [
+      {
+        name: "otherPanUpload",
+        code: "OTHER_PAN",
+        label: "PAN",
+        labelKey: "OTHER_PAN",
+        type: "file",
+        required: () => true,
+        colSize: 6,
+      },
+      {
+        name: "otherGstUpload",
+        code: "OTHER_GST",
+        label: "GST",
+        labelKey: "OTHER_GST",
+        type: "file",
+        required: () => true,
+        colSize: 6,
+      },
+    ],
+  },
+};
+
+export const getDocumentsForOwner = (formData = {}, ownerCd = null, t = null) => {
+  const ownerCode = formData?.categoryOfOwner || ownerCd;
+
+  return [
+    ...OWNER_DOC_CONFIG.baseDocuments,
+    ...(OWNER_DOC_CONFIG.categoryDocuments[ownerCode] || []),
+  ].map((doc) => ({
+    ...doc,
+    label: t?.(`vesselOwnerRegistration.${doc.labelKey}`) || doc.label,
+    required:
+      typeof doc.required === "function"
+        ? doc.required(formData)
+        : !!doc.required,
+  }));
 };
