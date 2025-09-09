@@ -1,47 +1,247 @@
-// Add this case to your existing DynamicViewFields component
-case "additional_docs":
-  return (
-    <div className="additional-docs-section">
-      <div className="additional-docs-header">
-        <FaFileUpload className="text-primary" size={20} />
-        <h6 className="mb-0 text-primary fw-bold">{field.label}</h6>
-        <span className="badge bg-primary rounded-pill" style={{ fontSize: "0.7rem" }}>
-          {formData.additionalDocuments?.length || 0} files
-        </span>
-      </div>
+import React, { useRef } from 'react';
+import { Row, Col, Button } from 'react-bootstrap';
+import { useFormContext } from 'react-hook-form';
+import InputText from './InputText.tsx';
+import InputFile from './InputFile.tsx';
+import { FaDownload, FaEye, FaFileAlt, FaExclamationCircle } from 'react-icons/fa';
+import { BsFileEarmarkX } from 'react-icons/bs';
+import { renameFile } from '../../utils/constants.ts';
+import {
+  getFromLocalStorage,
+  setToLocalStorage,
+} from "../../utils/localStorageUtils.js";
+import axios from 'axios';
+import { toast } from 'react-toastify';
+
+const DynamicViewFields = ({ fields, setFormData, formData }) => {
+  const { register, formState: { errors }, setValue, watch, setError } = useFormContext();
+  const loaderRef = useRef();
+
+  const handleDownload = async (fileData) => {
+    try {
+      if (!fileData?.downLoadFile) {
+        toast.error("No download URL available");
+        return;
+      }
       
-      {formData.additionalDocuments?.length > 0 ? (
-        <div className="additional-docs-grid">
-          {formData.additionalDocuments.map((doc, index) => (
-            <div key={doc.fileStoreId} className="additional-doc-card">
-              <div className="file-item">
-                <div className="file-info">
-                  <div className="file-icon">
-                    <BsFileEarmarkPdf size={16} />
+      loaderRef.current?.show?.();
+
+      const accessToken = getFromLocalStorage("access_token");
+      const tokenDetails = getFromLocalStorage("tokenDetails");
+      const sessionState = tokenDetails
+        ? JSON.parse(tokenDetails)?.session_state
+        : "";
+
+      const response = await axios({
+        method: "GET",
+        url: fileData.downLoadFile,
+        responseType: "blob",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "X-Request-ID": sessionState,
+          Accept: "application/octet-stream",
+        },
+      });
+
+      if (response.data) {
+        let filename = fileData.fileName || "document";
+        const contentDisposition = response.headers["content-disposition"];
+        if (contentDisposition) {
+          const filenameMatch = contentDisposition.match(
+            /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/
+          );
+          if (filenameMatch && filenameMatch[1]) {
+            filename = filenameMatch[1].replace(/['"]/g, "");
+          }
+        }
+
+        const blob = new Blob([response.data], {
+          type: response.headers["content-type"] || "application/octet-stream",
+        });
+        const blobUrl = window.URL.createObjectURL(blob);
+
+        const link = document.createElement("a");
+        link.href = blobUrl;
+        link.setAttribute("download", filename);
+        document.body.appendChild(link);
+        link.click();
+
+        setTimeout(() => {
+          document.body.removeChild(link);
+          window.URL.revokeObjectURL(blobUrl);
+        }, 100);
+      }
+    } catch (error) {
+      console.error("Error downloading file:", error);
+      toast.error("Failed to download file. Please try again.");
+    } finally {
+      loaderRef.current?.hide?.();
+    }
+  };
+
+  const handleView = (fileData) => {
+    if (fileData && fileData.downLoadFile) {
+      window.open(fileData.downLoadFile, '_blank');
+    } else {
+      console.warn("No view URL available for file");
+    }
+  };
+
+  const renderField = (field) => {
+    if (field.showIf && !field.showIf()) return null;
+
+    const handleChange = (e) => {
+      if (field?.onChange) field.onChange(e, setValue, watch);
+    };
+
+    switch (field.type) {
+      case 'file':
+        if (field.disabled || field.displayOnly) {
+          const fileData = formData[field.name];
+          const hasFile = fileData && (fileData.fileName || fileData.downLoadFile);
+          
+          return (
+            <div className="file-field">
+              <label className="field-label">
+                <FaFileAlt size={12} className="field-icon" />
+                {field.label}
+              </label>
+              <div className="file-display">
+                {!hasFile ? (
+                  <div className="no-file">
+                    <FaExclamationCircle size={14} className="no-data-icon" />
+                    <span>No data available</span>
                   </div>
-                  <div className="file-name">{doc.fileName}</div>
-                </div>
-                <div className="file-actions">
-                  <Button
-                    variant="outline-primary"
-                    size="sm"
-                    className="file-btn view-btn"
-                    onClick={() => window.open(doc.downLoadFile, '_blank')}
-                  >
-                    <BsDownload size={12} />
-                  </Button>
-                </div>
+                ) : (
+                  <div className="file-item">
+                    <div className="file-info">
+                      <FaFileAlt size={14} className="file-icon" />
+                      <span className="file-name">
+                        {fileData.fileName || `${field.label}.pdf`}
+                      </span>
+                    </div>
+                    <div className="file-actions">
+                      {/* <Button 
+                        variant="outline-primary" 
+                        size="sm" 
+                        onClick={() => handleView(fileData)}
+                        className="file-btn view-btn"
+                        title="View"
+                      >
+                        <FaEye size={10} />
+                      </Button> */}
+                      <Button 
+                        variant="outline-success" 
+                        size="sm" 
+                        onClick={() => handleDownload(fileData)}
+                        className="file-btn download-btn"
+                        title="Download"
+                      >
+                        <FaDownload size={10} />
+                      </Button>
+                    </div>
+                  </div>
+                )}
               </div>
+              <input
+                type="file"
+                className="d-none"
+                disabled
+                {...register(field.name)}
+              />
             </div>
-          ))}
-        </div>
-      ) : (
-        <div className="text-center py-3 text-muted">
-          <BsFileEarmarkPdf size={32} className="opacity-50 mb-2" />
-          <p className="mb-0" style={{ fontSize: "0.9rem" }}>
-            No additional documents uploaded
-          </p>
-        </div>
-      )}
-    </div>
+          );
+        }
+        return (
+          <InputFile
+            label={field.label}
+            required={field.required}
+            name={field.name}
+            key={field.name}
+            register={register(field.name)}
+            errors={errors}
+            onChange={(e) => {
+              if (e.target.files && e?.target?.files[0]) {
+                const file = e.target.files[0];
+                const extension = file?.name?.substring(file?.name?.lastIndexOf('.'));
+                const fileName = `${field.label}${extension}`;
+                file.originalName = fileName;
+                setValue(field.name, renameFile(file, fileName));
+                setFormData(prev => {
+                  const updated = { ...prev, [field.name]: file };
+                  return updated;
+                });
+
+                const validTypes = ['application/pdf', 'image/jpeg', 'image/png', 'image/jpg'];
+                if (!validTypes.includes(file.type)) {
+                  setError(field.name, {
+                    type: 'manual',
+                    message: 'Only PDF, JPG or PNG files are allowed'
+                  });
+                }
+
+                if (file.size > 2 * 1024 * 1024) {
+                  setError(field.name, {
+                    type: 'manual',
+                    message: 'File size should not exceed 2MB'
+                  });
+                }
+              }
+            }}
+            className="mb-4"
+            watch={watch}
+            accept=".pdf,.jpg,.jpeg,.png"
+            defaultValue={watch(field.name)}
+          />
+        );
+
+      default:
+        const fieldValue = formData[field.name];
+        const hasData = fieldValue && fieldValue !== '' && fieldValue !== null && fieldValue !== undefined;
+        
+        return (
+          <div className="text-field">
+            <label className="form-label">{field.label}</label>
+            {!hasData ? (
+              <div className="no-data-field">
+                <FaExclamationCircle size={12} className="no-data-icon" />
+                <span>No data available</span>
+              </div>
+            ) : (
+              <InputText
+                label=""
+                required={field.required}
+                name={field.name}
+                key={field.name}
+                type={field.type}
+                placeholder={field.placeholder}
+                register={register(field?.name, {
+                  ...field.validation,
+                })}
+                onChange={handleChange}
+                errors={errors}
+                readOnly={field.readOnly}
+                icon={field.icon}
+                maxlength={field?.maxlength}
+                onKeyDown={field?.keyDown}
+                disabled={field?.disabled || false}
+                className="form-input"
+              />
+            )}
+          </div>
+        );
+    }
+  };
+
+  return (
+    <Row className="g-3">
+      {fields.map((field, index) => (
+        <Col key={index} md={field.colSize || 12}>
+          {renderField(field)}
+        </Col>
+      ))}
+    </Row>
   );
+};
+
+export default DynamicViewFields;
