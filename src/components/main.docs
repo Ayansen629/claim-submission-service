@@ -1,4 +1,68 @@
-useEffect(() => {
+import React, { useState, useEffect } from "react";
+import {
+  Card,
+  Button,
+  Container,
+  Row,
+  Col,
+  Spinner,
+  Image,
+} from "react-bootstrap";
+import {
+  useParams,
+  useNavigate,
+  useLocation,
+  useSearchParams,
+} from "react-router-dom";
+import { IconButton, Typography, Tooltip } from "@mui/material";
+import {
+  ArrowBack,
+  CheckCircleOutline,
+  FileDownload,
+  ErrorOutline,
+  Close as CloseIcon,
+} from "@mui/icons-material";
+
+import {
+  FaCheckCircle,
+  FaExclamationCircle,
+  FaExclamationTriangle,
+} from "react-icons/fa";
+
+// import logo from "../../assets/images/IWT_Icon.jpg";
+import bb_bg from "../../assets/images/svg-images/bengal-logo.svg";
+
+import "./styles/PaymentPage.css";
+import { postData } from "../../services/http.service.ts";
+import { SERVICE_BASE, URLS_ENDPOINT } from "../../utils/urlsConstants.ts";
+import { toast } from "react-toastify";
+import { getFromLocalStorage } from "../../utils/localStorageUtils.js";
+import { House } from "react-bootstrap-icons";
+import { useTranslation } from "react-i18next";
+import { text } from "@fortawesome/fontawesome-svg-core";
+
+const PaymentPage = () => {
+  // const { invoiceId } = useParams();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [status, setStatus] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [downloadLoading, setDownloadLoading] = useState(false);
+  const { t } = useTranslation();
+
+  const paymentData = location.state?.paymentData;
+  const fullPaymentData = location.state?.fullPaymentData?.data;
+
+  const [searchParams] = useSearchParams();
+
+  const urlApplicationNo = searchParams?.get("applicationNo");
+  const txnId = searchParams.get("txnId");
+  const invoiceId = searchParams.get("paymentId");
+
+  const applicationNumber =
+    urlApplicationNo || location?.state?.applicationNumber || searchParams.get("applicationNo") || invoiceId;
+
+  useEffect(() => {
   // Get URL status first
   const urlStatus = searchParams.get("status");
   
@@ -16,3 +80,561 @@ useEffect(() => {
     return () => clearTimeout(timer);
   }
 }, [searchParams, applicationNumber, navigate]);
+
+  // console.log(fullPaymentData, "PAYMENTData");
+  //   console.log("Transaction ID from URL:", txnId);
+
+  // Get payment type based on billtype
+  const getPaymentType = () => {
+    const billtype = fullPaymentData?.billtype;
+
+    switch (billtype) {
+      case "DRAWINGAPPROVAL":
+        return "Drawing Approval";
+      case "SUPERVISIONCHARGE":
+        return "Supervision Fee";
+      case "APPLICATIONCHARGE":
+        return "Application Charge Fee";
+      case "INITIALSURVEYCHARGE":
+        return "Initial Survey Charge";
+      default:
+        return "Drawing Approval";
+    }
+  };
+
+  useEffect(() => {
+    const urlStatus = searchParams.get("status");
+    console.log("URL Status:", urlStatus);
+
+    if (urlStatus === "SUCCESS") {
+      console.log("Payment was successful!");
+      setStatus("success");
+    } else if (urlStatus === "FAILED" || urlStatus === "CANCELLED") {
+      console.log("Payment failed or cancelled.");
+      setStatus("error");
+    }
+  }, [searchParams]);
+
+  const formatCurrency = (amount) => {
+    return new Intl.NumberFormat("en-IN", {
+      style: "currency",
+      currency: "INR",
+      minimumFractionDigits: 2,
+    }).format(amount);
+  };
+
+  const handlePayment = async () => {
+    if (!fullPaymentData) {
+      toast.error("Payment data not available");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const payload = {
+        calculation: fullPaymentData,
+        // calculation: {
+        // totalAmount: fullPaymentData.totalAmount,
+        // totalAmountAtergst: fullPaymentData.totalAmountAtergst,
+        // cgst: fullPaymentData.cgst,
+        // igst: fullPaymentData.igst,
+        // sgst: fullPaymentData.sgst,
+        // billtype: fullPaymentData.billtype,
+        // applicationNumber: fullPaymentData.applicationNumber,
+        // applicationUuid: fullPaymentData.applicationUuid,
+        // feesDetailsl: fullPaymentData.feesDetailsl
+        // }
+      };
+
+      const apiUrl =
+        SERVICE_BASE.IWT_REGISTRATION +
+        URLS_ENDPOINT.VESSEL_SERVICE.PAYMENT_FEES;
+      const response = await postData(apiUrl, payload);
+      console.log(response, "PAYMENT RESPONSE");
+
+      if (response?.data?.data?.paymentStatusUrl) {
+        const paymentStatusUrl = response.data.data.paymentStatusUrl;
+        
+
+        if (paymentStatusUrl.includes("status=SUCCESS")) {
+          navigate(paymentStatusUrl);
+        } else {
+          navigate(paymentStatusUrl);
+        }
+      } else {
+        setStatus("error");
+        toast.error("Payment failed. Please try again.");
+      }
+    } catch (error) {
+      console.error("Payment error:", error);
+      setStatus("error");
+      toast.error("Payment failed. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDownloadReceipt = async () => {
+    if (!txnId) {
+      toast.error("Transaction ID not found");
+      return;
+    }
+
+    setDownloadLoading(true);
+    try {
+      const payload = {
+        formType: "INVOICE",
+        transactionNo: txnId,
+        isUploadReq: true,
+      };
+
+      const accessToken = getFromLocalStorage("access_token");
+      const tokenDetails = getFromLocalStorage("tokenDetails");
+      const sessionState = tokenDetails
+        ? JSON.parse(tokenDetails)?.session_state
+        : "";
+
+      const apiUrl =
+        SERVICE_BASE.IWT_PDFSERVICE +
+        URLS_ENDPOINT.VESSEL_SERVICE.INVOICE_DOWNLOAD;
+      const response = await fetch(apiUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+          "X-Request-ID": sessionState,
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (response.ok) {
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = `invoice_${applicationNumber}_${txnId}.pdf`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(url);
+        toast.success("Receipt downloaded successfully!");
+      } else {
+        toast.error("Failed to generate receipt");
+      }
+    } catch (error) {
+      console.error("Receipt download error:", error);
+      toast.error("Failed to download receipt. Please try again.");
+    } finally {
+      setDownloadLoading(false);
+    }
+  };
+
+  const textStyle = {
+    fontFamily: "Aptos, sans-serif",
+    fontWeight: 600,
+    fontSize: "1.1em", // 14px → 0.875rem
+    lineHeight: "1.75rem", // 28px → 1.75rem
+    letterSpacing: "0",
+    color: "#1A1A1A",
+  };
+
+  const goHome = () => {
+    navigate("/dashboard");
+  };
+
+  if (!applicationNumber || !location?.state) {
+    return (
+      <div className="d-flex align-items-center justify-content-center min-vh-50 bg-light mt-5">
+        <Container>
+          <Row className="justify-content-center">
+            <Col xs={12} md={10} lg={8} xl={6}>
+              <Card className="shadow border-0 rounded-4 p-4 text-center justify-content-center align-items-center  bg-white">
+                <FaExclamationTriangle
+                  style={{ fontSize: 50, color: "#dc3545" }}
+                  className="text-center"
+                />
+                <h5
+                  className="fw-bold mt-3"
+                  style={{ color: "#dc3545", fontSize: "1.5rem" }}
+                >
+                  Invalid Application Details
+                </h5>
+                <p className="fw-semibold mt-2 mb-4">
+                  We couldn’t find a valid Application number or payment data.
+                  You will be redirected to the dashboard shortly.
+                </p>
+
+                <div className="d-flex flex-wrap justify-content-center gap-3">
+                  <Button
+                    variant="outline-secondary"
+                    className="d-flex align-items-center px-4 py-2 rounded-pill shadow-sm"
+                    onClick={() => navigate(-1)}
+                  >
+                    <ArrowBack className="me-2" /> Go Back
+                  </Button>
+
+                  <Button
+                    variant="primary"
+                    className="d-flex align-items-center px-4 py-2 rounded-pill shadow-sm"
+                    style={{
+                      backgroundColor: "#1056B2",
+                      border: "none",
+                    }}
+                    onClick={() => navigate("/dashboard", { replace: true })}
+                  >
+                    <House className="me-2" /> Go to Dashboard
+                  </Button>
+                </div>
+              </Card>
+            </Col>
+          </Row>
+        </Container>
+      </div>
+    );
+  }
+  return (
+    <Card
+      fluid
+      className="payment-card mt-2"
+      style={{ background: "#F5F5F5;!important", minHeight: "100vh" }}
+    >
+      <Row className="mt-1 mb-3 px-3 align-items-center">
+        <Col xs="auto">
+          <Tooltip title="Back to Dashboard">
+            <IconButton
+              onClick={goHome}
+              sx={{
+                backgroundColor: "#2466BF",
+                color: "#fff",
+                "&:hover": {
+                  backgroundColor: "#1a4d8c",
+                  transform: "scale(1.05)",
+                  transition: "all 0.2s ease-in-out",
+                },
+              }}
+            >
+              <ArrowBack />
+            </IconButton>
+          </Tooltip>
+        </Col>
+
+        <Col className="d-flex align-items-center flex-wrap gap-2">
+          <span className="fw-bold m-0">Application Number</span>
+          <span
+            style={{
+              minWidth: "auto",
+              padding: "0.4rem 1rem",
+              borderRadius: "0.5rem",
+              backgroundColor: "#22AEFF",
+              color: "white",
+              fontWeight: 600,
+              fontSize: "0.95rem",
+              whiteSpace: "nowrap",
+            }}
+          >
+            #{applicationNumber}
+          </span>
+        </Col>
+      </Row>
+
+      <Row className="justify-content-center">
+        <Col xs={12} md={10} lg={8}>
+          <Card
+            className="rounded-4 border-0 p-4"
+            style={{
+              boxShadow: "0 12px 28px rgba(0, 0, 0, 0.1)",
+              background: "#F5F5F5",
+              borderRadius: "8px",
+              opacity: 1,
+            }}
+          >
+            {/* Background Overlay Image */}
+            <div
+              style={{
+                backgroundImage: `url(${bb_bg})`, // use your background image
+                backgroundSize: "contain",
+                backgroundRepeat: "no-repeat",
+                backgroundPosition: "center",
+                opacity: 0.08,
+                position: "absolute",
+                top: 0,
+                left: 0,
+                height: "100%",
+                width: "100%",
+                zIndex: 0,
+              }}
+            />
+
+            <div className="position-relative  pb-2" style={{ zIndex: 1 }}>
+              <p
+                className="text-center"
+                style={{
+                  fontSize: "1.65em",
+                  color: "#1056B2",
+                  fontWeight: "700",
+                }}
+              >
+                {t("home.title")}
+              </p>
+
+              <p
+                className="text-center mb-4"
+                style={{
+                  fontSize: "0.8em",
+                  position: "relative",
+                  bottom: "1rem",
+                  fontWeight: "550",
+                }}
+              >
+                {t("login.deptofTransport")}
+              </p>
+            </div>
+
+            <div
+              className="position-relative mb-4 pb-3"
+              style={{ zIndex: 1, bottom: "1rem" }}
+            >
+              {/* <div className="d-flex align-items-center">
+                <Image
+                  src={logo}
+                  alt="IWT Logo"
+                  height={50}
+                  style={{ objectFit: "contain" }}
+                />
+              </div> */}
+
+              <Typography
+                variant="h6"
+                className="text-center position-absolute top-50 start-50 translate-middle"
+                sx={{
+                  color: "#1056B2",
+                  fontWeight: 600,
+                  fontSize: "1.1rem",
+                }}
+              >
+                Secure Payment Portal
+              </Typography>
+            </div>
+
+            {/* <div className="text-center mb-3">
+              <Typography
+                variant="body1"
+                sx={{ color: "#2466BF", fontWeight: 600 }}
+              >
+                Application Number: <strong>{applicationNumber}</strong>
+              </Typography>
+            </div> */}
+
+            <div className="p-2 border-0" style={{ zIndex: 1 }}>
+              <div className="row mb-3 justify-content-center text-center">
+                <div className="col-10">
+                  <span style={textStyle}>Application Number &nbsp; :</span>
+                  <span
+                    style={{
+                      ...textStyle,
+                      padding: "0.4rem 1rem",
+                      fontWeight: "700",
+                    }}
+                  >
+                    {applicationNumber}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div
+              className="position-relative p-2"
+              style={{ zIndex: 1, bottom: "1rem" }}
+            >
+              {status !== "success" && (
+                <div className="row justify-content-center text-center">
+                  <div className="col-10">
+                    <span
+                      style={{
+                        ...textStyle,
+                        color: "#65980B",
+                        wordBreak: "break-word",
+                        fontWeight: "700",
+                      }}
+                    >
+                      Complete your payment for {getPaymentType()}
+                    </span>
+                  </div>
+                  {/* <div className="col-1"></div>
+                  <div className="col-5 text-start">
+                    <span
+                      style={{
+                        ...textStyle,
+                        padding: "0.4rem 1rem",
+                        color: "#65980B",
+                      }}
+                    >
+                      #{applicationNumber}
+                    </span>
+                  </div> */}
+                </div>
+              )}
+            </div>
+
+            {status === "success" && (
+              <div
+                className="text-center fade-in-up z-index-1"
+                style={{ zIndex: 1 }}
+              >
+                <CheckCircleOutline sx={{ fontSize: 70, color: "#86BC25" }} />
+                <Typography
+                  variant="h5"
+                  className="mt-3 fw-bold"
+                  sx={{ color: "#1056B2" }}
+                >
+                  Payment Successful!
+                </Typography>
+                <Typography
+                  className="fw-semi-bold mb-3"
+                  sx={{ color: "#1A1A1A" }}
+                >
+                  Thank you! Your payment has been completed successfully.
+                </Typography>
+                <div className="d-flex mt-4 justify-content-center gap-3 flex-wrap">
+                  <Button
+                    variant="success"
+                    onClick={handleDownloadReceipt}
+                    disabled={downloadLoading || !txnId}
+                    style={{
+                      backgroundColor: "#86BC25",
+                      borderColor: "#86BC25",
+                      padding: "10px 20px",
+                      fontWeight: "500",
+                      borderRadius: "8px",
+                      boxShadow: "0 4px 6px rgba(0, 0, 0, 0.1)",
+                      transition: "all 0.3s ease",
+                    }}
+                    onMouseEnter={(e) => {
+                      e.target.style.backgroundColor = "#218838";
+                      e.target.style.boxShadow =
+                        "0 6px 8px rgba(0, 0, 0, 0.15)";
+                      e.target.style.transform = "translateY(-2px)";
+                    }}
+                    onMouseLeave={(e) => {
+                      e.target.style.backgroundColor = "#86BC25";
+                      e.target.style.boxShadow = "0 4px 6px rgba(0, 0, 0, 0.1)";
+                      e.target.style.transform = "translateY(0)";
+                    }}
+                  >
+                    {downloadLoading ? (
+                      <Spinner animation="border" size="sm" className="me-2" />
+                    ) : (
+                      <FileDownload className="me-2" />
+                    )}
+                    {downloadLoading ? "Generating..." : "Download Receipt"}
+                  </Button>
+                  <Button
+                    variant="outline-primary"
+                    onClick={goHome}
+                    style={{
+                      backgroundColor: "transparent",
+                      border: "2px solid #2466BF",
+                      color: "#2466BF",
+                      padding: "10px 20px",
+                      fontWeight: "600",
+                      borderRadius: "8px",
+                      transition: "all 0.3s ease",
+                    }}
+                    onMouseEnter={(e) => {
+                      e.target.style.backgroundColor = "#2466BF";
+                      e.target.style.color = "#fff";
+                      e.target.style.boxShadow =
+                        "0 6px 8px rgba(36, 102, 191, 0.3)";
+                      e.target.style.transform = "translateY(-2px)";
+                    }}
+                    onMouseLeave={(e) => {
+                      e.target.style.backgroundColor = "transparent";
+                      e.target.style.color = "#2466BF";
+                      e.target.style.boxShadow = "none";
+                      e.target.style.transform = "translateY(0)";
+                    }}
+                  >
+                    <ArrowBack
+                      className="me-2"
+                      style={{ transition: "color 0.3s ease" }}
+                    />
+                    Back to Dashboard
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {status === "error" && (
+              <div
+                className="text-center py-4 fade-in-up z-index-1"
+                style={{ zIndex: 1 }}
+              >
+                <ErrorOutline sx={{ fontSize: 70, color: "red" }} />
+                <Typography variant="h5" className="mt-3 fw-bold text-danger">
+                  Payment Failed
+                </Typography>
+                <Typography className="text-muted mb-3">
+                  Oops! Something went wrong. Please try again.
+                </Typography>
+                <Button variant="danger" onClick={() => setStatus(null)}>
+                  Retry Payment
+                </Button>
+              </div>
+            )}
+
+            {!status && (
+              <div className="text-center" style={{ zIndex: 1 }}>
+                <Typography
+                  variant="body1"
+                  align="center"
+                  className="mt-2 mb-4"
+                  sx={{
+                    fontFamily: "Aptos",
+                    fontWeight: 600,
+                    fontStyle: "bold",
+                    fontSize: "1.5rem",
+                    lineHeight: "1.75rem",
+                    letterSpacing: "0",
+                    color: "#1A61C1",
+                  }}
+                >
+                  Amount Due :{" "}
+                  <span>
+                    {paymentData?.summary?.totalPayable
+                      ? formatCurrency(paymentData?.summary?.totalPayable)
+                      : "N/A"}
+                  </span>
+                </Typography>
+                <Button
+                  variant="primary"
+                  className="col-md-4 mt-1 py-2"
+                  style={{
+                    height: "3.5rem",
+                    borderRadius: "0.35rem",
+                    opacity: 1,
+                    backgroundColor: "#1A61C1",
+                    color: "#fff",
+                    fontWeight: 600,
+                  }}
+                  onClick={handlePayment}
+                  disabled={loading}
+                >
+                  {loading ? (
+                    <>
+                      <Spinner animation="border" size="sm" className="me-2" />
+                      Processing Payment...
+                    </>
+                  ) : (
+                    "Pay Now"
+                  )}
+                </Button>
+              </div>
+            )}
+          </Card>
+        </Col>
+      </Row>
+    </Card>
+  );
+};
+
+export default PaymentPage;
