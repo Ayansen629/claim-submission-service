@@ -1,17 +1,72 @@
-<Button
-  size="sm"
-  onClick={() => {
-    if (isDeclarationEditable) {
-      setIsDeclarationEditable(false);
-    } else {
-      handleGenerateDeclaration();
+const handleDownloadReceipt = async (rowData) => {
+    const txnId = rowData?.txnId;
+
+    if (!txnId) {
+      toast.error("Transaction ID not found");
+      return;
     }
-  }}
-  style={{
-    backgroundColor: `${isDeclarationEditable ? "#28a745" : "#00A3E0"} !important`, 
-    borderColor:`${isDeclarationEditable ? "#28a745" : "#00A3E0"} !important`,  
-    color:"#ffffff !important",
-  }}
->
-  {isDeclarationEditable ? "Save Declaration" : "Generate Declaration"}
-</Button>
+
+    try {
+      loaderRef.current?.show();
+
+      const payload = {
+        formType: "INVOICE",
+        transactionNo: txnId,
+        isUploadReq: true,
+      };
+
+      const accessToken = getFromLocalStorage("access_token");
+      const tokenDetails = JSON.parse(
+        getFromLocalStorage("tokenDetails") || "{}"
+      );
+      const sessionState = tokenDetails.session_state || "";
+
+      if (!accessToken) {
+        toast.error("Authentication token missing. Please login again.");
+        return;
+      }
+
+      const apiUrl =
+        SERVICE_BASE.IWT_PDFSERVICE +
+        URLS_ENDPOINT.VESSEL_SERVICE.INVOICE_DOWNLOAD;
+
+      const response = await fetch(apiUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+          "X-Request-ID": sessionState,
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        const errorMsg = await response.text();
+        throw new Error(errorMsg || "Failed to generate receipt");
+      }
+
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `invoice_${rowData?.applicationNo || "NA"}_${txnId}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+
+      loaderRef.current?.hide();
+
+      toast.success("Receipt downloaded successfully!");
+
+      window.URL.revokeObjectURL(url);
+
+    } catch (error) {
+      loaderRef.current?.hide();
+
+      console.error("Receipt download error:", error);
+      toast.error(
+        error.message || "Failed to download receipt. Please try again."
+      );
+    }
+  };
