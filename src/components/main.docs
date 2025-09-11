@@ -1,192 +1,669 @@
-import React, { useState, useEffect } from "react";
-import {
-  Card,
-  Button,
-  Container,
-  Row,
-  Col,
-  Spinner,
-  Image,
-} from "react-bootstrap";
-import {
-  useParams,
-  useNavigate,
-  useLocation,
-  useSearchParams,
-} from "react-router-dom";
-import { IconButton, Typography, Tooltip } from "@mui/material";
-import {
-  ArrowBack,
-  CheckCircleOutline,
-  FileDownload,
-  ErrorOutline,
-  Close as CloseIcon,
-} from "@mui/icons-material";
-
-import {
-  FaCheckCircle,
-  FaExclamationCircle,
-  FaExclamationTriangle,
-} from "react-icons/fa";
-
-// import logo from "../../assets/images/IWT_Icon.jpg";
-import bb_bg from "../../assets/images/svg-images/bengal-logo.svg";
-
-import "./styles/PaymentPage.css";
-import { postData } from "../../services/http.service.ts";
-import { SERVICE_BASE, URLS_ENDPOINT } from "../../utils/urlsConstants.ts";
-import { toast } from "react-toastify";
-import { getFromLocalStorage } from "../../utils/localStorageUtils.js";
-import { House } from "react-bootstrap-icons";
+import React, { useState, useEffect, useRef } from "react";
+import { Row, Col, Button, Card } from "react-bootstrap";
+import Collapsible from "../../../common/Collapsible.js";
 import { useTranslation } from "react-i18next";
-import { text } from "@fortawesome/fontawesome-svg-core";
+import InputFile from "../../../common/InputFile.tsx";
+import InputText from "../../../common/InputText.tsx";
+import { fetchAndViewFile, renameFile } from "../../../../utils/constants.ts";
+import {
+  BsDownload,
+  BsEyeFill,
+  BsFileEarmarkPdf,
+  BsPlus,
+  BsTrash,
+} from "react-icons/bs";
+import { BASE_IP, URLS_ENDPOINT } from "../../../../utils/urlsConstants.ts";
+import { postFORMdata } from "../../../../services/http.service.ts";
+import { FaClipboardList, FaPaperclip, FaTimesCircle } from "react-icons/fa";
+import { toast } from "react-toastify";
+import NewLoader from "../../../common/NewLoader.js";
+import axios from "axios";
+import { getFromLocalStorage } from "../../../../utils/localStorageUtils.js";
+import { deleteFile } from "../../../../utils/deleteFile.js";
+import styles from "./Documents.module.css";
 
-const PaymentPage = () => {
-  // const { invoiceId } = useParams();
-  const navigate = useNavigate();
-  const location = useLocation();
-  const [status, setStatus] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [downloadLoading, setDownloadLoading] = useState(false);
+const Documents = ({
+  formMethods,
+  viewMode = false,
+  editMode = false,
+  vesselRegisData,
+  tonnageRequired,
+  stabilityRequired,
+  setParentWorkOrderFiles,
+  setParentDrawingsFiles,
+}) => {
   const { t } = useTranslation();
+  const [formData, setFormData] = useState({});
+  const [workOrderFiles, setWorkOrderFiles] = useState([{ id: 1 }]);
+  const [drawingsFiles, setDrawingsFiles] = useState([{ id: 1 }]);
+  const [regVesselData, setRegVesselData] = useState(vesselRegisData);
+  const loaderRef = useRef();
 
-  const paymentData = location.state?.paymentData;
-  const fullPaymentData = location.state?.fullPaymentData?.data;
-
-  const [searchParams] = useSearchParams();
-
-  const urlApplicationNo = searchParams?.get("applicationNo");
-  const txnId = searchParams.get("txnId");
-  const invoiceId = searchParams.get("paymentId");
-
-  const applicationNumber =
-    urlApplicationNo || location?.state?.applicationNumber || searchParams.get("applicationNo") || invoiceId;
-
-  useEffect(() => {
-  // Get URL status first
-  const urlStatus = searchParams.get("status");
-  
-  // If we have a payment status (SUCCESS, FAILED, CANCELLED), don't redirect
-  if (urlStatus) {
-    return; // This is a payment response, let it show the appropriate page
-  }
-  
-  // Only redirect if no status and no application data
-  if (!applicationNumber) {
-    toast.error("Invalid or missing application details.");
-    const timer = setTimeout(() => {
-      navigate("/dashboard", { replace: true });
-    }, 3000);
-    return () => clearTimeout(timer);
-  }
-}, [searchParams, applicationNumber, navigate]);
-
-  // console.log(fullPaymentData, "PAYMENTData");
-  //   console.log("Transaction ID from URL:", txnId);
-
-  // Get payment type based on billtype
-  const getPaymentType = () => {
-    const billtype = fullPaymentData?.billtype;
-
-    switch (billtype) {
-      case "DRAWINGAPPROVAL":
-        return "Drawing Approval";
-      case "SUPERVISIONCHARGE":
-        return "Supervision Fee";
-      case "APPLICATIONCHARGE":
-        return "Application Charge Fee";
-      case "INITIALSURVEYCHARGE":
-        return "Initial Survey Charge";
-      default:
-        return "Drawing Approval";
-    }
-  };
+  const {
+    register,
+    watch,
+    setValue,
+    clearErrors,
+    getValues,
+    setError,
+    formState: { errors },
+    unregister,
+  } = formMethods;
 
   useEffect(() => {
-    const urlStatus = searchParams.get("status");
-    console.log("URL Status:", urlStatus);
-
-    if (urlStatus === "SUCCESS") {
-      console.log("Payment was successful!");
-      setStatus("success");
-    } else if (urlStatus === "FAILED" || urlStatus === "CANCELLED") {
-      console.log("Payment failed or cancelled.");
-      setStatus("error");
-    }
-  }, [searchParams]);
-
-  const formatCurrency = (amount) => {
-    return new Intl.NumberFormat("en-IN", {
-      style: "currency",
-      currency: "INR",
-      minimumFractionDigits: 2,
-    }).format(amount);
-  };
-
-  const handlePayment = async () => {
-    if (!fullPaymentData) {
-      toast.error("Payment data not available");
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const payload = {
-        calculation: fullPaymentData,
-        // calculation: {
-        // totalAmount: fullPaymentData.totalAmount,
-        // totalAmountAtergst: fullPaymentData.totalAmountAtergst,
-        // cgst: fullPaymentData.cgst,
-        // igst: fullPaymentData.igst,
-        // sgst: fullPaymentData.sgst,
-        // billtype: fullPaymentData.billtype,
-        // applicationNumber: fullPaymentData.applicationNumber,
-        // applicationUuid: fullPaymentData.applicationUuid,
-        // feesDetailsl: fullPaymentData.feesDetailsl
-        // }
-      };
-
-      const apiUrl =
-        SERVICE_BASE.IWT_REGISTRATION +
-        URLS_ENDPOINT.VESSEL_SERVICE.PAYMENT_FEES;
-      const response = await postData(apiUrl, payload);
-      console.log(response, "PAYMENT RESPONSE");
-
-      if (response?.data?.data?.paymentStatusUrl) {
-        const paymentStatusUrl = response.data.data.paymentStatusUrl;
-        
-
-        if (paymentStatusUrl.includes("status=SUCCESS")) {
-          navigate(paymentStatusUrl);
-        } else {
-          navigate(paymentStatusUrl);
+    setTimeout(() => {
+      Object.keys(formData).forEach((key) => {
+        if (formData[key] !== undefined) {
+          setValue(key, formData[key], { shouldValidate: false });
         }
+      });
+    }, 0);
+  }, [setValue, formData]);
+
+  useEffect(() => {
+    const initializeFiles = () => {
+      const workOrderIds = [];
+      const drawingIds = [];
+
+      if (viewMode) {
+        for (let i = 1; i <= 50; i++) {
+          const workOrderFile = getValues(`WORK_ORDER_file_${i}`);
+          const drawingFile = getValues(`DRAWINGS_file_${i}`);
+
+          if (workOrderFile && (workOrderFile.name || workOrderFile.size)) {
+            workOrderIds.push({ id: i });
+          }
+          if (drawingFile && (drawingFile.name || drawingFile.size)) {
+            drawingIds.push({ id: i });
+          }
+        }
+
+        setWorkOrderFiles(workOrderIds);
+        setParentWorkOrderFiles(workOrderIds);
+        setDrawingsFiles(drawingIds);
+        setParentDrawingsFiles(drawingIds);
+      } else if (editMode) {
+        for (let i = 1; i <= 50; i++) {
+          const workOrderFile = getValues(`WORK_ORDER_file_${i}`);
+          const drawingFile = getValues(`DRAWINGS_file_${i}`);
+
+          if (workOrderFile && (workOrderFile.name || workOrderFile.size)) {
+            workOrderIds.push({ id: i });
+          }
+          if (drawingFile && (drawingFile.name || drawingFile.size)) {
+            drawingIds.push({ id: i });
+          }
+        }
+
+        if (workOrderIds.length === 0) {
+          workOrderIds.push({ id: 1 });
+        }
+        if (drawingIds.length === 0) {
+          drawingIds.push({ id: 1 });
+        }
+
+        setWorkOrderFiles(workOrderIds);
+        setParentWorkOrderFiles(workOrderIds);
+        setDrawingsFiles(drawingIds);
+        setParentDrawingsFiles(drawingIds);
       } else {
-        setStatus("error");
-        toast.error("Payment failed. Please try again.");
+        for (let i = 1; i <= 50; i++) {
+          const workOrderFile = getValues(`WORK_ORDER_file_${i}`);
+          const drawingFile = getValues(`DRAWINGS_file_${i}`);
+
+          if (workOrderFile && (workOrderFile.name || workOrderFile.size)) {
+            workOrderIds.push({ id: i });
+          }
+          if (drawingFile && (drawingFile.name || drawingFile.size)) {
+            drawingIds.push({ id: i });
+          }
+        }
+
+        if (workOrderIds.length > 0) {
+          setWorkOrderFiles(workOrderIds);
+          setParentWorkOrderFiles(workOrderIds);
+        }
+        if (drawingIds.length > 0) {
+          setDrawingsFiles(drawingIds);
+          setParentDrawingsFiles(drawingIds);
+        }
       }
-    } catch (error) {
-      console.error("Payment error:", error);
-      setStatus("error");
-      toast.error("Payment failed. Please try again.");
-    } finally {
-      setLoading(false);
+    };
+
+    const timer = setTimeout(initializeFiles, 200);
+    return () => clearTimeout(timer);
+  }, [viewMode, editMode, getValues]);
+
+  useEffect(() => {
+    if (!viewMode && !editMode) {
+      const subscription = watch((value, { name, type }) => {
+        if (name && name.includes("_file_")) {
+          const fileType = name.includes("WORK_ORDER")
+            ? "WORK_ORDER"
+            : "DRAWINGS";
+          const fileId = parseInt(name.split("_").pop());
+
+          if (type === "change" && value[name]) {
+            if (fileType === "WORK_ORDER") {
+              setWorkOrderFiles((prev) => {
+                const exists = prev.some((f) => f.id === fileId);
+                if (!exists) {
+                  return [...prev, { id: fileId }].sort((a, b) => a.id - b.id);
+                }
+                return prev;
+              });
+              setParentWorkOrderFiles((prev) => {
+                const exists = prev.some((f) => f.id === fileId);
+                if (!exists) {
+                  return [...prev, { id: fileId }].sort((a, b) => a.id - b.id);
+                }
+                return prev;
+              });
+            } else if (fileType === "DRAWINGS") {
+              setDrawingsFiles((prev) => {
+                const exists = prev.some((f) => f.id === fileId);
+                if (!exists) {
+                  return [...prev, { id: fileId }].sort((a, b) => a.id - b.id);
+                }
+                return prev;
+              });
+              setParentDrawingsFiles((prev) => {
+                const exists = prev.some((f) => f.id === fileId);
+                if (!exists) {
+                  return [...prev, { id: fileId }].sort((a, b) => a.id - b.id);
+                }
+                return prev;
+              });
+            }
+          }
+        }
+      });
+
+      return () => subscription.unsubscribe();
+    }
+  }, [watch, viewMode, editMode]);
+
+  const DocumentCard = ({
+    fileName,
+    description,
+    onDownload,
+    fileSize,
+    onRemove,
+    showRemove = false,
+  }) => {
+    const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
+
+    useEffect(() => {
+      const handleResize = () => setIsMobile(window.innerWidth <= 768);
+      window.addEventListener("resize", handleResize);
+      return () => window.removeEventListener("resize", handleResize);
+    }, []);
+
+    return (
+      <Card className="mb-1 border-0 shadow-sm">
+        <Card.Body className="p-2">
+          <div className="d-flex justify-content-between align-items-center">
+            <div
+              className="d-flex align-items-center flex-grow-1 me-2"
+              style={{ minWidth: 0 }}
+            >
+              {!isMobile && (
+                <div className="bg-danger bg-opacity-10 rounded-circle p-1 me-2 flex-shrink-0">
+                  <BsFileEarmarkPdf className="text-danger" size={10} />
+                </div>
+              )}
+              <div style={{ minWidth: 0 }}>
+                <div
+                  className="text-primary fw-semibold"
+                  style={{
+                    fontSize: isMobile ? "0.8rem" : "0.7rem",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                    lineHeight: "1.3",
+                    marginBottom: isMobile ? "0" : "4px",
+                  }}
+                  title={fileName}
+                >
+                  {fileName}
+                </div>
+                {!isMobile && (
+                  <>
+                    <p
+                      className="mb-0 text-muted"
+                      style={{
+                        fontSize: "0.6rem",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {description}
+                    </p>
+                    {fileSize && (
+                      <span
+                        className="badge bg-light text-dark mt-1"
+                        style={{ fontSize: "0.55rem" }}
+                      >
+                        {(fileSize / 1024 / 1024).toFixed(1)} MB
+                      </span>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+            <div className="flex-shrink-0">
+              <Button
+                variant="outline-primary"
+                size="sm"
+                onClick={() => onDownload(fileName)}
+                className="rounded-pill d-flex align-items-center"
+                style={{
+                  minWidth: "auto",
+                  fontSize: "0.6rem",
+                  padding: isMobile ? "6px 8px" : "4px 6px",
+                }}
+              >
+                {isMobile && <BsFileEarmarkPdf className="me-1" size={12} />}
+                <BsDownload size={isMobile ? 12 : 8} />
+                {!isMobile && <span className="ms-1">{t("Download")}</span>}
+              </Button>
+              {showRemove && (
+                <Button
+                  variant="outline-danger"
+                  size="sm"
+                  onClick={onRemove}
+                  className="rounded-pill ms-1"
+                  style={{ minWidth: "auto", padding: "4px 6px" }}
+                >
+                  <BsTrash size={8} />
+                </Button>
+              )}
+            </div>
+          </div>
+        </Card.Body>
+      </Card>
+    );
+  };
+
+  const FileUploadCard = ({
+    label,
+    name,
+    fileDownloadKey,
+    onRemove,
+    showRemove = false,
+    fileIndex,
+    displayIndex,
+  }) => {
+    const fileData = watch(name);
+    const fileStoreId = watch(fileDownloadKey);
+    const hasFile = fileData && (fileData.name || fileData.size);
+
+    const handleDeleteFile = async (name) => {
+      const res = await deleteFile(fileStoreId, loaderRef);
+      if (res) {
+        clearErrors(name);
+        setValue(name, null);
+        setValue(name.replace("_file_", "_fileStoreId_"), null);
+      }
+    };
+
+    return (
+      <Card className="mb-2 border-2 border-dashed border-primary border-opacity-25">
+        <Card.Body className="p-2">
+          <div className="mb-2">
+            <div style={{ fontSize: "0.75rem", position: "relative" }}>
+              <InputFile
+                label={`${label} ${displayIndex}`}
+                name={name}
+                register={register(name)}
+                errors={errors}
+                onChange={(e) => {
+                  if (e?.target?.files && e?.target?.files[0]) {
+                    const file = e.target.files[0];
+
+                    if (file.size > 30 * 1024 * 1024) {
+                      setError(name, {
+                        type: "manual",
+                        message: t(
+                          "vesselDetails..File size should not exceed 30MB"
+                        ),
+                      });
+                      return;
+                    }
+
+                    const extension = file?.name?.substring(
+                      file?.name?.lastIndexOf(".")
+                    );
+                    const fileType = name.includes("WORK_ORDER")
+                      ? "WORK_ORDER"
+                      : "DRAWINGS";
+                    const fileName = `${fileType}_${String(fileIndex).padStart(
+                      2,
+                      "0"
+                    )}${extension}`;
+                    file.originalName = fileName;
+                    const renamedFile = renameFile(file, fileName);
+                    uploadFile(file, name, renamedFile, fileType, fileIndex);
+                  }
+                }}
+                watch={watch}
+                defaultValue={watch(name)}
+                clearErrors={clearErrors}
+                accept=".pdf,.jpg,.jpeg,.png"
+                className="mobile-file-input"
+                style={{ width: "100%" }}
+              />
+
+              {hasFile && !viewMode && (
+                <FaTimesCircle
+                  className="text-danger position-absolute"
+                  style={{
+                    top: "55%",
+                    right: "1.5rem",
+                    transform: "translateY(-50%)",
+                    cursor: "pointer",
+                    zIndex: 10,
+                  }}
+                  size={16}
+                  title="Remove file"
+                  onClick={() => handleDeleteFile(name)}
+                />
+              )}
+            </div>
+          </div>
+          <div className="mb-2">
+            <div style={{ fontSize: "0.75rem" }}>
+              <InputText
+                label={t("vesselDetails.Description")}
+                name={name?.replace("_file_", "_desc_")}
+                placeholder={t("vesselDetails.Enter file description")}
+                register={register(name.replace("_file_", "_desc_"))}
+                errors={errors}
+                className="mobile-text-input"
+              />
+            </div>
+          </div>
+          <div className="text-end d-flex justify-content-end gap-1">
+            {editMode && hasFile && (
+              <>
+                <Button
+                  variant="outline-success"
+                  size="sm"
+                  onClick={() => fetchAndViewFile(fileData?.fileViewUrl || "")}
+                  className="rounded-pill"
+                  style={{ fontSize: "0.65rem", padding: "2px 6px" }}
+                >
+                  <BsEyeFill className="me-1" size={8} />
+                  <span className="d-none d-sm-inline">View</span>
+                </Button>
+                <Button
+                  variant="outline-primary"
+                  size="sm"
+                  onClick={() => handleDownload(fileStoreId, fileData?.name)}
+                  className="rounded-pill"
+                  style={{ fontSize: "0.65rem", padding: "2px 6px" }}
+                >
+                  <BsDownload className="me-1" size={8} />
+                  <span className="d-none d-sm-inline">Download</span>
+                  <span className="d-sm-none">↓</span>
+                </Button>
+              </>
+            )}
+            {showRemove && (
+              <Button
+                variant="outline-danger"
+                size="sm"
+                onClick={onRemove}
+                className="rounded-pill"
+                style={{ fontSize: "0.65rem", padding: "2px 6px" }}
+              >
+                <BsTrash className="me-1" size={8} />
+                <span className="d-none d-sm-inline">Remove</span>
+                <span className="d-sm-none">×</span>
+              </Button>
+            )}
+          </div>
+        </Card.Body>
+      </Card>
+    );
+  };
+
+  const FileSection = ({ title, files, type, icon }) => {
+    const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
+
+    useEffect(() => {
+      const handleResize = () => setIsMobile(window.innerWidth <= 768);
+      window.addEventListener("resize", handleResize);
+      return () => window.removeEventListener("resize", handleResize);
+    }, []);
+
+    const filesWithData = files?.filter((file) => {
+      const fileData = watch(`${type}_file_${file.id}`);
+      return fileData && (fileData.name || fileData.size);
+    });
+
+    return (
+      <Card className="h-100 shadow-sm border-0">
+        <Card.Header className="bg-light border-0 py-2">
+          <div className="d-flex justify-content-between align-items-start">
+            <div className="d-flex justify-content-start align-items-start p-1">
+              <h6
+                className="mb-0 text-primary fw-bold d-flex align-items-center"
+                style={{ fontSize: isMobile ? "0.8rem" : "0.75rem" }}
+              >
+                {icon}
+                <span className="ms-2">{title}</span>
+              </h6>
+              <span
+                className="ms-2 px-2 py-1 badge d-flex align-items-center gap-1 rounded-pill"
+                style={{
+                  fontSize: "0.7rem",
+                  background: "linear-gradient(90deg, #00c6ff, #0072ff)",
+                  color: "#fff",
+                  padding: "2px 6px",
+                  boxShadow: "0 1px 4px rgba(0,0,0,0.2)",
+                }}
+              >
+                <FaPaperclip size={12} />
+                {viewMode
+                  ? `${filesWithData?.length} Files Uploaded`
+                  : editMode
+                  ? `${filesWithData?.length} / 50 Files Attached`
+                  : `${files?.length} Files Selected`}
+              </span>
+            </div>
+            <div className="d-flex justify-content-end align-items-start">
+              {!viewMode && (
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={() => addFileInput(type)}
+                  className={`${styles.addBtn} ms-2 badge bg-primary rounded-pill`}
+                  style={{ fontSize: "0.6rem" }}
+                  disabled={files.length >= 50}
+                >
+                  <BsPlus className="me-1" size={10} />
+                  <span className={isMobile ? "d-none" : ""}>Add</span>
+                  <span className={isMobile ? "" : "d-none"}>+</span>
+                </Button>
+              )}
+            </div>
+          </div>
+        </Card.Header>
+
+        <Card.Body className="p-1">
+          <div
+            style={{
+              maxHeight: isMobile ? "350px" : "250px",
+              overflowY: "auto",
+            }}
+          >
+            {viewMode ? (
+              filesWithData.length > 0 ? (
+                filesWithData.map((fileInput, index) => {
+                  const fileData = watch(`${type}_file_${fileInput.id}`);
+                  const descData = watch(`${type}_desc_${fileInput.id}`);
+
+                  return (
+                    <DocumentCard
+                      key={fileInput.id}
+                      fileName={fileData.name}
+                      description={descData || `${title} document ${index + 1}`}
+                      fileSize={fileData.size}
+                      onDownload={() =>
+                        handleDownload(
+                          watch(`${type}_fileStoreId_${fileInput.id}`),
+                          watch(`${type}_file_${fileInput.id}`)?.name
+                        )
+                      }
+                    />
+                  );
+                })
+              ) : (
+                <div className="text-center py-3 text-muted">
+                  <div className="bg-light rounded-circle p-2 d-inline-flex mb-2">
+                    <BsFileEarmarkPdf size={20} className="opacity-50" />
+                  </div>
+                  <p className="mb-0" style={{ fontSize: "0.7rem" }}>
+                    No files uploaded
+                  </p>
+                </div>
+              )
+            ) : (
+              files.map((fileInput, idx) => {
+                return (
+                  <div key={fileInput.id}>
+                    <FileUploadCard
+                      label={t("vesselDetails.Choose File")}
+                      name={`${type}_file_${fileInput.id}`}
+                      fileDownloadKey={`${type}_fileStoreId_${fileInput.id}`}
+                      fileIndex={fileInput.id}
+                      displayIndex={idx + 1}
+                      onRemove={() => removeFileInput(type, fileInput.id)}
+                      showRemove={files.length > 1}
+                    />
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </Card.Body>
+      </Card>
+    );
+  };
+
+  const SingleFileSection = ({
+    title,
+    fileName,
+    onDownload,
+    fileSize,
+    icon,
+  }) => (
+    <Card className="h-100 shadow-sm border-0">
+      <Card.Header className="bg-light border-0 py-2">
+        <h6
+          className="mb-0 text-primary fw-bold d-flex align-items-center"
+          style={{ fontSize: "0.75rem" }}
+        >
+          {icon}
+          <span className="ms-2">{title}</span>
+        </h6>
+      </Card.Header>
+      <Card.Body className="p-2">
+        {fileName ? (
+          <DocumentCard
+            fileName={fileName}
+            description={`${title} document`}
+            fileSize={fileSize}
+            onDownload={() => onDownload(fileName)}
+          />
+        ) : (
+          <div className="text-center py-2 text-muted">
+            <div className="bg-light rounded-circle p-2 d-inline-flex mb-2">
+              <BsFileEarmarkPdf size={20} className="opacity-50" />
+            </div>
+            <p className="mb-0" style={{ fontSize: "0.7rem" }}>
+              No file uploaded
+            </p>
+          </div>
+        )}
+      </Card.Body>
+    </Card>
+  );
+
+  const addFileInput = (type) => {
+    if (viewMode) return;
+
+    if (type === "WORK_ORDER") {
+      if (workOrderFiles.length >= 50) return;
+
+      const existingIds = workOrderFiles.map((f) => f.id);
+      let nextId = 1;
+      while (existingIds.includes(nextId)) {
+        nextId++;
+      }
+
+      setWorkOrderFiles((prev) =>
+        [...prev, { id: nextId }].sort((a, b) => a.id - b.id)
+      );
+      setParentWorkOrderFiles((prev) =>
+        [...prev, { id: nextId }].sort((a, b) => a.id - b.id)
+      );
+    } else if (type === "DRAWINGS") {
+      if (drawingsFiles.length >= 50) return;
+
+      const existingIds = drawingsFiles.map((f) => f.id);
+      let nextId = 1;
+      while (existingIds.includes(nextId)) {
+        nextId++;
+      }
+
+      setDrawingsFiles((prev) =>
+        [...prev, { id: nextId }].sort((a, b) => a.id - b.id)
+      );
+      setParentDrawingsFiles((prev) =>
+        [...prev, { id: nextId }].sort((a, b) => a.id - b.id)
+      );
     }
   };
 
-  const handleDownloadReceipt = async () => {
-    if (!txnId) {
-      toast.error("Transaction ID not found");
-      return;
-    }
+  const removeFileInput = async (type, id, fileDownloadKey) => {
+    if (viewMode) return;
 
-    setDownloadLoading(true);
+    const fileStoreId = watch(`${type}_fileStoreId_${id}`);
+    // console.log("fileStoreId ", fileStoreId);
+    if (fileStoreId) {
+      const res = await deleteFile(fileStoreId, loaderRef);
+      if (!res) {
+        return;
+      }
+    }
+    if (type === "WORK_ORDER") {
+      setWorkOrderFiles((prev) => prev.filter((file) => file.id !== id));
+      setParentWorkOrderFiles((prev) => prev.filter((file) => file.id !== id));
+    } else if (type === "DRAWINGS") {
+      setDrawingsFiles((prev) => prev.filter((file) => file.id !== id));
+      setParentDrawingsFiles((prev) => prev.filter((file) => file.id !== id));
+    }
+    // setValue(`${type}_file_${id}`, null);
+    // setValue(`${type}_desc_${id}`, "");
+    unregister(`${type}_file_${id}`);
+    unregister(`${type}_desc_${id}`);
+    unregister(`${type}_fileStoreId_${id}`);
+    clearErrors([`${type}_file_${id}`, `${type}_desc_${id}`]);
+
+    setValue(`${type}_file_${id}`, null);
+    setValue(`${type}_desc_${id}`, "");
+    setValue(`${type}_fileStoreId_${id}`, null);
+  };
+
+  const handleDownload = async (fileStoreId, fileName) => {
     try {
-      const payload = {
-        formType: "INVOICE",
-        transactionNo: txnId,
-        isUploadReq: true,
-      };
+      if (!fileStoreId) return;
+      const url = `${BASE_IP}/filestore/v1/files/id?fileStoreId=${fileStoreId}`;
+
+      loaderRef.current?.show();
 
       const accessToken = getFromLocalStorage("access_token");
       const tokenDetails = getFromLocalStorage("tokenDetails");
@@ -194,447 +671,480 @@ const PaymentPage = () => {
         ? JSON.parse(tokenDetails)?.session_state
         : "";
 
-      const apiUrl =
-        SERVICE_BASE.IWT_PDFSERVICE +
-        URLS_ENDPOINT.VESSEL_SERVICE.INVOICE_DOWNLOAD;
-      const response = await fetch(apiUrl, {
-        method: "POST",
+      const response = await axios({
+        method: "GET",
+        url: url,
+        responseType: "blob",
         headers: {
-          "Content-Type": "application/json",
           Authorization: `Bearer ${accessToken}`,
           "X-Request-ID": sessionState,
+          Accept: "application/octet-stream",
         },
-        body: JSON.stringify(payload),
       });
 
-      if (response.ok) {
-        const blob = await response.blob();
-        const url = window.URL.createObjectURL(blob);
+      if (response.data) {
+        let filename = fileName || "document";
+        const contentDisposition = response.headers["content-disposition"];
+        if (contentDisposition) {
+          const filenameMatch = contentDisposition.match(
+            /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/
+          );
+          if (filenameMatch && filenameMatch[1]) {
+            filename = filenameMatch[1].replace(/['"]/g, "");
+          }
+        }
+
+        const blob = new Blob([response.data], {
+          type: response.headers["content-type"] || "application/octet-stream",
+        });
+        const blobUrl = window.URL.createObjectURL(blob);
+
         const link = document.createElement("a");
-        link.href = url;
-        link.download = `invoice_${applicationNumber}_${txnId}.pdf`;
+        link.href = blobUrl;
+        link.setAttribute("download", filename);
         document.body.appendChild(link);
         link.click();
-        document.body.removeChild(link);
-        window.URL.revokeObjectURL(url);
-        toast.success("Receipt downloaded successfully!");
-      } else {
-        toast.error("Failed to generate receipt");
+
+        setTimeout(() => {
+          document.body.removeChild(link);
+          window.URL.revokeObjectURL(blobUrl);
+        }, 100);
       }
     } catch (error) {
-      console.error("Receipt download error:", error);
-      toast.error("Failed to download receipt. Please try again.");
+      console.error("Error downloading file:", error);
+      toast.error("Failed to download file. Please try again.");
     } finally {
-      setDownloadLoading(false);
+      loaderRef.current?.hide();
     }
   };
 
-  const textStyle = {
-    fontFamily: "Aptos, sans-serif",
-    fontWeight: 600,
-    fontSize: "1.1em", // 14px → 0.875rem
-    lineHeight: "1.75rem", // 28px → 1.75rem
-    letterSpacing: "0",
-    color: "#1A1A1A",
+  const uploadFile = async (
+    file,
+    formValueName,
+    renamedFile,
+    fileType,
+    fileIndex
+  ) => {
+    try {
+      loaderRef?.current?.show();
+      const formData = new FormData();
+      formData.append("file", file);
+      const uploadUrl = BASE_IP + URLS_ENDPOINT.FILE_STORE_SERVICE.UPLOAD_FILE;
+      const response = await postFORMdata(uploadUrl, formData);
+      const fileStoreId = response?.data?.files[0]?.fileStoreId;
+
+      clearErrors(formValueName);
+      setValue(formValueName, renamedFile, { shouldValidate: true });
+
+      if (
+        fileType === "STABILITY_BOOKLETS" ||
+        fileType === "TONNAGE_BOOKLETS"
+      ) {
+        setValue(fileType + "_fileStoreId", fileStoreId);
+      } else {
+        setValue(fileType + "_fileStoreId_" + fileIndex, fileStoreId);
+        setFormData((prev) => ({
+          ...prev,
+          [formValueName]: renamedFile,
+        }));
+      }
+
+      loaderRef?.current?.hide();
+    } catch (err) {
+      loaderRef?.current?.hide();
+      console.error(err);
+      setError(formValueName, {
+        type: "manual",
+        message: t("File upload failed"),
+      });
+      toast.error("File upload failed...");
+    }
   };
 
-  const goHome = () => {
-    navigate("/dashboard");
+  const handleRemoveTonnageFile = async () => {
+    const fileStoreId = watch("TONNAGE_BOOKLETS_fileStoreId");
+    console.log("fileStoreId - ", fileStoreId);
+    const res = await deleteFile(fileStoreId, loaderRef);
+    if (res) {
+      clearErrors("TONNAGE_BOOKLETS");
+      setValue("TONNAGE_BOOKLETS", null);
+      setValue("TONNAGE_BOOKLETS_fileStoreId", null);
+    }
   };
 
-  if (!applicationNumber || !location?.state) {
-    return (
-      <div className="d-flex align-items-center justify-content-center min-vh-50 bg-light mt-5">
-        <Container>
-          <Row className="justify-content-center">
-            <Col xs={12} md={10} lg={8} xl={6}>
-              <Card className="shadow border-0 rounded-4 p-4 text-center justify-content-center align-items-center  bg-white">
-                <FaExclamationTriangle
-                  style={{ fontSize: 50, color: "#dc3545" }}
-                  className="text-center"
+  const handleRemoveStabilityFile = async () => {
+    const fileStoreId = watch("STABILITY_BOOKLETS_fileStoreId");
+    console.log("fileStoreId - ", fileStoreId);
+    const res = await deleteFile(fileStoreId, loaderRef);
+    if (res) {
+      clearErrors("STABILITY_BOOKLETS");
+      setValue("STABILITY_BOOKLETS", null);
+      setValue("STABILITY_BOOKLETS_fileStoreId", null);
+    }
+  };
+
+  return (
+    <>
+      <NewLoader ref={loaderRef} />
+      <style jsx>{`
+        @media (max-width: 768px) {
+          .mobile-file-input .file-upload {
+            padding: 0.5rem !important;
+          }
+
+          .mobile-file-input .file-label {
+            font-size: 0.7rem !important;
+            padding: 4px 8px !important;
+            min-width: 80px !important;
+          }
+
+          .mobile-file-input .file-name-container {
+            font-size: 0.65rem !important;
+            padding: 4px 8px !important;
+          }
+
+          .mobile-text-input .form-control {
+            font-size: 0.75rem !important;
+            padding: 0.25rem 0.5rem !important;
+          }
+
+          .mobile-text-input .form-label {
+            font-size: 0.7rem !important;
+            margin-bottom: 0.25rem !important;
+          }
+        }
+      `}</style>
+      <Collapsible
+        title={
+          <>
+            <FaClipboardList className="me-2" />
+            <span>{t("vesselDetails.Documents")}</span>
+          </>
+        }
+        openStat={true}
+      >
+        <div style={{ padding: "1rem", backgroundColor: "#f8f9fa" }}>
+          <Row className="g-3">
+            <Col lg={6} md={12}>
+              <FileSection
+                title={t("vesselDetails.Work Order")}
+                files={workOrderFiles}
+                type="WORK_ORDER"
+                icon={<BsFileEarmarkPdf className="text-primary" size={12} />}
+              />
+            </Col>
+
+            <Col lg={6} md={12}>
+              <FileSection
+                title={t("vesselDetails.Drawings")}
+                files={drawingsFiles}
+                type="DRAWINGS"
+                icon={<BsFileEarmarkPdf className="text-success" size={12} />}
+              />
+            </Col>
+
+            <Col md={6}>
+              {viewMode ? (
+                <SingleFileSection
+                  title={t("vesselDetails.Tonnage Booklets")}
+                  fileName={watch("TONNAGE_BOOKLETS")?.name}
+                  fileSize={watch("TONNAGE_BOOKLETS")?.size}
+                  onDownload={() =>
+                    handleDownload(
+                      watch("TONNAGE_BOOKLETS_fileStoreId"),
+                      watch("TONNAGE_BOOKLETS")?.name
+                    )
+                  }
+                  icon={<BsFileEarmarkPdf className="text-warning" size={12} />}
                 />
-                <h5
-                  className="fw-bold mt-3"
-                  style={{ color: "#dc3545", fontSize: "1.5rem" }}
-                >
-                  Invalid Application Details
-                </h5>
-                <p className="fw-semibold mt-2 mb-4">
-                  We couldn’t find a valid Application number or payment data.
-                  You will be redirected to the dashboard shortly.
-                </p>
+              ) : (
+                <Card className="h-100 shadow-sm border-0">
+                  <Card.Header className="bg-light border-0 py-2">
+                    <h6
+                      className="mb-0 text-primary fw-bold d-flex align-items-center"
+                      style={{ fontSize: "0.75rem" }}
+                    >
+                      <BsFileEarmarkPdf
+                        className="text-warning me-2"
+                        size={12}
+                      />
+                      {t("vesselDetails.Tonnage Booklets")}
+                    </h6>
+                  </Card.Header>
+                  <Card.Body className="p-2">
+                    <div style={{ fontSize: "0.75rem", position: "relative" }}>
+                      <InputFile
+                        label={t("vesselDetails.Tonnage Booklets")}
+                        required={tonnageRequired}
+                        name="TONNAGE_BOOKLETS"
+                        register={register("TONNAGE_BOOKLETS")}
+                        errors={errors}
+                        style={{ width: "100%" }}
+                        onChange={(e) => {
+                          if (e.target.files && e?.target?.files[0]) {
+                            const file = e.target.files[0];
+                            if (file.size > 30 * 1024 * 1024) {
+                              setError("TONNAGE_BOOKLETS", {
+                                type: "manual",
+                                message: t("File size should not exceed 30MB"),
+                              });
+                              return;
+                            }
+                            const extension = file?.name?.substring(
+                              file?.name?.lastIndexOf(".")
+                            );
+                            const fileName = `Tonnage Booklets${extension}`;
+                            file.originalName = fileName;
+                            const renamedFile = renameFile(file, fileName);
+                            uploadFile(
+                              file,
+                              "TONNAGE_BOOKLETS",
+                              renamedFile,
+                              "TONNAGE_BOOKLETS"
+                            );
+                            // clearErrors("TONNAGE_BOOKLETS");
+                            // setValue("TONNAGE_BOOKLETS", renamedFile, {
+                            //   shouldValidate: true,
+                            // });
+                          }
+                        }}
+                        watch={watch}
+                        accept=".pdf,.jpg,.jpeg,.png"
+                        defaultValue={watch("TONNAGE_BOOKLETS")}
+                        clearErrors={clearErrors}
+                        className="mobile-file-input"
+                      />
 
-                <div className="d-flex flex-wrap justify-content-center gap-3">
-                  <Button
-                    variant="outline-secondary"
-                    className="d-flex align-items-center px-4 py-2 rounded-pill shadow-sm"
-                    onClick={() => navigate(-1)}
-                  >
-                    <ArrowBack className="me-2" /> Go Back
-                  </Button>
+                      {watch("TONNAGE_BOOKLETS") && !viewMode && (
+                        <FaTimesCircle
+                          className="text-danger position-absolute"
+                          style={{
+                            top: "2.9rem",
+                            right: "1.5rem",
+                            cursor: "pointer",
+                            zIndex: 10,
+                          }}
+                          size={16}
+                          title="Remove file"
+                          onClick={handleRemoveTonnageFile}
+                        />
+                      )}
+                    </div>
+                    {editMode && watch("TONNAGE_BOOKLETS") && (
+                      <div className="text-end mt-2">
+                        <Button
+                          variant="outline-success"
+                          size="sm"
+                          onClick={() =>
+                            fetchAndViewFile(
+                              watch("TONNAGE_BOOKLETS")?.fileViewUrl
+                            )
+                          }
+                          className="rounded-pill me-1"
+                          style={{ fontSize: "0.65rem", padding: "2px 6px" }}
+                        >
+                          <BsEyeFill className="me-1" size={8} />
+                          <span className="d-none d-sm-inline">View</span>
+                        </Button>
+                        <Button
+                          variant="outline-primary"
+                          size="sm"
+                          onClick={() =>
+                            handleDownload(
+                              watch("TONNAGE_BOOKLETS_fileStoreId"),
+                              watch("TONNAGE_BOOKLETS")?.name
+                            )
+                          }
+                          className="rounded-pill"
+                          style={{ fontSize: "0.65rem", padding: "2px 6px" }}
+                        >
+                          <BsDownload className="me-1" size={8} />
+                          <span className="d-none d-sm-inline">Download</span>
+                          <span className="d-sm-none">↓</span>
+                        </Button>
+                      </div>
+                    )}
+                  </Card.Body>
+                </Card>
+              )}
+            </Col>
 
-                  <Button
-                    variant="primary"
-                    className="d-flex align-items-center px-4 py-2 rounded-pill shadow-sm"
-                    style={{
-                      backgroundColor: "#1056B2",
-                      border: "none",
-                    }}
-                    onClick={() => navigate("/dashboard", { replace: true })}
-                  >
-                    <House className="me-2" /> Go to Dashboard
-                  </Button>
-                </div>
+            <Col md={6}>
+              {viewMode ? (
+                <SingleFileSection
+                  title={t("vesselDetails.Stability Booklets")}
+                  fileName={watch("STABILITY_BOOKLETS")?.name}
+                  fileSize={watch("STABILITY_BOOKLETS")?.size}
+                  onDownload={() =>
+                    handleDownload(
+                      watch("STABILITY_BOOKLETS_fileStoreId"),
+                      watch("STABILITY_BOOKLETS")?.name
+                    )
+                  }
+                  icon={<BsFileEarmarkPdf className="text-info" size={12} />}
+                />
+              ) : (
+                <Card className="h-100 shadow-sm border-0">
+                  <Card.Header className="bg-light border-0 py-2">
+                    <h6
+                      className="mb-0 text-primary fw-bold d-flex align-items-center"
+                      style={{ fontSize: "0.75rem" }}
+                    >
+                      <BsFileEarmarkPdf className="text-info me-2" size={12} />
+                      {t("vesselDetails.Stability Booklets")}
+                    </h6>
+                  </Card.Header>
+                  <Card.Body className="p-2">
+                    <div style={{ fontSize: "0.75rem", position: "relative" }}>
+                      <InputFile
+                        label={t("vesselDetails.Stability Booklets")}
+                        required={stabilityRequired}
+                        name="STABILITY_BOOKLETS"
+                        register={register("STABILITY_BOOKLETS")}
+                        errors={errors}
+                        style={{ width: "100%" }}
+                        onChange={(e) => {
+                          if (e.target.files && e?.target?.files[0]) {
+                            const file = e.target.files[0];
+                            if (file.size > 30 * 1024 * 1024) {
+                              setError("STABILITY_BOOKLETS", {
+                                type: "manual",
+                                message: t("File size should not exceed 30MB"),
+                              });
+                              return;
+                            }
+                            const extension = file?.name?.substring(
+                              file?.name?.lastIndexOf(".")
+                            );
+                            const fileName = `Stability Booklets${extension}`;
+                            file.originalName = fileName;
+                            const renamedFile = renameFile(file, fileName);
+                            // clearErrors("STABILITY_BOOKLETS");
+                            // setValue("STABILITY_BOOKLETS", renamedFile, {
+                            //   shouldValidate: true,
+                            // });
+                            uploadFile(
+                              file,
+                              "STABILITY_BOOKLETS",
+                              renamedFile,
+                              "STABILITY_BOOKLETS"
+                            );
+                          }
+                        }}
+                        watch={watch}
+                        accept=".pdf,.jpg,.jpeg,.png"
+                        defaultValue={watch("STABILITY_BOOKLETS")}
+                        clearErrors={clearErrors}
+                        className="mobile-file-input"
+                      />
+
+                      {watch("STABILITY_BOOKLETS") && !viewMode && (
+                        <FaTimesCircle
+                          className="text-danger position-absolute"
+                          style={{
+                            top: "2.9rem",
+                            right: "1.5rem",
+                            cursor: "pointer",
+                            zIndex: 10,
+                          }}
+                          size={16}
+                          title="Remove file"
+                          onClick={handleRemoveStabilityFile}
+                        />
+                      )}
+                    </div>
+                    {editMode && watch("STABILITY_BOOKLETS") && (
+                      <div className="text-end mt-2">
+                        <Button
+                          variant="outline-success"
+                          size="sm"
+                          className="rounded-pill me-1"
+                          style={{ fontSize: "0.65rem", padding: "2px 6px" }}
+                        >
+                          <BsEyeFill
+                            className="me-1"
+                            size={8}
+                            onClick={() =>
+                              fetchAndViewFile(
+                                watch("STABILITY_BOOKLETS")?.fileViewUrl
+                              )
+                            }
+                          />
+                          <span className="d-none d-sm-inline">View</span>
+                        </Button>
+                        <Button
+                          variant="outline-primary"
+                          size="sm"
+                          onClick={() =>
+                            handleDownload(
+                              watch("STABILITY_BOOKLETS_fileStoreId"),
+                              watch("STABILITY_BOOKLETS")?.name
+                            )
+                          }
+                          className="rounded-pill"
+                          style={{ fontSize: "0.65rem", padding: "2px 6px" }}
+                        >
+                          <BsDownload className="me-1" size={8} />
+                          <span className="d-none d-sm-inline">Download</span>
+                          <span className="d-sm-none">↓</span>
+                        </Button>
+                      </div>
+                    )}
+                  </Card.Body>
+                </Card>
+              )}
+            </Col>
+
+            <Col md={12}>
+              <Card className="shadow-sm border-0">
+                <Card.Body className="p-3">
+                  <div className="d-flex align-items-start">
+                    <input
+                      type="checkbox"
+                      id="termsAccepted"
+                      className="me-3 mt-1"
+                      {...register("termsAccepted", {
+                        required: t("You must accept the terms and conditions"),
+                      })}
+                      onChange={(e) => {
+                        setValue("termsAccepted", e.target.checked);
+                        if (e.target.checked) {
+                          clearErrors("termsAccepted");
+                        }
+                      }}
+                      disabled={viewMode}
+                      checked={viewMode ? true : watch("termsAccepted")}
+                    />
+                    <div className="flex-grow-1">
+                      <label
+                        htmlFor="termsAccepted"
+                        className="mb-0 fw-medium"
+                        style={{
+                          color: "#333",
+                          cursor: viewMode ? "default" : "pointer",
+                          lineHeight: "1.5",
+                          fontSize: "0.85rem",
+                        }}
+                      >
+                        {t(
+                          "vesselDetails.I have thoroughly read and understood all the terms and conditions as mentioned in the Schedule."
+                        )}
+                      </label>
+                      {errors.termsAccepted && !viewMode && (
+                        <div className="text-danger small mt-2">
+                          {t(errors.termsAccepted.message)}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </Card.Body>
               </Card>
             </Col>
           </Row>
-        </Container>
-      </div>
-    );
-  }
-  return (
-    <Card
-      fluid
-      className="payment-card mt-2"
-      style={{ background: "#F5F5F5;!important", minHeight: "100vh" }}
-    >
-      <Row className="mt-1 mb-3 px-3 align-items-center">
-        <Col xs="auto">
-          <Tooltip title="Back to Dashboard">
-            <IconButton
-              onClick={goHome}
-              sx={{
-                backgroundColor: "#2466BF",
-                color: "#fff",
-                "&:hover": {
-                  backgroundColor: "#1a4d8c",
-                  transform: "scale(1.05)",
-                  transition: "all 0.2s ease-in-out",
-                },
-              }}
-            >
-              <ArrowBack />
-            </IconButton>
-          </Tooltip>
-        </Col>
-
-        <Col className="d-flex align-items-center flex-wrap gap-2">
-          <span className="fw-bold m-0">Application Number</span>
-          <span
-            style={{
-              minWidth: "auto",
-              padding: "0.4rem 1rem",
-              borderRadius: "0.5rem",
-              backgroundColor: "#22AEFF",
-              color: "white",
-              fontWeight: 600,
-              fontSize: "0.95rem",
-              whiteSpace: "nowrap",
-            }}
-          >
-            #{applicationNumber}
-          </span>
-        </Col>
-      </Row>
-
-      <Row className="justify-content-center">
-        <Col xs={12} md={10} lg={8}>
-          <Card
-            className="rounded-4 border-0 p-4"
-            style={{
-              boxShadow: "0 12px 28px rgba(0, 0, 0, 0.1)",
-              background: "#F5F5F5",
-              borderRadius: "8px",
-              opacity: 1,
-            }}
-          >
-            {/* Background Overlay Image */}
-            <div
-              style={{
-                backgroundImage: `url(${bb_bg})`, // use your background image
-                backgroundSize: "contain",
-                backgroundRepeat: "no-repeat",
-                backgroundPosition: "center",
-                opacity: 0.08,
-                position: "absolute",
-                top: 0,
-                left: 0,
-                height: "100%",
-                width: "100%",
-                zIndex: 0,
-              }}
-            />
-
-            <div className="position-relative  pb-2" style={{ zIndex: 1 }}>
-              <p
-                className="text-center"
-                style={{
-                  fontSize: "1.65em",
-                  color: "#1056B2",
-                  fontWeight: "700",
-                }}
-              >
-                {t("home.title")}
-              </p>
-
-              <p
-                className="text-center mb-4"
-                style={{
-                  fontSize: "0.8em",
-                  position: "relative",
-                  bottom: "1rem",
-                  fontWeight: "550",
-                }}
-              >
-                {t("login.deptofTransport")}
-              </p>
-            </div>
-
-            <div
-              className="position-relative mb-4 pb-3"
-              style={{ zIndex: 1, bottom: "1rem" }}
-            >
-              {/* <div className="d-flex align-items-center">
-                <Image
-                  src={logo}
-                  alt="IWT Logo"
-                  height={50}
-                  style={{ objectFit: "contain" }}
-                />
-              </div> */}
-
-              <Typography
-                variant="h6"
-                className="text-center position-absolute top-50 start-50 translate-middle"
-                sx={{
-                  color: "#1056B2",
-                  fontWeight: 600,
-                  fontSize: "1.1rem",
-                }}
-              >
-                Secure Payment Portal
-              </Typography>
-            </div>
-
-            {/* <div className="text-center mb-3">
-              <Typography
-                variant="body1"
-                sx={{ color: "#2466BF", fontWeight: 600 }}
-              >
-                Application Number: <strong>{applicationNumber}</strong>
-              </Typography>
-            </div> */}
-
-            <div className="p-2 border-0" style={{ zIndex: 1 }}>
-              <div className="row mb-3 justify-content-center text-center">
-                <div className="col-10">
-                  <span style={textStyle}>Application Number &nbsp; :</span>
-                  <span
-                    style={{
-                      ...textStyle,
-                      padding: "0.4rem 1rem",
-                      fontWeight: "700",
-                    }}
-                  >
-                    {applicationNumber}
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            <div
-              className="position-relative p-2"
-              style={{ zIndex: 1, bottom: "1rem" }}
-            >
-              {status !== "success" && (
-                <div className="row justify-content-center text-center">
-                  <div className="col-10">
-                    <span
-                      style={{
-                        ...textStyle,
-                        color: "#65980B",
-                        wordBreak: "break-word",
-                        fontWeight: "700",
-                      }}
-                    >
-                      Complete your payment for {getPaymentType()}
-                    </span>
-                  </div>
-                  {/* <div className="col-1"></div>
-                  <div className="col-5 text-start">
-                    <span
-                      style={{
-                        ...textStyle,
-                        padding: "0.4rem 1rem",
-                        color: "#65980B",
-                      }}
-                    >
-                      #{applicationNumber}
-                    </span>
-                  </div> */}
-                </div>
-              )}
-            </div>
-
-            {status === "success" && (
-              <div
-                className="text-center fade-in-up z-index-1"
-                style={{ zIndex: 1 }}
-              >
-                <CheckCircleOutline sx={{ fontSize: 70, color: "#86BC25" }} />
-                <Typography
-                  variant="h5"
-                  className="mt-3 fw-bold"
-                  sx={{ color: "#1056B2" }}
-                >
-                  Payment Successful!
-                </Typography>
-                <Typography
-                  className="fw-semi-bold mb-3"
-                  sx={{ color: "#1A1A1A" }}
-                >
-                  Thank you! Your payment has been completed successfully.
-                </Typography>
-                <div className="d-flex mt-4 justify-content-center gap-3 flex-wrap">
-                  <Button
-                    variant="success"
-                    onClick={handleDownloadReceipt}
-                    disabled={downloadLoading || !txnId}
-                    style={{
-                      backgroundColor: "#86BC25",
-                      borderColor: "#86BC25",
-                      padding: "10px 20px",
-                      fontWeight: "500",
-                      borderRadius: "8px",
-                      boxShadow: "0 4px 6px rgba(0, 0, 0, 0.1)",
-                      transition: "all 0.3s ease",
-                    }}
-                    onMouseEnter={(e) => {
-                      e.target.style.backgroundColor = "#218838";
-                      e.target.style.boxShadow =
-                        "0 6px 8px rgba(0, 0, 0, 0.15)";
-                      e.target.style.transform = "translateY(-2px)";
-                    }}
-                    onMouseLeave={(e) => {
-                      e.target.style.backgroundColor = "#86BC25";
-                      e.target.style.boxShadow = "0 4px 6px rgba(0, 0, 0, 0.1)";
-                      e.target.style.transform = "translateY(0)";
-                    }}
-                  >
-                    {downloadLoading ? (
-                      <Spinner animation="border" size="sm" className="me-2" />
-                    ) : (
-                      <FileDownload className="me-2" />
-                    )}
-                    {downloadLoading ? "Generating..." : "Download Receipt"}
-                  </Button>
-                  <Button
-                    variant="outline-primary"
-                    onClick={goHome}
-                    style={{
-                      backgroundColor: "transparent",
-                      border: "2px solid #2466BF",
-                      color: "#2466BF",
-                      padding: "10px 20px",
-                      fontWeight: "600",
-                      borderRadius: "8px",
-                      transition: "all 0.3s ease",
-                    }}
-                    onMouseEnter={(e) => {
-                      e.target.style.backgroundColor = "#2466BF";
-                      e.target.style.color = "#fff";
-                      e.target.style.boxShadow =
-                        "0 6px 8px rgba(36, 102, 191, 0.3)";
-                      e.target.style.transform = "translateY(-2px)";
-                    }}
-                    onMouseLeave={(e) => {
-                      e.target.style.backgroundColor = "transparent";
-                      e.target.style.color = "#2466BF";
-                      e.target.style.boxShadow = "none";
-                      e.target.style.transform = "translateY(0)";
-                    }}
-                  >
-                    <ArrowBack
-                      className="me-2"
-                      style={{ transition: "color 0.3s ease" }}
-                    />
-                    Back to Dashboard
-                  </Button>
-                </div>
-              </div>
-            )}
-
-            {status === "error" && (
-              <div
-                className="text-center py-4 fade-in-up z-index-1"
-                style={{ zIndex: 1 }}
-              >
-                <ErrorOutline sx={{ fontSize: 70, color: "red" }} />
-                <Typography variant="h5" className="mt-3 fw-bold text-danger">
-                  Payment Failed
-                </Typography>
-                <Typography className="text-muted mb-3">
-                  Oops! Something went wrong. Please try again.
-                </Typography>
-                <Button variant="danger" onClick={() => setStatus(null)}>
-                  Retry Payment
-                </Button>
-              </div>
-            )}
-
-            {!status && (
-              <div className="text-center" style={{ zIndex: 1 }}>
-                <Typography
-                  variant="body1"
-                  align="center"
-                  className="mt-2 mb-4"
-                  sx={{
-                    fontFamily: "Aptos",
-                    fontWeight: 600,
-                    fontStyle: "bold",
-                    fontSize: "1.5rem",
-                    lineHeight: "1.75rem",
-                    letterSpacing: "0",
-                    color: "#1A61C1",
-                  }}
-                >
-                  Amount Due :{" "}
-                  <span>
-                    {paymentData?.summary?.totalPayable
-                      ? formatCurrency(paymentData?.summary?.totalPayable)
-                      : "N/A"}
-                  </span>
-                </Typography>
-                <Button
-                  variant="primary"
-                  className="col-md-4 mt-1 py-2"
-                  style={{
-                    height: "3.5rem",
-                    borderRadius: "0.35rem",
-                    opacity: 1,
-                    backgroundColor: "#1A61C1",
-                    color: "#fff",
-                    fontWeight: 600,
-                  }}
-                  onClick={handlePayment}
-                  disabled={loading}
-                >
-                  {loading ? (
-                    <>
-                      <Spinner animation="border" size="sm" className="me-2" />
-                      Processing Payment...
-                    </>
-                  ) : (
-                    "Pay Now"
-                  )}
-                </Button>
-              </div>
-            )}
-          </Card>
-        </Col>
-      </Row>
-    </Card>
+        </div>
+      </Collapsible>
+    </>
   );
 };
 
-export default PaymentPage;
+export default Documents;
