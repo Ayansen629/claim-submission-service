@@ -1,54 +1,157 @@
-const handleSave = async () => {
-  if (viewMode) {
-    if (steps[activeStep]?.showSavaAndNextButton) {
-      // Validate current step before proceeding
-      if (currentStep.validate) {
-        const isValid = await currentStep.validate();
-        if (!isValid) {
-          toast.error("Please fill all required fields and upload supporting documents.");
-          return; // Don't proceed if validation fails
-        }
-      }
-      
-      // Mark step as completed and proceed
-      markStepCompleted();
-      goToNextStep();
-      
-      const currentStepInfo = {
-        index: activeStep,
-        label: currentStep?.label,
-        component: currentStep?.component,
-        validate: currentStep?.validate,
-        isLastStep: activeStep === totalSteps - 1,
-        completedSteps: completed,
-        getFormData: currentStep?.getFormData,
-      };
-      onSyncData?.(currentStepInfo);
-      return;
-    }
-    return;
-  }
+import React, { useState, useCallback, forwardRef, useImperativeHandle } from "react";
+import { useForm } from "react-hook-form";
+import { Button } from "@mui/material";
+import { FaEye, FaUpload } from "react-icons/fa";
+import Collapsible from "../../../common/Collapsible";
+import InputText from "../../../common/InputText.tsx";
+import styles from './NameChange.module.css';
 
-  if (steps[activeStep]?.goToNextStepNoValidtion || editMode) {
-    goToNextStep();
-    markStepCompleted();
-    return;
-  }
-
-  validateAndProceed(() => {
-    if (activeStep < totalSteps - 1) {
-      const currentStepInfo = {
-        index: activeStep,
-        label: currentStep?.label,
-        component: currentStep?.component,
-        validate: currentStep?.validate,
-        isLastStep: activeStep === totalSteps - 1,
-        completedSteps: completed,
-        getFormData: currentStep?.getFormData,
-      };
-      onSyncData?.(currentStepInfo);
-    } else {
-      onSave?.();
+const NameChange = forwardRef(({ selectedOption, onValidationChange, onDataChange }, ref) => {
+  const {
+    register,
+    formState: { errors },
+    watch,
+    trigger,
+  } = useForm({
+    mode: "onChange",
+    defaultValues: {
+      previousName: "",
+      updatedNewName: ""
     }
   });
-};
+
+  const [uploadedFile, setUploadedFile] = useState(null);
+  const [fileError, setFileError] = useState("");
+  const [showValidation, setShowValidation] = useState(false);
+
+  const handleFileUpload = useCallback((event) => {
+    const file = event.target.files[0];
+    if (file) {
+      setUploadedFile(file);
+      setFileError("");
+      const formData = watch();
+      const isValid = formData.previousName && formData.updatedNewName && file;
+      onValidationChange?.(isValid);
+      onDataChange?.({ ...formData, uploadedFile: file });
+    }
+  }, [watch, onValidationChange, onDataChange]);
+
+  const validateForm = useCallback(async () => {
+    setShowValidation(true);
+    
+    // Trigger validation for all form fields
+    const isFormValid = await trigger();
+    const formData = watch();
+    
+    // Check file upload
+    if (!uploadedFile) {
+      setFileError("Please upload a valid supporting document");
+    } else {
+      setFileError("");
+    }
+    
+    const isValid = isFormValid && formData.previousName && formData.updatedNewName && uploadedFile;
+    return isValid;
+  }, [trigger, watch, uploadedFile]);
+
+  useImperativeHandle(ref, () => ({
+    validateForm
+  }));
+
+  React.useEffect(() => {
+    const subscription = watch((value) => {
+      const isValid = value.previousName && value.updatedNewName && uploadedFile;
+      
+      if (showValidation && !uploadedFile) {
+        setFileError("Please upload a valid supporting document");
+      } else if (uploadedFile) {
+        setFileError("");
+      }
+      
+      onValidationChange?.(isValid);
+      onDataChange?.({ ...value, uploadedFile });
+    });
+    return () => subscription.unsubscribe();
+  }, [watch, uploadedFile, onValidationChange, onDataChange, showValidation]);
+
+  return (
+    <Collapsible
+      title="Registration Information"
+      openStat={true}
+      newDesign={true}
+    >
+      <div className={styles.formContent}>
+        <div className={styles.formRow}>
+          <InputText
+            label="Previous Name"
+            name="previousName"
+            placeholder="Enter previous name"
+            register={register("previousName", {
+              required: "Previous name is required"
+            })}
+            errors={showValidation ? errors : {}}
+            required={true}
+          />
+          
+          <InputText
+            label="Updated New Name"
+            name="updatedNewName"
+            placeholder="Enter updated new name"
+            register={register("updatedNewName", {
+              required: "Updated new name is required"
+            })}
+            errors={showValidation ? errors : {}}
+            required={true}
+          />
+        </div>
+        
+        <div className={styles.warningText}>
+          Applicant must upload valid supporting documents for the selected change ({selectedOption})
+        </div>
+        
+        <div className={styles.uploadSection}>
+          <label className={styles.uploadLabel}>*Valid Supporting Documents</label>
+          <div className={`${styles.uploadBox} ${fileError ? styles.uploadBoxError : ''}`}>
+            <input
+              type="file"
+              id="fileUpload"
+              style={{ display: 'none' }}
+              onChange={handleFileUpload}
+              accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
+            />
+            <div className={styles.fileName}>
+              {uploadedFile ? uploadedFile.name : "File Name"}
+            </div>
+            <div className={styles.uploadButtons}>
+              <Button
+                variant="contained"
+                size="small"
+                startIcon={<FaEye />}
+                className={styles.viewButton}
+                disabled={!uploadedFile}
+              >
+                View
+              </Button>
+              <Button
+                variant="contained"
+                size="small"
+                startIcon={<FaUpload />}
+                className={styles.uploadButton}
+                onClick={() => document.getElementById('fileUpload').click()}
+              >
+                Upload
+              </Button>
+            </div>
+          </div>
+          {fileError && (
+            <div className={styles.fileError}>
+              {fileError}
+            </div>
+          )}
+        </div>
+      </div>
+    </Collapsible>
+  );
+});
+
+export default NameChange;
