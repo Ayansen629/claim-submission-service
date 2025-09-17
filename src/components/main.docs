@@ -1,247 +1,312 @@
-import React, { useState, useRef, useCallback, forwardRef, useImperativeHandle, useEffect } from "react";
-import { useForm } from "react-hook-form";
-import { Row, Col, Button } from "react-bootstrap";
-import { FaEye, FaUpload, FaMapMarkerAlt } from "react-icons/fa";
-import Collapsible from "../../../common/Collapsible";
-import InputText from "../../../common/InputText.tsx";
-import styles from './AddressChange.module.css';
+import React, { useState, useRef, useEffect } from "react";
+import { Form, InputGroup, OverlayTrigger, Tooltip } from "react-bootstrap";
+import { FaEye, FaEyeSlash, FaInfo, FaInfoCircle } from "react-icons/fa";
+import classNames from "classnames";
+import { CONSTANT_REGEX } from "../../utils/constants.ts";
 
-const AddressChange = forwardRef(({ selectedOption, onValidationChange, onDataChange, initialData }, ref) => {
-  const {
-    register,
-    formState: { errors },
-    watch,
-    trigger,
-    setValue,
-  } = useForm({
-    mode: "onChange",
-    defaultValues: {
-      previousAddress: "23, Park View Road, Salt Lake, Kolkata - 700091, West Bengal",
-      addressLine1: "",
-      addressLine2: "",
-      pin: "",
-      district: "",
-      state: "",
-      country: "INDIA"
-    }
-  });
+interface InputTextProps {
+  label: string;
+  required?: boolean;
+  name: string;
+  type?: string;
+  placeholder?: string;
+  register?: any;
+  disabled?: boolean;
+  onChange?: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  maxlength?: number;
+  readOnly?: boolean;
+  errors?: any;
+  className?: string;
+  onKeyDown?: (e: React.KeyboardEvent<HTMLInputElement>) => void;
+  icon?: React.ElementType;
+  description?: string;
+  style?: React.CSSProperties;
+  autoFocus?: boolean;
+  tooltipText?: string;
+  minDate?: string | Date;
+  maxDate?: string | Date;
+}
 
-  const [uploadedFile, setUploadedFile] = useState(null);
-  const [fileError, setFileError] = useState("");
-  const [showValidation, setShowValidation] = useState(false);
+const InputText: React.FC<InputTextProps> = ({
+  label,
+  required,
+  name,
+  type = "text",
+  placeholder,
+  register,
+  disabled,
+  onChange,
+  maxlength,
+  readOnly,
+  errors,
+  className = "",
+  onKeyDown,
+  icon: IconComponent,
+  description,
+  style = {},
+  autoFocus,
+  tooltipText = "",
+  minDate = "",
+  maxDate = new Date(),
+}) => {
+  const [showPassword, setShowPassword] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const isPassword = type === "password";
+  const inputType = isPassword ? (showPassword ? "text" : "password") : type;
+
+  // Format Date -> YYYY-MM-DD
+  const formatDate = (date?: string | Date) => {
+    if (!date) return undefined;
+    if (typeof date === "string") return date;
+    return date.toISOString().split("T")[0]; // only YYYY-MM-DD
+  };
+
+  // const errorMessage = errors?.[name]?.message || "";
+  // const errorMessage = getNestedError(errors, name);
+
+  const errorMessage =
+    name?.split(".")?.reduce((acc, key) => acc?.[key], errors)?.message || "";
+  const [inputValue, setInputValue] = useState("");
+  const [isValid, setIsValid] = useState(false);
+  const [touched, setTouched] = useState(false);
+  const [isTyping, setIsTyping] = useState(false);
+  const validationPattern = useRef<RegExp | null>(null);
 
   useEffect(() => {
-    if (initialData) {
-      Object.keys(initialData).forEach(key => {
-        if (key !== 'uploadedFile') {
-          setValue(key, initialData[key]);
-        }
-      });
-      if (initialData.uploadedFile) {
-        setUploadedFile(initialData.uploadedFile);
-        setFileError("");
-      }
-    }
-  }, [initialData, setValue]);
-
-  const handleFileUpload = useCallback((event) => {
-    const file = event.target.files[0];
-    if (file) {
-      setUploadedFile(file);
-      setFileError("");
-      const formData = watch();
-      const isValid = formData.addressLine1 && formData.pin && formData.district && formData.state && file;
-      onValidationChange?.(isValid);
-      onDataChange?.({ ...formData, uploadedFile: file });
-    }
-  }, [watch, onValidationChange, onDataChange]);
-
-  const validateForm = useCallback(async () => {
-    setShowValidation(true);
-    
-    const isFormValid = await trigger();
-    const formData = watch();
-    
-    if (!uploadedFile) {
-      setFileError("Please upload a valid supporting document");
+    if (type === "email") {
+      validationPattern.current = CONSTANT_REGEX.EMAIL;
+    } else if (name.includes("pan")) {
+      validationPattern.current = CONSTANT_REGEX.PAN;
+    } else if (name.includes("gst")) {
+      validationPattern.current = CONSTANT_REGEX.GSTNO;
+    } else if (name.includes("phone") || name.includes("mobile")) {
+      validationPattern.current = CONSTANT_REGEX.MOBILE;
+    } else if (name.includes("pin")) {
+      validationPattern.current = CONSTANT_REGEX.PINCODE;
     } else {
-      setFileError("");
+      validationPattern.current = null;
     }
-    
-    const isValid = isFormValid && formData.addressLine1 && formData.pin && formData.district && formData.state && uploadedFile;
-    return isValid;
-  }, [trigger, watch, uploadedFile]);
+  }, [type, name]);
 
-  useImperativeHandle(ref, () => ({
-    validateForm
-  }));
+  useEffect(() => {
+    if (!inputValue && !required) {
+      setIsValid(true);
+      return;
+    }
 
-  React.useEffect(() => {
-    const subscription = watch((value) => {
-      const isValid = value.addressLine1 && value.pin && value.district && value.state && uploadedFile;
-      
-      if (showValidation && !uploadedFile) {
-        setFileError("Please upload a valid supporting document");
-      } else if (uploadedFile) {
-        setFileError("");
-      }
-      
-      onValidationChange?.(isValid);
-      onDataChange?.({ ...value, uploadedFile });
-    });
-    return () => subscription.unsubscribe();
-  }, [watch, uploadedFile, onValidationChange, onDataChange, showValidation]);
+    if (!inputValue) {
+      setIsValid(false);
+      return;
+    }
+
+    let valid = false;
+
+    if (name.includes("pin") && inputValue.length === 6) {
+      valid = true;
+    } else if (validationPattern.current) {
+      valid = validationPattern.current.test(inputValue);
+    } else if (required) {
+      valid = inputValue.length > 0;
+    } else {
+      valid = true;
+    }
+
+    setIsValid(valid);
+  }, [inputValue, required, name]);
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setInputValue(value);
+    setTouched(true);
+    setIsTyping(true);
+
+    if (name.includes("pin") && value.length === 6) {
+      setTimeout(() => {
+        if (inputRef.current) {
+          inputRef.current.value = value;
+        }
+      }, 100);
+    }
+
+    if (onChange) {
+      onChange(e);
+    }
+  };
+
+  const togglePasswordVisibility = () => setShowPassword((prev) => !prev);
+
+  const showError = errorMessage && !isTyping;
+  const showSuccess = touched && isValid && inputValue && !showError;
+
+  const inputClasses = classNames("shadow-sm w-100", {
+    "is-invalid": showError,
+    "is-valid": showSuccess && type !=="date",
+    "border-start-0": IconComponent,
+    "border-end-0": isPassword,
+    disabled: disabled,
+  });
 
   return (
-    <Collapsible
-      title="Registration Information"
-      openStat={true}
-      newDesign={true}
-    >
-      <div className={styles.formContent}>
-        <div className={styles.previousAddressSection}>
-          <label className={styles.sectionLabel}>Previous Address</label>
-          <div className={styles.previousAddressBox}>
-            {watch("previousAddress")}
-          </div>
-        </div>
-
-        <div className={styles.updateSection}>
-          <h6 className={styles.sectionTitle}>Update Your Address</h6>
-          
-          <Row className="gy-3">
-            <Col md={6}>
-              <InputText
-                label="Address line 1"
-                name="addressLine1"
-                placeholder="Enter Address Line 1"
-                register={register("addressLine1", {
-                  required: "Address line 1 is required"
-                })}
-                errors={showValidation ? errors : {}}
-                required={true}
-                icon={<FaMapMarkerAlt />}
+    <Form.Group className={`mb-2 ${className}`} controlId={name}>
+      {label && (
+        <Form.Label className="fw-semibold d-flex align-items-center justify-content-between">
+          <span>
+            {label}
+            {required && <span className="text-danger ms-1">*</span>}
+          </span>
+          {tooltipText && (
+            <OverlayTrigger
+              placement="auto"
+              overlay={<Tooltip id={`tooltip-${name}`}>{tooltipText}</Tooltip>}
+            >
+              <FaInfoCircle
+                style={{
+                  cursor: "pointer",
+                  fontSize: "18px",
+                  color: "#0c9573ff",
+                }}
               />
-            </Col>
-            
-            <Col md={6}>
-              <InputText
-                label="Address line 2"
-                name="addressLine2"
-                placeholder="Enter Address Line 2"
-                register={register("addressLine2")}
-                errors={showValidation ? errors : {}}
-                icon={<FaMapMarkerAlt />}
-              />
-            </Col>
-
-            <Col md={6}>
-              <InputText
-                label="PIN"
-                name="pin"
-                placeholder="Enter 6-digit Pin code"
-                register={register("pin", {
-                  required: "PIN is required",
-                  pattern: {
-                    value: /^[0-9]{6}$/,
-                    message: "Please enter a valid 6-digit PIN"
-                  }
-                })}
-                errors={showValidation ? errors : {}}
-                required={true}
-                maxLength={6}
-                icon={<FaMapMarkerAlt />}
-              />
-            </Col>
-            
-            <Col md={6}>
-              <InputText
-                label="District"
-                name="district"
-                placeholder="Please Enter Your District"
-                register={register("district", {
-                  required: "District is required"
-                })}
-                errors={showValidation ? errors : {}}
-                required={true}
-                icon={<FaMapMarkerAlt />}
-              />
-            </Col>
-
-            <Col md={6}>
-              <InputText
-                label="State"
-                name="state"
-                placeholder="Please Enter Your State"
-                register={register("state", {
-                  required: "State is required"
-                })}
-                errors={showValidation ? errors : {}}
-                required={true}
-                icon={<FaMapMarkerAlt />}
-              />
-            </Col>
-            
-            <Col md={6}>
-              <InputText
-                label="Country"
-                name="country"
-                register={register("country")}
-                errors={showValidation ? errors : {}}
-                disabled={true}
-                icon={<FaMapMarkerAlt />}
-              />
-            </Col>
-          </Row>
-        </div>
-        
-        <div className={styles.warningText}>
-          Applicant must upload valid supporting documents for the selected change ({selectedOption})
-        </div>
-        
-        <div className={styles.uploadSection}>
-          <label className={styles.uploadLabel}>*Valid Supporting Documents</label>
-          <div className={`${styles.uploadBox} ${fileError ? styles.uploadBoxError : ''}`}>
-            <input
-              type="file"
-              id="fileUpload"
-              style={{ display: 'none' }}
-              onChange={handleFileUpload}
-              accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
-            />
-            <div className={styles.fileName}>
-              {uploadedFile ? uploadedFile.name : "File Name"}
-            </div>
-            <div className={styles.uploadButtons}>
-              <Button
-                variant="outline-success"
-                size="sm"
-                disabled={!uploadedFile}
-                className={styles.viewButton}
-              >
-                <FaEye className="me-1" />
-                View
-              </Button>
-              <Button
-                variant="outline-primary"
-                size="sm"
-                className={styles.uploadButton}
-                onClick={() => document.getElementById('fileUpload').click()}
-              >
-                <FaUpload className="me-1" />
-                Upload
-              </Button>
-            </div>
-          </div>
-          {fileError && (
-            <div className={styles.fileError}>
-              {fileError}
-            </div>
+            </OverlayTrigger>
           )}
-        </div>
-      </div>
-    </Collapsible>
-  );
-});
+        </Form.Label>
+      )}
 
-export default AddressChange;
+      <InputGroup className="flex-nowrap w-100 flex-md-nowrap flex-wrap">
+        {IconComponent && (
+          <InputGroup.Text
+            className={`bg-white border-end-0 ${
+              showError
+                ? "border-danger text-danger"
+                : showSuccess
+                ? "border-success text-success"
+                : ""
+            }`}
+            style={{
+              borderColor: showError
+                ? "#dc3545"
+                : showSuccess
+                ? "#198754"
+                : "#ced4da",
+              transition: "all 0.3s ease",
+            }}
+          >
+            <IconComponent
+              size={18}
+              color={
+                showError ? "#dc3545" : showSuccess ? "#198754" : "#1A61C1"
+              }
+            />
+          </InputGroup.Text>
+        )}
+
+       <Form.Control
+          ref={inputRef}
+          type={inputType}
+          name={name}
+          placeholder={placeholder}
+          {...register}
+          disabled={disabled}
+          onChange={(e: any) => {
+            handleChange(e);
+            if (register?.onChange) {
+              register.onChange(e);
+            }
+          }}
+          maxLength={maxlength}
+          readOnly={readOnly}
+          onKeyDown={onKeyDown}
+          min={type === "date" ? formatDate(minDate) : 0}
+          max={type === "date" ? formatDate(maxDate) : undefined}
+          className={inputClasses}
+          aria-label={label}
+          onBlur={(e) => {
+            setTouched(true);
+            setIsTyping(false);
+            if (register?.onBlur) {
+              register.onBlur(e);
+            }
+          }}
+          style={{
+            ...style,
+            borderColor: showError
+              ? "#dc3545"
+              : showSuccess && type !== "date"
+              ? "#198754"
+              : "#ced4da",
+            backgroundColor: showError
+              ? "#fff8f8"
+              : showSuccess && type !== "date"
+              ? "#f8fff9"
+              : "white",
+            transition: "all 0.3s ease",
+          }}
+          autoFocus={autoFocus}
+        />
+
+        {isPassword && (
+          <OverlayTrigger
+            placement="top"
+            overlay={
+              <Tooltip id={`tooltip-${name}`}>
+                {showPassword ? "Hide password" : "Show password"}
+              </Tooltip>
+            }
+          >
+            <InputGroup.Text
+              className={`bg-white border-start-0 ${
+                showError
+                  ? "border-danger text-danger"
+                  : showSuccess
+                  ? "border-success text-success"
+                  : ""
+              }`}
+              role="button"
+              onClick={togglePasswordVisibility}
+              aria-label="Toggle password visibility"
+              style={{
+                cursor: "pointer",
+                borderColor: showError
+                  ? "#dc3545"
+                  : showSuccess
+                  ? "#198754"
+                  : "#ced4da",
+                transition: "all 0.3s ease",
+              }}
+            >
+              {showPassword ? (
+                <FaEyeSlash
+                  size={18}
+                  color={
+                    showError ? "#dc3545" : showSuccess ? "#198754" : "#387AD4"
+                  }
+                />
+              ) : (
+                <FaEye
+                  size={18}
+                  color={
+                    showError ? "#dc3545" : showSuccess ? "#198754" : "#387AD4"
+                  }
+                />
+              )}
+            </InputGroup.Text>
+          </OverlayTrigger>
+        )}
+      </InputGroup>
+
+      {description && (
+        <Form.Text style={{ color: "#5A67D8" }} className="d-block mt-1">
+          {description}
+        </Form.Text>
+      )}
+
+      {showError && (
+        <Form.Text className="text-danger d-block">
+          {errorMessage}
+          {/* {errorMessage || `${label} is required`} */}
+        </Form.Text>
+      )}
+    </Form.Group>
+  );
+};
+
+export default InputText;
