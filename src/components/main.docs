@@ -1,1284 +1,837 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
-import { useForm } from "react-hook-form";
-import { Row, Col } from "react-bootstrap";
-import InputText from "../../../common/InputText.tsx";
-import InputSelect from "../../../common/InputSelect.tsx";
-import InputRadio from "../../../common/InputRadio.tsx";
-import InputFile from "../../../common/InputFile.tsx";
-import Collapsible from "../../../common/Collapsible.js";
-import { useTranslation } from "react-i18next";
-import { useLanguageContext } from "../../../common/LanguageContext.js";
-import { fetchAndViewFile, renameFile } from "../../../../utils/constants.ts";
-import { BsDownload, BsEyeFill } from "react-icons/bs";
-import { FaClipboardList, FaShip, FaTimesCircle, FaUser } from "react-icons/fa";
-import { useMasterData } from "../../../context/MasterDataContext.js";
-import { handleErrorMessage } from "../../../../utils/errorMessageHandler.js";
-import NewLoader from "../../../common/NewLoader.js";
-import { BASE_IP, URLS_ENDPOINT } from "../../../../utils/urlsConstants.ts";
-import { postData, postFORMdata } from "../../../../services/http.service.ts";
-import { Tooltip, IconButton } from "@mui/material";
-import InfoOutlinedIcon from "@mui/icons-material/InfoOutlined";
-import { toast } from "react-toastify";
-import { getFromLocalStorage } from "../../../../utils/localStorageUtils.js";
-import axios from "axios";
-import { deleteFile } from "../../../../utils/deleteFile.js";
-import styles from "./VesselDetails.module.css";
+import React, { useState, useRef, useCallback } from "react";
+import { Button } from "react-bootstrap";
+import { BsArrowLeft } from "react-icons/bs";
+import { useNavigate, useLocation } from "react-router-dom";
+import Stepper from "../../../common/Stepper";
+import NameChange from "./NameChange";
+import Invoicing from "../../../common/Invoicing";
+import styles from './ApplicationDetailsUpdate.module.css';
 
-const VesselDetails = ({
-  formMethods,
-  viewMode = false,
-  editMode = false,
-  vesselRegisData,
-}) => {
-  const { i18n, t } = useTranslation();
+const ApplicationDetailsUpdate = () => {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const stepperRef = useRef();
+  const nameChangeRef = useRef();
+  const selectedOption = location.state?.selectedOption || "";
+  
+  const [isValid, setIsValid] = useState(false);
   const [formData, setFormData] = useState({});
-  const { masterData } = useMasterData();
-  const loaderRef = useRef();
-  const [isBuilderDataLoaded, setIsBuilderDataLoaded] = useState(false);
-  const [selectedBuilderId, setSelectedBuilderId] = useState("");
+  const [savedFormData, setSavedFormData] = useState({}); 
 
-  const defaultValues = {
-    ownerName: "",
-    ownerAddress: "",
-    mobile: "",
-    email: "",
-    pan: "",
-    aadhar: "",
-    tradeLicence: "",
-    gst: "",
-    grt: "",
-    workOrderValue: "",
-    vesselType: "",
-    category: "",
-    zone: "",
-    supervisionAuthority: "",
-    purchaseType: "",
-    classificationSociety: "",
-    constructedBy: 1,
-    builder: "",
-    builderName: "",
-    builderAddress: "",
-    builderEmail: "",
-    builderMobile: "",
-    builderTradeLicence: "",
-    builderGST: "",
-    builderAuth: "",
-    authLetter: "",
-    authLetterFileStoreId: "",
-    termsAccepted: false,
-    tonnageBooklets: null,
-    stabilityBooklets: null,
+  const mockPaymentData = {
+    summary: {
+      subTotal: 1000,
+      cgst: 90,
+      sgst: 90,
+      igst: 0,
+      totalPayable: 1180
+    },
+    invoiceBreakupInfo: [
+      {
+        id: 1,
+        categoryHeader: "Registration Charges",
+        label: "Application processing fee",
+        amount: 500
+      },
+      {
+        id: 2,
+        categoryHeader: "Documentation Charges",
+        label: "Certificate issuance fee",
+        amount: 300
+      },
+      {
+        id: 3,
+        categoryHeader: "Processing Fees",
+        label: "Administrative charges",
+        amount: 200
+      }
+    ]
   };
 
-  const internalFormMethods = useForm({
-    defaultValues,
-    mode: "onTouched",
-  });
-
-  const methods = formMethods || internalFormMethods;
-
-  const isCompMount = useRef(true);
-
-  const {
-    register,
-    watch,
-    setValue,
-    clearErrors,
-    trigger,
-    getValues,
-    setError,
-    formState: { errors },
-  } = methods;
-
-  const constructedBy = watch("constructedBy");
-  const category = watch("category");
-
-  const mapApiValueToDropdown = useCallback((apiValue, masterDataArray) => {
-    if (!apiValue || !masterDataArray) return "";
-
-    const exactMatch = masterDataArray.find(
-      (item) => item.valueCode === apiValue || item.valueLabel === apiValue
-    );
-    if (exactMatch) return exactMatch.valueCode;
-
-    const caseInsensitiveMatch = masterDataArray.find(
-      (item) =>
-        item.valueCode?.toLowerCase() === apiValue.toLowerCase() ||
-        item.valueLabel?.toLowerCase() === apiValue.toLowerCase()
-    );
-    if (caseInsensitiveMatch) return caseInsensitiveMatch.valueCode;
-
-    const partialMatch = masterDataArray.find((item) => {
-      const itemCode = item.valueCode?.toLowerCase() || "";
-      const itemLabel = item.valueLabel?.toLowerCase() || "";
-      const apiVal = apiValue.toLowerCase();
-
-      return (
-        itemCode.includes(apiVal) ||
-        itemLabel.includes(apiVal) ||
-        apiVal.includes(itemCode) ||
-        apiVal.includes(itemLabel)
-      );
-    });
-    if (partialMatch) return partialMatch.valueCode;
-
-    return apiValue;
+  const handleValidationChange = useCallback((valid) => {
+    setIsValid(valid);
   }, []);
 
-  useEffect(() => {
-    if (!masterData || !vesselRegisData?.vesselDetails) return;
-
-    const vesselDetails = vesselRegisData?.vesselDetails;
-
-    const mappings = [
-      {
-        field: "vesselType",
-        apiValue: vesselDetails.typeOfVessel,
-        masterArray: masterData.vesselTypes,
-      },
-      {
-        field: "category",
-        apiValue: vesselDetails.categoryOfVessel,
-        masterArray: masterData.vesselCategories,
-      },
-      {
-        field: "zone",
-        apiValue: vesselDetails.zone,
-        masterArray: masterData.zones,
-      },
-      {
-        field: "supervisionAuthority",
-        apiValue: vesselDetails.supervisionAuthority,
-        masterArray: masterData.supervisionAuthorites,
-      },
-      {
-        field: "purchaseType",
-        apiValue: vesselDetails.purchaseType,
-        masterArray: masterData.purchaseTypes,
-      },
-      {
-        field: "builderAuth",
-        apiValue: vesselDetails.builderAuth,
-        masterArray: masterData.builderAuthorizations,
-      },
-    ];
-
-    mappings.forEach(({ field, apiValue, masterArray }) => {
-      if (apiValue && masterArray) {
-        const mappedValue = mapApiValueToDropdown(apiValue, masterArray);
-        if (mappedValue) {
-          setValue(field, mappedValue, { shouldValidate: false });
-          setFormData((prev) => ({ ...prev, [field]: mappedValue }));
-        }
-      }
-    });
-
-    if (
-      vesselRegisData.basicDetails?.builderDetails?.id &&
-      masterData.builderNames
-    ) {
-      const builderId = vesselRegisData.basicDetails.builderDetails.id;
-      const builderMatch = masterData.builderNames.find(
-        (builder) => builder.valueCode === builderId || builder.id === builderId
-      );
-      if (builderMatch) {
-        setValue("builder", builderMatch.valueCode, { shouldValidate: false });
-        setFormData((prev) => ({ ...prev, builder: builderMatch.valueCode }));
-      }
-    }
-
-    console.log("Mapped dropdown values:", {
-      vesselType: getValues("vesselType"),
-      category: getValues("category"),
-      zone: getValues("zone"),
-      supervisionAuthority: getValues("supervisionAuthority"),
-      purchaseType: getValues("purchaseType"),
-      builder: getValues("builder"),
-    });
-  }, [masterData, vesselRegisData, setValue, mapApiValueToDropdown, getValues]);
-
-  useEffect(() => {
-    if (isCompMount.current) {
-      isCompMount.current = false;
-      return;
-    }
-    const fieldsWithErrors = Object.keys(errors);
-    trigger(fieldsWithErrors);
-  }, [i18n.language]);
-
-  useEffect(() => {
-    setTimeout(() => {
-      Object.keys(formData).forEach((key) => {
-        if (formData[key] !== undefined) {
-          setValue(key, formData[key], { shouldValidate: false });
-        }
-      });
-    }, 0);
-  }, [setValue, formData]);
-
-  const handleDropdownChange = useCallback(
-    (name, value) => {
-      setValue(name, value, { shouldValidate: true });
-      clearErrors(name);
-      setFormData((prev) => ({
-        ...prev,
-        [name]: value,
-      }));
-      if (name === "builder") {
-        handleBuilderChange(value);
-      }
-    },
-    [setValue, clearErrors]
-  );
-
-  // const handleFileChange = useCallback(
-  //   async (name, file) => {
-  //     if (!file) return;
-
-  //     const validTypes = [
-  //       "application/pdf",
-  //       "image/jpeg",
-  //       "image/png",
-  //       "image/jpg",
-  //     ];
-  //     if (!validTypes.includes(file.type)) {
-  //       setError(name, {
-  //         type: "manual",
-  //         message: t("Only PDF, JPG or PNG files are allowed"),
-  //       });
-  //       setValue(name, null);
-  //       return;
-  //     }
-
-  //     if (file.size > 10 * 1024 * 1024) {
-  //       setError(name, {
-  //         type: "manual",
-  //         message: t("File size should not exceed 10MB"),
-  //       });
-  //       setValue(name, null);
-  //       return;
-  //     }
-
-  //     const extension = file?.name?.substring(file?.name?.lastIndexOf("."));
-  //     const fileName = `${name}${extension}`;
-  //     file.originalName = fileName;
-  //     const renamedFile = renameFile(file, fileName);
-
-  //     clearErrors(name);
-  //     setValue(name, renamedFile, { shouldValidate: true });
-  //     setFormData((prev) => ({
-  //       ...prev,
-  //       [name]: renamedFile,
-  //     }));
-
-  //     if (name === "authLetter") {
-  //       setValue("authLetterFileStoreId", null);
-  //       try {
-  //         const formData = new FormData();
-  //         formData.append("file", file);
-  //         const uploadUrl =
-  //           BASE_IP + URLS_ENDPOINT.FILE_STORE_SERVICE.UPLOAD_FILE;
-  //         loaderRef?.current?.show();
-  //         const response = await postFORMdata(uploadUrl, formData);
-  //         loaderRef?.current?.hide();
-  //         const fileStoreId = response?.data?.files[0]?.fileStoreId;
-  //         if (fileStoreId) {
-  //           console.log("authfileStoreId ", fileStoreId);
-  //           setValue("authLetterFileStoreId", fileStoreId);
-  //         } else {
-  //           toast.error("File addition failed. Please try again.");
-  //           setValue("authLetter", null);
-  //           setFormData((prev) => ({
-  //             ...prev,
-  //             [name]: null,
-  //           }));
-  //         }
-  //       } catch (error) {
-  //         loaderRef?.current?.hide();
-  //         clearErrors(name);
-  //         setValue("authLetter", null);
-  //         setFormData((prev) => ({
-  //           ...prev,
-  //           [name]: null,
-  //         }));
-  //         console.error("File upload failed", error);
-  //         toast.error("File upload failed. Please try again.");
-  //       }
-  //     }
-  //   },
-  //   [setValue, clearErrors, setError, t]
-  // );
-  const handleFileChange = useCallback(
-    async (name, file) => {
-      if (!file) return;
-
-      const validTypes = [
-        "application/pdf",
-        "image/jpeg",
-        "image/png",
-        "image/jpg",
-      ];
-      if (!validTypes.includes(file.type)) {
-        setError(name, {
-          type: "manual",
-          message: t("Only PDF, JPG or PNG files are allowed"),
-        });
-        setValue(name, null);
-        return;
-      }
-
-      if (file.size > 10 * 1024 * 1024) {
-        setError(name, {
-          type: "manual",
-          message: t("File size should not exceed 10MB"),
-        });
-        setValue(name, null);
-        return;
-      }
-
-      const extension = file?.name?.substring(file?.name?.lastIndexOf("."));
-      const fileName = `${name}${extension}`;
-      file.originalName = fileName;
-      const renamedFile = renameFile(file, fileName);
-
-      clearErrors(name);
-      setValue(name, renamedFile, { shouldValidate: true });
-      setFormData((prev) => ({
-        ...prev,
-        [name]: renamedFile,
-      }));
-
-      if (name === "authLetter") {
-        setValue("authLetterFileStoreId", null);
-
-        const standardizedName = `Authorization Letter${extension}`;
-
-        const displayFile = new File([file], standardizedName, {
-          type: file.type,
-        });
-
-        setValue("authLetter", displayFile);
-        setValue("authLetterOriginalName", file.name);
-
-        try {
-          const formData = new FormData();
-          formData.append("file", file);
-          const uploadUrl =
-            BASE_IP + URLS_ENDPOINT.FILE_STORE_SERVICE.UPLOAD_FILE;
-          loaderRef?.current?.show();
-          const response = await postFORMdata(uploadUrl, formData);
-          loaderRef?.current?.hide();
-          const fileStoreId = response?.data?.files[0]?.fileStoreId;
-          if (fileStoreId) {
-            console.log("authfileStoreId ", fileStoreId);
-            setValue("authLetterFileStoreId", fileStoreId);
-          } else {
-            toast.error("File addition failed. Please try again.");
-            setValue("authLetter", null);
-            setValue("authLetterOriginalName", null);
-            setFormData((prev) => ({
-              ...prev,
-              [name]: null,
-            }));
-          }
-        } catch (error) {
-          loaderRef?.current?.hide();
-          clearErrors(name);
-          setValue("authLetter", null);
-          setValue("authLetterOriginalName", null);
-          setFormData((prev) => ({
-            ...prev,
-            [name]: null,
-          }));
-          console.error("File upload failed", error);
-          toast.error("File upload failed. Please try again.");
-        }
-      }
-    },
-    [setValue, clearErrors, setError, t]
-  );
-
-  useEffect(() => {
-    if (category === "A" && masterData) {
-      const zone1 = masterData?.zones?.find(
-        (zone) =>
-          zone.valueCode === "ZONE 1" || zone.valueLabel?.includes("ZONE 1")
-      );
-      const zone1Value = zone1 ? zone1.valueCode : "ZONE 1";
-
-      const classificationSociety = masterData?.supervisionAuthorites?.find(
-        (auth) =>
-          auth.valueCode === "CLASSIFICATION SOCIETY" ||
-          auth.valueLabel?.includes("CLASSIFICATION")
-      );
-      const classificationSocietyValue = classificationSociety
-        ? classificationSociety.valueCode
-        : "CLASSIFICATION SOCIETY";
-
-      setValue("zone", zone1Value, { shouldValidate: true });
-      setValue("supervisionAuthority", classificationSocietyValue, {
-        shouldValidate: true,
-      });
-
-      clearErrors("zone");
-      clearErrors("supervisionAuthority");
-
-      setFormData((prev) => ({
-        ...prev,
-        zone: zone1Value,
-        supervisionAuthority: classificationSocietyValue,
-      }));
-    }
-  }, [category, masterData, setValue, clearErrors, setFormData]);
-
-  useEffect(() => {
-    if (!!getValues("builderAuth")) {
-      setIsBuilderDataLoaded(true);
-    }
+  const handleDataChange = useCallback((data) => {
+    setFormData(data);
   }, []);
 
-  const handleBuilderChange = async (selectedValue) => {
-    setIsBuilderDataLoaded(false);
-    setSelectedBuilderId("");
-
-    const fieldsMap = {
-      builderName: "builderName",
-      builderAddress: "address",
-      builderEmail: "emailId",
-      builderMobile: "phone",
-      builderTradeLicence: "tradeLicenseNumber",
-      builderGST: "gstNo",
-      builderAuth: "",
-    };
-
-    Object.keys(fieldsMap).forEach((field) => setValue(field, ""));
-
-    if (!selectedValue) return;
-
-    try {
-      const URL = `${process.env.REACT_APP_AUTH_URL}${URLS_ENDPOINT.USER_SERVICE.BUILDER_SEARCH}`;
-
-      loaderRef?.current?.show();
-      const response = await postData(URL, {
-        ids: [selectedValue],
-      });
-      if (response?.data?.data?.length > 0) {
-        loaderRef?.current?.hide();
-        const builderDetails = response.data.data?.map((obj) => ({
-          ...obj,
-          address: [obj.addressLine1, obj.addressLine2]
-            .filter(Boolean)
-            .join(", "),
-        }));
-
-        Object.entries(fieldsMap).forEach(([formField, apiField]) => {
-          setValue(formField, builderDetails[0]?.[apiField] || "");
-        });
-        setIsBuilderDataLoaded(true);
-        setSelectedBuilderId(selectedValue);
-      }
-    } catch (err) {
-      setIsBuilderDataLoaded(false);
-      setSelectedBuilderId("");
-      console.error("Failed to fetch builder details", err);
-      loaderRef?.current?.hide();
-      handleErrorMessage(err?.response?.data);
-      Object.keys(fieldsMap).forEach((field) => setValue(field, ""));
+  const validateStep = async () => {
+    if (nameChangeRef.current?.validateForm) {
+      return await nameChangeRef.current.validateForm();
     }
+    return isValid;
   };
 
-  const handleDownload = async (fileStoreId, fileName) => {
-    try {
-      if (!fileStoreId) return;
-      const url = `${BASE_IP}/filestore/v1/files/id?fileStoreId=${fileStoreId}`;
-
-      loaderRef.current?.show();
-
-      const accessToken = getFromLocalStorage("access_token");
-      const tokenDetails = getFromLocalStorage("tokenDetails");
-      const sessionState = tokenDetails
-        ? JSON.parse(tokenDetails)?.session_state
-        : "";
-
-      const response = await axios({
-        method: "GET",
-        url: url,
-        responseType: "blob",
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          "X-Request-ID": sessionState,
-          Accept: "application/octet-stream",
-        },
-      });
-
-      if (response.data) {
-        let filename = fileName || "document";
-        const contentDisposition = response.headers["content-disposition"];
-        if (contentDisposition) {
-          const filenameMatch = contentDisposition.match(
-            /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/
-          );
-          if (filenameMatch && filenameMatch[1]) {
-            filename = filenameMatch[1].replace(/['"]/g, "");
-          }
-        }
-
-        const blob = new Blob([response.data], {
-          type: response.headers["content-type"] || "application/octet-stream",
-        });
-        const blobUrl = window.URL.createObjectURL(blob);
-
-        const link = document.createElement("a");
-        link.href = blobUrl;
-        link.setAttribute("download", filename);
-        document.body.appendChild(link);
-        link.click();
-
-        setTimeout(() => {
-          document.body.removeChild(link);
-          window.URL.revokeObjectURL(blobUrl);
-        }, 100);
-      }
-    } catch (error) {
-      console.error("Error downloading file:", error);
-      toast.error("Failed to download file. Please try again.");
-    } finally {
-      loaderRef.current?.hide();
-    }
+  const getFormData = () => {
+    return formData;
   };
 
-  const handleRemoveAuthLetter = async () => {
-    const fileStoreId = watch("authLetterFileStoreId");
-    const res = await deleteFile(fileStoreId, loaderRef);
-    if (res) {
-      clearErrors("authLetter");
-      setValue("authLetter", null);
-      setValue("authLetterFileStoreId", null);
-    }
+  const handleSaveAndNext = (stepInfo) => {
+    console.log("Saving step data:", stepInfo);
+    setSavedFormData(formData);
   };
+
+  const handlePayNow = () => {
+    console.log("Proceeding to payment...");
+  };
+
+  const steps = [
+    {
+      label: "Registration Information",
+      component: (
+        <NameChange 
+          ref={nameChangeRef}
+          selectedOption={selectedOption}
+          onValidationChange={handleValidationChange}
+          onDataChange={handleDataChange}
+          initialData={savedFormData} 
+        />
+      ),
+      validate: validateStep,
+      getFormData: getFormData,
+      showSavaAndNextButton: true,
+      hasActions: true
+    },
+    {
+      label: "Invoicing",
+      component: (
+        <Invoicing
+          supervisionAuthority="iwt"
+          onPayNow={handlePayNow}
+          paymentData={mockPaymentData}
+        />
+      ),
+      validate: () => true,
+      getFormData: () => ({}),
+      showPayBtn: true
+    }
+  ];
 
   return (
-    <>
-      <NewLoader ref={loaderRef} />
-      <form autoComplete="off">
-        <Collapsible
-          title={
-            <>
-              <FaClipboardList className="me-2" />
-              <span>{t("Basic Information")}</span>
-            </>
-          }
-          openStat={true}
+    <div className={styles.container}>
+      <div className={styles.header}>
+        <Button
+          variant="outline-primary"
+          onClick={() => navigate(-1)}
+          className={styles.backButton}
         >
-          <Row className="gy-3" style={{ padding: "1rem" }}>
-            <Col md={4}>
-              <InputText
-                label={t("vesselDetails.Name of Owner")}
-                required={true}
-                name="ownerName"
-                placeholder={t("vesselDetails.Please enter Name of Owner")}
-                register={register("ownerName", {
-                  required: t("vesselDetails.Name is required"),
-                })}
-                errors={errors}
-                disabled={
-                  viewMode || (!errors?.ownerName && !!getValues("ownerName"))
-                }
-              />
-            </Col>
-            <Col md={4}>
-              <InputText
-                label={t("vesselDetails.Address of Owner")}
-                required={true}
-                name="ownerAddress"
-                placeholder={t("vesselDetails.Please enter Address of Owner")}
-                register={register("ownerAddress", {
-                  required: t("vesselDetails.Address is required"),
-                })}
-                errors={errors}
-                disabled={
-                  viewMode ||
-                  (!errors?.ownerAddress && !!getValues("ownerAddress"))
-                }
-              />
-            </Col>
-            <Col md={4}>
-              <InputText
-                label={t("vesselDetails.Mobile")}
-                required={true}
-                name="mobile"
-                placeholder={t("vesselDetails.Please enter Mobile")}
-                register={register("mobile", {
-                  required: t("vesselDetails.Mobile is required"),
-                })}
-                errors={errors}
-                disabled={
-                  viewMode || (!errors?.mobile && !!getValues("mobile"))
-                }
-              />
-            </Col>
-            <Col md={4}>
-              <InputText
-                label={t("vesselDetails.Email Id")}
-                required={true}
-                name="email"
-                type="email"
-                placeholder={t("vesselDetails.Please enter Email Id")}
-                register={register("email", {
-                  required: t("vesselDetails.Email is required"),
-                })}
-                errors={errors}
-                disabled={viewMode || (!errors?.email && !!getValues("email"))}
-              />
-            </Col>
-            <Col md={4}>
-              <InputText
-                label={t("vesselDetails.PAN")}
-                required={true}
-                name="pan"
-                placeholder={t("vesselDetails.Please enter PAN")}
-                register={register("pan", {
-                  required: t("vesselDetails.PAN is required"),
-                })}
-                errors={errors}
-                disabled={viewMode || (!errors?.pan && !!getValues("pan"))}
-              />
-            </Col>
-            <Col md={4}>
-              <InputText
-                label={t("vesselDetails.Aadhar")}
-                required={true}
-                name="aadhar"
-                placeholder={t("vesselDetails.Please enter Aadhar")}
-                register={register("aadhar", {
-                  required: t("vesselDetails.Aadhar is required"),
-                })}
-                errors={errors}
-                maxLength={12}
-                disabled={
-                  viewMode || (!errors?.aadhar && !!getValues("aadhar"))
-                }
-              />
-            </Col>
-            <Col md={4}>
-              <InputText
-                label={t("vesselDetails.Trade Licence")}
-                required={true}
-                name="tradeLicence"
-                placeholder={t("vesselDetails.Please enter Trade Licence")}
-                register={register("tradeLicence", {
-                  required: t("vesselDetails.Trade Licence is required"),
-                })}
-                errors={errors}
-                disabled={
-                  viewMode ||
-                  (!errors?.tradeLicence && !!getValues("tradeLicence"))
-                }
-              />
-            </Col>
-            <Col md={4}>
-              <InputText
-                label={t("vesselDetails.GST")}
-                required={
-                  JSON.parse(getFromLocalStorage("ownerDetails") || "{}")
-                    ?.categoryOfOwner !== "INDIVIDUAL"
-                }
-                name="gst"
-                placeholder={t("vesselDetails.Please enter GST")}
-                register={register("gst", {
-                  required:
-                    JSON.parse(getFromLocalStorage("ownerDetails") || "{}")
-                      ?.categoryOfOwner !== "INDIVIDUAL"
-                      ? t("vesselDetails.GST is required")
-                      : false,
-                })}
-                errors={errors}
-                disabled={viewMode || (!errors?.gst && !!getValues("gst"))}
-              />
-            </Col>
-          </Row>
-        </Collapsible>
-
-        <Collapsible
-          title={
-            <div className="d-flex align-items-center">
-              <FaShip className="me-2" style={{ color: "#2466BF" }} />
-              <span style={{ color: "#2466BF" }}>{t("Vessel Details")}</span>
-            </div>
-          }
-          openStat={true}
-        >
-          <Row className="gy-3" style={{ padding: "1rem" }}>
-            <Col md={4}>
-              <InputSelect
-                label={t("vesselDetails.Type of Vessel")}
-                required={true}
-                name="vesselType"
-                options={[
-                  {
-                    value: "",
-                    label: "-- Select --",
-                  },
-                  ...(masterData?.vesselTypes?.map((type) => ({
-                    value: type?.valueCode,
-                    label: type?.valueLabel,
-                  })) || []),
-                ]}
-                register={register("vesselType", {
-                  required: t("vesselDetails.vesselType is required"),
-                })}
-                errors={errors}
-                value={formData.vesselType || watch("vesselType") || ""}
-                onChange={(value) =>
-                  !viewMode && handleDropdownChange("vesselType", value)
-                }
-                disabled={viewMode}
-              />
-            </Col>
-            <Col md={4}>
-              <InputSelect
-                label={t("vesselDetails.Category")}
-                required={true}
-                name="category"
-                options={[
-                  {
-                    value: "",
-                    label: "-- Select --",
-                  },
-                  ...(masterData?.vesselCategories?.map((type) => ({
-                    value: type.valueCode,
-                    label: type.valueLabel,
-                  })) || []),
-                ]}
-                register={register("category", {
-                  required: t("vesselDetails.category is required"),
-                })}
-                errors={errors}
-                value={formData.category || watch("category") || ""}
-                onChange={(value) =>
-                  !viewMode && handleDropdownChange("category", value)
-                }
-                disabled={viewMode}
-              />
-            </Col>
-            <Col md={4}>
-              <InputSelect
-                label={t("vesselDetails.Zone")}
-                required={true}
-                name="zone"
-                options={[
-                  {
-                    value: "",
-                    label: "-- Select --",
-                  },
-                  ...(masterData?.zones?.map((type) => ({
-                    value: type.valueCode,
-                    label: type.valueLabel,
-                  })) || []),
-                ]}
-                register={register("zone", {
-                  required: category !== "A" && t("zone is required"),
-                })}
-                errors={errors}
-                value={formData.zone || watch("zone") || ""}
-                onChange={(value) =>
-                  !viewMode &&
-                  category !== "A" &&
-                  handleDropdownChange("zone", value)
-                }
-                disabled={viewMode || category === "A"}
-                style={{
-                  backgroundColor: category === "A" ? "#f8f9fa" : "",
-                  cursor: category === "A" ? "not-allowed" : "pointer",
-                }}
-              />
-            </Col>
-
-            <Col md={4}>
-              <InputSelect
-                label={t("vesselDetails.Supervision Authority")}
-                required={true}
-                name="supervisionAuthority"
-                options={[
-                  {
-                    value: "",
-                    label: "-- Select --",
-                  },
-                  ...(masterData?.supervisionAuthorites?.map((type) => ({
-                    value: type.valueCode,
-                    label: type.valueLabel,
-                  })) || []),
-                ]}
-                register={register("supervisionAuthority", {
-                  required:
-                    category !== "A" &&
-                    t("vesselDetails.Supervision Authority is required"),
-                })}
-                errors={errors}
-                value={
-                  formData.supervisionAuthority ||
-                  watch("supervisionAuthority") ||
-                  ""
-                }
-                onChange={(value) =>
-                  !viewMode &&
-                  category !== "A" &&
-                  handleDropdownChange("supervisionAuthority", value)
-                }
-                disabled={viewMode || category === "A"}
-                style={{
-                  backgroundColor: category === "A" ? "#f8f9fa" : "",
-                  cursor: category === "A" ? "not-allowed" : "pointer",
-                }}
-              />
-            </Col>
-
-            {(formData?.supervisionAuthority === "CLASSIFICATION SOCIETY" ||
-              watch("supervisionAuthority") === "CLASSIFICATION SOCIETY") && (
-                <Col md={8}>
-                  <InputText
-                    label={t("vesselDetails.Name of the Classification Society")}
-                    name="classificationSociety"
-                    placeholder={t(
-                      "vesselDetails.Please enter Name of the Classification Society"
-                    )}
-                    register={register("classificationSociety")}
-                    errors={errors}
-                    disabled={viewMode}
-                  />
-                </Col>
-              )}
-
-            <Col md={4}>
-              <InputSelect
-                label={t("vesselDetails.Constructed By ?")}
-                required={true}
-                name="constructedBy"
-                options={[
-                  { label: t("vesselDetails.Self"), value: "1" },
-                  { label: t("vesselDetails.Builder"), value: "2" },
-                ]}
-                register={register("constructedBy", {
-                  required: t("vesselDetails.Please select a Constructor Type"),
-                })}
-                rules={{
-                  required: t("vesselDetails.Please select a Constructor Type"),
-                }}
-                errors={errors}
-                value={formData.constructedBy || watch("constructedBy") || ""}
-                onChange={(value) =>
-                  !viewMode && handleDropdownChange("constructedBy", value)
-                }
-                disabled={viewMode}
-              />
-            </Col>
-            {constructedBy === "2" && (
-              <Col md={4}>
-                <InputSelect
-                  label={t("vesselDetails.Builder")}
-                  required={true}
-                  name="builder"
-                  options={[
-                    {
-                      value: "",
-                      label: "-- Select --",
-                    },
-                    ...(masterData?.builderNames?.map((type) => ({
-                      value: type.valueCode,
-                      label: type.valueLabel,
-                    })) || []),
-                  ]}
-                  register={register("builder", {
-                    required: t("vesselDetails.Builder is required"),
-                  })}
-                  errors={errors}
-                  value={formData.builder || watch("builder") || ""}
-                  onChange={(value) =>
-                    !viewMode && handleDropdownChange("builder", value)
-                  }
-                  disabled={viewMode}
-                />
-              </Col>
-            )}
-
-            <Col md={4}>
-              <InputText
-                label={t("vesselDetails.Gross Tonnage (GRT)")}
-                required={true}
-                name="grt"
-                placeholder={t("vesselDetails.Please enter GRT")}
-                register={register("grt", {
-                  required: t("vesselDetails.GRT is required"),
-                })}
-                errors={errors}
-                disabled={viewMode}
-              />
-            </Col>
-            <Col md={4}>
-              <InputText
-                label={
-                  constructedBy === "1"
-                    ? t("vesselDetails.Valuation")
-                    : t("vesselDetails.Work Order Value")
-                }
-                tooltipText={
-                  constructedBy === "1" ? t("vesselDetails.Valution_tt") : ""
-                }
-                required={true}
-                name="workOrderValue"
-                placeholder={t("vesselDetails.Enter Work Order Value")}
-                register={register("workOrderValue", {
-                  required: t("vesselDetails.Work Order Value is required"),
-                  pattern: {
-                    value: /^[0-9]+$/,
-                    message: t("vesselDetails.Please enter a valid number"),
-                  },
-                })}
-                errors={errors}
-                disabled={viewMode}
-              />
-            </Col>
-
-            <Col md={4}>
-              <InputSelect
-                label={t("vesselDetails.Purchase Type")}
-                required={true}
-                name="purchaseType"
-                options={[
-                  {
-                    value: "",
-                    label: "-- Select --",
-                  },
-                  ...(masterData?.purchaseTypes?.map((type) => ({
-                    value: type.valueCode,
-                    label: type.valueLabel,
-                  })) || []),
-                ]}
-                register={register("purchaseType", {
-                  required: t("vesselDetails.Purchase Type is required"),
-                })}
-                errors={errors}
-                value={formData.purchaseType || watch("purchaseType") || ""}
-                onChange={(value) =>
-                  !viewMode && handleDropdownChange("purchaseType", value)
-                }
-                disabled={viewMode}
-              />
-            </Col>
-          </Row>
-        </Collapsible>
-
-        {constructedBy === "2" && (
-          <Collapsible
-            title={
-              <div className="d-flex align-items-center">
-                <FaUser className="me-2" style={{ color: "#2466BF" }} />
-                <span style={{ color: "#2466BF" }}>{t("Builder Details")}</span>
-              </div>
-            }
-            openStat={true}
-          >
-            <Row className="gy-3" style={{ padding: "1rem" }}>
-              <Col md={4}>
-                <InputText
-                  label={t("vesselDetails.Builder Name")}
-                  required={true}
-                  name="builderName"
-                  placeholder={t("vesselDetails.Please enter Builder Name")}
-                  register={register("builderName", {
-                    required: t("vesselDetails.Builder Name is required"),
-                  })}
-                  errors={errors}
-                  disabled={
-                    viewMode ||
-                    (isBuilderDataLoaded && !!getValues("builderName"))
-                  }
-                />
-              </Col>
-              <Col md={4}>
-                <InputText
-                  label={t("vesselDetails.Builder Address")}
-                  required={true}
-                  name="builderAddress"
-                  placeholder={t("vesselDetails.Please enter Builder Address")}
-                  register={register("builderAddress", {
-                    required: t("vesselDetails.Builder Address is required"),
-                  })}
-                  errors={errors}
-                  disabled={
-                    viewMode ||
-                    (isBuilderDataLoaded && !!getValues("builderAddress"))
-                  }
-                />
-              </Col>
-              <Col md={4}>
-                <InputText
-                  label={t("vesselDetails.Builder Email Id")}
-                  required={true}
-                  name="builderEmail"
-                  type="email"
-                  placeholder={t("vesselDetails.Please enter Builder Email Id")}
-                  register={register("builderEmail", {
-                    required: t("vesselDetails.Builder Email is required"),
-                    pattern: {
-                      value: /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i,
-                      message: t("vesselDetails.Invalid email address"),
-                    },
-                  })}
-                  errors={errors}
-                  disabled={
-                    viewMode ||
-                    (isBuilderDataLoaded && !!getValues("builderEmail"))
-                  }
-                />
-              </Col>
-              <Col md={4}>
-                <InputText
-                  label={t("vesselDetails.Mobile")}
-                  required={true}
-                  name="builderMobile"
-                  placeholder={t("vesselDetails.Please enter Mobile")}
-                  register={register("builderMobile", {
-                    required: t("vesselDetails.Builder Mobile is required"),
-                    pattern: {
-                      value: /^[0-9]{10}$/,
-                      message: t("vesselDetails.Invalid mobile number"),
-                    },
-                  })}
-                  errors={errors}
-                  disabled={
-                    viewMode ||
-                    (isBuilderDataLoaded && !!getValues("builderMobile"))
-                  }
-                />
-              </Col>
-              <Col md={4}>
-                <InputText
-                  label={t("vesselDetails.Trade Licence")}
-                  required={true}
-                  name="builderTradeLicence"
-                  placeholder={t("vesselDetails.Please enter Trade Licence")}
-                  register={register("builderTradeLicence", {
-                    required: t(
-                      "vesselDetails.Builder Trade Licence is required"
-                    ),
-                  })}
-                  errors={errors}
-                  disabled={
-                    viewMode ||
-                    (isBuilderDataLoaded && !!getValues("builderTradeLicence"))
-                  }
-                />
-              </Col>
-              <Col md={4}>
-                <InputText
-                  label={t("vesselDetails.GST")}
-                  required={true}
-                  name="builderGST"
-                  placeholder={t("vesselDetails.Please enter GST")}
-                  register={register("builderGST", {
-                    required: t("vesselDetails.Builder GST is required"),
-                  })}
-                  errors={errors}
-                  disabled={
-                    viewMode ||
-                    (isBuilderDataLoaded && !!getValues("builderGST"))
-                  }
-                />
-              </Col>
-              <Col md={4}>
-                <InputSelect
-                  label={t("vesselDetails.Builder Authorization")}
-                  required={true}
-                  name="builderAuth"
-                  options={[
-                    {
-                      value: "",
-                      label: "-- Select --",
-                    },
-                    ...(masterData?.builderAuthorizations?.map((type) => ({
-                      value: type?.valueCode,
-                      label: type?.valueLabel,
-                    })) || []),
-                  ]}
-                  register={register("builderAuth", {
-                    required: t(
-                      "vesselDetails.Builder Authorization is required"
-                    ),
-                  })}
-                  errors={errors}
-                  value={formData?.builderAuth || watch("builderAuth") || ""}
-                  onChange={(value) =>
-                    !viewMode && handleDropdownChange("builderAuth", value)
-                  }
-                  disabled={viewMode}
-                />
-              </Col>
-              <Col md={6}>
-                {viewMode ? (
-                  watch("authLetter") && watch("authLetter").name ? (
-                    <div className="mb-3">
-                      <label
-                        className="form-label fw-bold"
-                        style={{ fontSize: "0.9rem" }}
-                      >
-                        {t("Authorization Letter")}
-                      </label>
-                      <div className="p-2 p-sm-3 border rounded bg-light">
-                        <div className="d-flex flex-column flex-sm-row justify-content-between align-items-start align-items-sm-center gap-2">
-                          <div className=" min-width-0">
-                            <div
-                              className="fw-semibold text-primary mb-1"
-                              style={{
-                                fontSize: "0.8rem",
-                                overflow: "hidden",
-                                textOverflow: "ellipsis",
-                                whiteSpace: "nowrap",
-                              }}
-                            >
-                              {watch("authLetter").name}
-                            </div>
-                            <small
-                              className="text-muted"
-                              style={{ fontSize: "0.7rem" }}
-                            >
-                              {(
-                                (watch("authLetter").size || 0) /
-                                1024 /
-                                1024
-                              ).toFixed(1)}{" "}
-                              MB
-                            </small>
-                          </div>
-                          <button
-                            type="button"
-                            className="btn btn-outline-success btn-sm d-flex align-items-center flex-shrink-0"
-                            style={{ fontSize: "0.75rem", padding: "4px 8px" }}
-                            onClick={() =>
-                              fetchAndViewFile(watch("authLetterFileStoreId") || "")
-                            }
-                          >
-                            <BsEyeFill size={12} className="me-1" />
-                            <span>{t("View")}</span>
-                          </button>
-                          <button
-                            type="button"
-                            className="btn btn-outline-primary btn-sm d-flex align-items-center flex-shrink-0"
-                            style={{ fontSize: "0.75rem", padding: "4px 8px" }}
-                            onClick={() =>
-                              handleDownload(
-                                watch("authLetterFileStoreId"),
-                                watch("authLetter").name
-                              )
-                            }
-                          >
-                            <BsDownload size={12} className="me-1" />
-                            <span>{t("Download")}</span>
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="mb-3">
-                      <label
-                        className="form-label fw-bold"
-                        style={{ fontSize: "0.9rem" }}
-                      >
-                        {t("Authorization Letter")}
-                      </label>
-                      <div
-                        className="p-2 p-sm-3 border rounded bg-light text-muted text-center"
-                        style={{ fontSize: "0.8rem" }}
-                      >
-                        {t("No file uploaded")}
-                      </div>
-                    </div>
-                  )
-                ) : (
-                  <div className="mb-2" style={{ display: "flex" }}>
-                    <InputFile
-                      style={{ width: "100%" }}
-                      label={t("Authorization Letter")}
-                      required={formData?.builderAuth?.toLowerCase() === "y"}
-                      name="authLetter"
-                      register={register("authLetter", {
-                        required:
-                          formData?.builderAuth?.toLowerCase() === "y"
-                            ? t(
-                              "vesselDetails.Authorization Letter is required"
-                            )
-                            : false,
-                      })}
-                      errors={errors}
-                      onChange={(e) => {
-                        if (viewMode) return;
-                        if (e.target.files?.[0]) {
-                          handleFileChange("authLetter", e.target.files[0]);
-                        }
-                      }}
-                      disabled={viewMode}
-                      watch={watch}
-                      defaultValue={watch("authLetter")}
-                      clearErrors={clearErrors}
-                      accept=".pdf,.jpg,.jpeg,.png"
-                    />
-
-                    {watch("authLetter") && !viewMode && (
-                      <FaTimesCircle
-                        className={`${styles.crossIcon} text-danger position-relative`}
-                        size={18}
-                        title="Remove file"
-                        onClick={handleRemoveAuthLetter}
-                      />
-                    )}
-                  </div>
-                )}
-
-                {editMode && watch("authLetter") && (
-                  <div
-                    className=" text-end gap-1"
-                    style={{
-                      display: "flex",
-                      justifyContent: "flex-end",
-                      marginRight: "0.9rem",
-                    }}
-                  >
-                    <button
-                      type="button"
-                      className="btn btn-outline-success btn-sm rounded-pill d-flex align-items-center"
-                      style={{ fontSize: "0.65rem", padding: "4px 8px" }}
-                      onClick={() =>
-                        fetchAndViewFile(
-                          watch("authLetterFileStoreId") || ""
-                        )
-                      }
-                    >
-                      <BsEyeFill size={10} />
-                      <span className="ms-1">View</span>
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-outline-primary btn-sm rounded-pill d-flex align-items-center"
-                      style={{ fontSize: "0.65rem", padding: "4px 8px" }}
-                      onClick={() =>
-                        handleDownload(
-                          watch("authLetterFileStoreId"),
-                          watch("authLetter").name
-                        )
-                      }
-                    >
-                      <BsDownload size={10} />
-                      <span className="ms-1">Download</span>
-                    </button>
-                  </div>
-                )}
-              </Col>
-            </Row>
-          </Collapsible>
-        )}
-      </form>
-    </>
+          <BsArrowLeft size={16} />
+        </Button>
+        
+        <div className={styles.headerContent}>
+          <h1 className={styles.title}>
+            Application Details Update
+          </h1>
+          <div className={styles.applicationId}>
+            WB-IWT/REG/2025/302748
+          </div>
+        </div>
+      </div>
+      
+      <Stepper
+        ref={stepperRef}
+        steps={steps}
+        onSyncData={handleSaveAndNext}
+        onPayNow={handlePayNow}
+        viewMode={true}
+        editMode={false}
+        initialStep={0}
+      />
+    </div>
   );
 };
 
-export default VesselDetails;
+export default ApplicationDetailsUpdate;
+import React, { useState, useRef } from "react";
+import { Box, Typography, TextField, Button, Paper, Collapse, IconButton } from "@mui/material";
+import { FaChevronDown, FaChevronUp, FaArrowLeft, FaEye, FaUpload, FaMapMarkerAlt } from "react-icons/fa";
+import { useNavigate, useLocation } from "react-router-dom";
+import Stepper from "../../../common/Stepper";
+import styles from './AddressChange.module.css';
+
+const AddressChange = () => {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const stepperRef = useRef();
+  const [formData, setFormData] = useState({
+    previousAddress: "23, Park View Road, Salt Lake, Kolkata - 700091, West Bengal",
+    addressLine1: "",
+    addressLine2: "",
+    pin: "",
+    district: "",
+    state: "",
+    country: "INDIA"
+  });
+  const [isAddressOpen, setIsAddressOpen] = useState(true);
+  const [uploadedFile, setUploadedFile] = useState(null);
+
+  const handleInputChange = (field, value) => {
+    setFormData(prev => ({
+      ...prev,
+      [field]: value
+    }));
+  };
+
+  const handleFileUpload = (event) => {
+    const file = event.target.files[0];
+    if (file) {
+      setUploadedFile(file);
+    }
+  };
+
+  const validateStep = () => {
+    return formData.addressLine1 && formData.pin && formData.district && formData.state && uploadedFile;
+  };
+
+  const getFormData = () => {
+    return formData;
+  };
+
+  const handleSaveAndNext = (stepInfo) => {
+    console.log("Saving step data:", stepInfo);
+  };
+
+  const AddressUpdateStep = () => (
+    <Paper elevation={0} sx={{ padding: 0 }}>
+      <div className={styles.collapsibleHeader} onClick={() => setIsAddressOpen(!isAddressOpen)}>
+        <div className={styles.headerLeft}>
+          <div className={styles.editIcon}>
+            <FaEye />
+          </div>
+          <Typography variant="h6" className={styles.headerTitle}>
+            Address Update
+          </Typography>
+        </div>
+        <IconButton size="small">
+          {isAddressOpen ? <FaChevronUp /> : <FaChevronDown />}
+        </IconButton>
+      </div>
+      
+      <Collapse in={isAddressOpen}>
+        <div className={styles.formContent}>
+          <div className={styles.previousAddressSection}>
+            <Typography className={styles.sectionLabel}>Previous Address</Typography>
+            <div className={styles.previousAddressBox}>
+              {formData.previousAddress}
+            </div>
+          </div>
+
+          <div className={styles.updateSection}>
+            <Typography className={styles.sectionTitle}>Update Your Address</Typography>
+            
+            <div className={styles.formRow}>
+              <div className={styles.formGroup}>
+                <Typography className={styles.fieldLabel}>Address line 1</Typography>
+                <div className={styles.inputWithIcon}>
+                  <FaMapMarkerAlt className={styles.inputIcon} />
+                  <TextField
+                    fullWidth
+                    variant="outlined"
+                    size="small"
+                    placeholder="Enter Address Line 1"
+                    value={formData.addressLine1}
+                    onChange={(e) => handleInputChange('addressLine1', e.target.value)}
+                    className={styles.textField}
+                  />
+                </div>
+              </div>
+              
+              <div className={styles.formGroup}>
+                <Typography className={styles.fieldLabel}>Address line 2</Typography>
+                <div className={styles.inputWithIcon}>
+                  <FaMapMarkerAlt className={styles.inputIcon} />
+                  <TextField
+                    fullWidth
+                    variant="outlined"
+                    size="small"
+                    placeholder="Enter Address Line 2"
+                    value={formData.addressLine2}
+                    onChange={(e) => handleInputChange('addressLine2', e.target.value)}
+                    className={styles.textField}
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className={styles.formRow}>
+              <div className={styles.formGroup}>
+                <Typography className={styles.fieldLabel}>PIN</Typography>
+                <div className={styles.inputWithIcon}>
+                  <FaMapMarkerAlt className={styles.inputIcon} />
+                  <TextField
+                    fullWidth
+                    variant="outlined"
+                    size="small"
+                    placeholder="Enter 6-digit Pin code"
+                    value={formData.pin}
+                    onChange={(e) => handleInputChange('pin', e.target.value)}
+                    className={styles.textField}
+                  />
+                </div>
+              </div>
+              
+              <div className={styles.formGroup}>
+                <Typography className={styles.fieldLabel}>District</Typography>
+                <div className={styles.inputWithIcon}>
+                  <FaMapMarkerAlt className={styles.inputIcon} />
+                  <TextField
+                    fullWidth
+                    variant="outlined"
+                    size="small"
+                    placeholder="Please Enter Your District"
+                    value={formData.district}
+                    onChange={(e) => handleInputChange('district', e.target.value)}
+                    className={styles.textField}
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className={styles.formRow}>
+              <div className={styles.formGroup}>
+                <Typography className={styles.fieldLabel}>State</Typography>
+                <div className={styles.inputWithIcon}>
+                  <FaMapMarkerAlt className={styles.inputIcon} />
+                  <TextField
+                    fullWidth
+                    variant="outlined"
+                    size="small"
+                    placeholder="Please Enter Your State"
+                    value={formData.state}
+                    onChange={(e) => handleInputChange('state', e.target.value)}
+                    className={styles.textField}
+                  />
+                </div>
+              </div>
+              
+              <div className={styles.formGroup}>
+                <Typography className={styles.fieldLabel}>Country</Typography>
+                <div className={styles.inputWithIcon}>
+                  <FaMapMarkerAlt className={styles.inputIcon} />
+                  <TextField
+                    fullWidth
+                    variant="outlined"
+                    size="small"
+                    value={formData.country}
+                    onChange={(e) => handleInputChange('country', e.target.value)}
+                    className={styles.textField}
+                    disabled
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+          
+          <div className={styles.warningText}>
+            Applicant must upload valid supporting documents for the selected change (Address)
+          </div>
+          
+          <div className={styles.uploadSection}>
+            <input
+              type="file"
+              id="fileUpload"
+              style={{ display: 'none' }}
+              onChange={handleFileUpload}
+              accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
+            />
+            <div className={styles.uploadBox}>
+              <div className={styles.fileName}>
+                {uploadedFile ? uploadedFile.name : "File Name"}
+              </div>
+              <div className={styles.uploadButtons}>
+                <Button
+                  variant="contained"
+                  size="small"
+                  startIcon={<FaEye />}
+                  className={styles.viewButton}
+                  disabled={!uploadedFile}
+                >
+                  View
+                </Button>
+                <Button
+                  variant="contained"
+                  size="small"
+                  startIcon={<FaUpload />}
+                  className={styles.uploadButton}
+                  onClick={() => document.getElementById('fileUpload').click()}
+                >
+                  Upload
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </Collapse>
+    </Paper>
+  );
+
+  const steps = [
+    {
+      label: "Address Update",
+      component: <AddressUpdateStep />,
+      validate: validateStep,
+      getFormData: getFormData
+    }
+  ];
+
+  return (
+    <div className={styles.container}>
+      <div className={styles.header}>
+        <Button
+          startIcon={<FaArrowLeft />}
+          onClick={() => navigate(-1)}
+          className={styles.backButton}
+        >
+        </Button>
+        <Typography variant="h5" className={styles.title}>
+          Application Details Update
+        </Typography>
+        <div className={styles.applicationId}>
+          WB-IWT/REG/2025/302748
+        </div>
+      </div>
+      
+      <Stepper
+        ref={stepperRef}
+        steps={steps}
+        onSyncData={handleSaveAndNext}
+        viewMode={false}
+        editMode={false}
+        initialStep={0}
+      />
+    </div>
+  );
+};
+
+export default AddressChange;
+.container {
+  padding: 20px;
+  background: #f5f5f5;
+  min-height: 100vh;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  margin-bottom: 20px;
+  background: white;
+  padding: 15px 20px;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.backButton {
+  color: #1A61C1 !important;
+  min-width: auto !important;
+  padding: 8px !important;
+}
+
+.title {
+  color: #1A61C1 !important;
+  font-weight: 600 !important;
+  flex: 1;
+}
+
+.applicationId {
+  background: #00A3E0;
+  color: white;
+  padding: 8px 16px;
+  border-radius: 20px;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.collapsibleHeader {
+  background: #00A3E0;
+  color: white;
+  padding: 15px 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+  border-radius: 8px 8px 0 0;
+}
+
+.headerLeft {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.editIcon {
+  background: rgba(255, 255, 255, 0.2);
+  padding: 8px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.headerTitle {
+  font-weight: 600 !important;
+  font-size: 16px !important;
+}
+
+.formContent {
+  padding: 25px;
+  background: white;
+  border-radius: 0 0 8px 8px;
+}
+
+.previousAddressSection {
+  margin-bottom: 30px;
+}
+
+.sectionLabel {
+  color: #666 !important;
+  font-size: 14px !important;
+  font-weight: 500 !important;
+  margin-bottom: 10px !important;
+}
+
+.previousAddressBox {
+  background: #f8f9fa;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  padding: 12px 16px;
+  color: #666;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.updateSection {
+  margin-bottom: 25px;
+}
+
+.sectionTitle {
+  color: #1A61C1 !important;
+  font-size: 16px !important;
+  font-weight: 600 !important;
+  margin-bottom: 20px !important;
+}
+
+.formRow {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  margin-bottom: 20px;
+}
+
+.formGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.fieldLabel {
+  color: #333 !important;
+  font-size: 14px !important;
+  font-weight: 500 !important;
+}
+
+.inputWithIcon {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.inputIcon {
+  position: absolute;
+  left: 12px;
+  color: #1A61C1;
+  font-size: 14px;
+  z-index: 1;
+}
+
+.textField {
+  background: white;
+}
+
+.textField .MuiOutlinedInput-root {
+  border-radius: 6px;
+  padding-left: 40px;
+}
+
+.textField .MuiOutlinedInput-input {
+  padding-left: 40px;
+}
+
+.textField .MuiOutlinedInput-root:hover .MuiOutlinedInput-notchedOutline {
+  border-color: #1A61C1;
+}
+
+.textField .MuiOutlinedInput-root.Mui-focused .MuiOutlinedInput-notchedOutline {
+  border-color: #1A61C1;
+}
+
+.textField .MuiOutlinedInput-root.Mui-disabled {
+  background-color: #f5f5f5;
+}
+
+.warningText {
+  color: #dc2626;
+  font-size: 14px;
+  margin-bottom: 20px;
+  font-weight: 500;
+}
+
+.uploadSection {
+  margin-top: 20px;
+}
+
+.uploadBox {
+  border: 2px dashed #ddd;
+  border-radius: 8px;
+  padding: 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #fafafa;
+}
+
+.fileName {
+  color: #666;
+  font-size: 14px;
+  flex: 1;
+}
+
+.uploadButtons {
+  display: flex;
+  gap: 10px;
+}
+
+.viewButton {
+  background: #00A3E0 !important;
+  color: white !important;
+  text-transform: none !important;
+  font-size: 12px !important;
+  padding: 6px 12px !important;
+  min-width: auto !important;
+}
+
+.viewButton:hover {
+  background: #0088cc !important;
+}
+
+.uploadButton {
+  background: #00A3E0 !important;
+  color: white !important;
+  text-transform: none !important;
+  font-size: 12px !important;
+  padding: 6px 12px !important;
+  min-width: auto !important;
+}
+
+.uploadButton:hover {
+  background: #0088cc !important;
+}
+
+@media (max-width: 768px) {
+  .container {
+    padding: 10px;
+  }
+  
+  .header {
+    padding: 12px 15px;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+  }
+  
+  .title {
+    font-size: 18px !important;
+  }
+  
+  .formRow {
+    grid-template-columns: 1fr;
+    gap: 15px;
+  }
+  
+  .formContent {
+    padding: 20px 15px;
+  }
+  
+  .uploadBox {
+    flex-direction: column;
+    gap: 15px;
+    align-items: stretch;
+  }
+  
+  .uploadButtons {
+    justify-content: center;
+  }
+}
+import React, { useState, useCallback, forwardRef, useImperativeHandle, useEffect } from "react";
+import { useForm } from "react-hook-form";
+import { Button } from "@mui/material";
+import { FaEye, FaUpload } from "react-icons/fa";
+import Collapsible from "../../../common/Collapsible";
+import InputText from "../../../common/InputText.tsx";
+import styles from './NameChange.module.css';
+
+const NameChange = forwardRef(({ selectedOption, onValidationChange, onDataChange, initialData }, ref) => {
+  const {
+    register,
+    formState: { errors },
+    watch,
+    trigger,
+    setValue,
+  } = useForm({
+    mode: "onChange",
+    defaultValues: {
+      previousName: "",
+      updatedNewName: ""
+    }
+  });
+
+  const [uploadedFile, setUploadedFile] = useState(null);
+  const [fileError, setFileError] = useState("");
+  const [showValidation, setShowValidation] = useState(false);
+
+
+  useEffect(() => {
+    if (initialData) {
+      if (initialData.previousName) {
+        setValue("previousName", initialData.previousName);
+      }
+      if (initialData.updatedNewName) {
+        setValue("updatedNewName", initialData.updatedNewName);
+      }
+      if (initialData.uploadedFile) {
+        setUploadedFile(initialData.uploadedFile);
+        setFileError("");
+      }
+    }
+  }, [initialData, setValue]);
+
+  const handleFileUpload = useCallback((event) => {
+    const file = event.target.files[0];
+    if (file) {
+      setUploadedFile(file);
+      setFileError("");
+      const formData = watch();
+      const isValid = formData.previousName && formData.updatedNewName && file;
+      onValidationChange?.(isValid);
+      onDataChange?.({ ...formData, uploadedFile: file });
+    }
+  }, [watch, onValidationChange, onDataChange]);
+
+  const validateForm = useCallback(async () => {
+    setShowValidation(true);
+    
+    const isFormValid = await trigger();
+    const formData = watch();
+    
+    if (!uploadedFile) {
+      setFileError("Please upload a valid supporting document");
+    } else {
+      setFileError("");
+    }
+    
+    const isValid = isFormValid && formData.previousName && formData.updatedNewName && uploadedFile;
+    return isValid;
+  }, [trigger, watch, uploadedFile]);
+
+  useImperativeHandle(ref, () => ({
+    validateForm
+  }));
+
+  React.useEffect(() => {
+    const subscription = watch((value) => {
+      const isValid = value.previousName && value.updatedNewName && uploadedFile;
+      
+      if (showValidation && !uploadedFile) {
+        setFileError("Please upload a valid supporting document");
+      } else if (uploadedFile) {
+        setFileError("");
+      }
+      
+      onValidationChange?.(isValid);
+      onDataChange?.({ ...value, uploadedFile });
+    });
+    return () => subscription.unsubscribe();
+  }, [watch, uploadedFile, onValidationChange, onDataChange, showValidation]);
+
+  return (
+    <Collapsible
+      title="Registration Information"
+      openStat={true}
+      newDesign={true}
+    >
+      <div className={styles.formContent}>
+        <div className={styles.formRow}>
+          <InputText
+            label="Previous Name"
+            name="previousName"
+            placeholder="Enter previous name"
+            register={register("previousName", {
+              required: "Previous name is required"
+            })}
+            errors={showValidation ? errors : {}}
+            required={true}
+          />
+          
+          <InputText
+            label="Updated New Name"
+            name="updatedNewName"
+            placeholder="Enter updated new name"
+            register={register("updatedNewName", {
+              required: "Updated new name is required"
+            })}
+            errors={showValidation ? errors : {}}
+            required={true}
+          />
+        </div>
+        
+        <div className={styles.warningText}>
+          Applicant must upload valid supporting documents for the selected change ({selectedOption})
+        </div>
+        
+        <div className={styles.uploadSection}>
+          <label className={styles.uploadLabel}>*Valid Supporting Documents</label>
+          <div className={`${styles.uploadBox} ${fileError ? styles.uploadBoxError : ''}`}>
+            <input
+              type="file"
+              id="fileUpload"
+              style={{ display: 'none' }}
+              onChange={handleFileUpload}
+              accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
+            />
+            <div className={styles.fileName}>
+              {uploadedFile ? uploadedFile.name : "File Name"}
+            </div>
+            <div className={styles.uploadButtons}>
+              <Button
+                variant="contained"
+                size="small"
+                startIcon={<FaEye />}
+                className={styles.viewButton}
+                disabled={!uploadedFile}
+              >
+                View
+              </Button>
+              <Button
+                variant="contained"
+                size="small"
+                startIcon={<FaUpload />}
+                className={styles.uploadButton}
+                onClick={() => document.getElementById('fileUpload').click()}
+              >
+                Upload
+              </Button>
+            </div>
+          </div>
+          {fileError && (
+            <div className={styles.fileError}>
+              {fileError}
+            </div>
+          )}
+        </div>
+      </div>
+    </Collapsible>
+  );
+});
+
+export default NameChange;
