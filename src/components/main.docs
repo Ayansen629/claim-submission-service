@@ -1,572 +1,1284 @@
-/* ApplicationView.module.css */
-.container {
-  display: flex;
-  min-height: 100vh;
-  background: #f5f5f5;
-}
+import React, { useState, useEffect, useRef, useCallback } from "react";
+import { useForm } from "react-hook-form";
+import { Row, Col } from "react-bootstrap";
+import InputText from "../../../common/InputText.tsx";
+import InputSelect from "../../../common/InputSelect.tsx";
+import InputRadio from "../../../common/InputRadio.tsx";
+import InputFile from "../../../common/InputFile.tsx";
+import Collapsible from "../../../common/Collapsible.js";
+import { useTranslation } from "react-i18next";
+import { useLanguageContext } from "../../../common/LanguageContext.js";
+import { fetchAndViewFile, renameFile } from "../../../../utils/constants.ts";
+import { BsDownload, BsEyeFill } from "react-icons/bs";
+import { FaClipboardList, FaShip, FaTimesCircle, FaUser } from "react-icons/fa";
+import { useMasterData } from "../../../context/MasterDataContext.js";
+import { handleErrorMessage } from "../../../../utils/errorMessageHandler.js";
+import NewLoader from "../../../common/NewLoader.js";
+import { BASE_IP, URLS_ENDPOINT } from "../../../../utils/urlsConstants.ts";
+import { postData, postFORMdata } from "../../../../services/http.service.ts";
+import { Tooltip, IconButton } from "@mui/material";
+import InfoOutlinedIcon from "@mui/icons-material/InfoOutlined";
+import { toast } from "react-toastify";
+import { getFromLocalStorage } from "../../../../utils/localStorageUtils.js";
+import axios from "axios";
+import { deleteFile } from "../../../../utils/deleteFile.js";
+import styles from "./VesselDetails.module.css";
 
-.mainContent {
-  flex: 1;
-  padding: 20px;
-  background: white;
-  margin: 20px;
-  border-radius: 8px;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-}
+const VesselDetails = ({
+  formMethods,
+  viewMode = false,
+  editMode = false,
+  vesselRegisData,
+}) => {
+  const { i18n, t } = useTranslation();
+  const [formData, setFormData] = useState({});
+  const { masterData } = useMasterData();
+  const loaderRef = useRef();
+  const [isBuilderDataLoaded, setIsBuilderDataLoaded] = useState(false);
+  const [selectedBuilderId, setSelectedBuilderId] = useState("");
 
-.topSection {
-  background: white;
-  margin: -20px -20px 20px -20px;
-  padding: 0;
-}
+  const defaultValues = {
+    ownerName: "",
+    ownerAddress: "",
+    mobile: "",
+    email: "",
+    pan: "",
+    aadhar: "",
+    tradeLicence: "",
+    gst: "",
+    grt: "",
+    workOrderValue: "",
+    vesselType: "",
+    category: "",
+    zone: "",
+    supervisionAuthority: "",
+    purchaseType: "",
+    classificationSociety: "",
+    constructedBy: 1,
+    builder: "",
+    builderName: "",
+    builderAddress: "",
+    builderEmail: "",
+    builderMobile: "",
+    builderTradeLicence: "",
+    builderGST: "",
+    builderAuth: "",
+    authLetter: "",
+    authLetterFileStoreId: "",
+    termsAccepted: false,
+    tonnageBooklets: null,
+    stabilityBooklets: null,
+  };
 
-.headerRow {
-  display: flex;
-  align-items: center;
-  gap: 15px;
-  padding: 20px;
-  background: white;
-  border-bottom: 1px solid #e0e0e0;
-}
+  const internalFormMethods = useForm({
+    defaultValues,
+    mode: "onTouched",
+  });
 
-.backButton {
-  color: #1A61C1 !important;
-  border-color: #e0e0e0 !important;
-  padding: 8px 12px !important;
-  border-radius: 4px !important;
-}
+  const methods = formMethods || internalFormMethods;
 
-.title {
-  color: #1A61C1;
-  font-weight: 600;
-  flex: 1;
-  font-size: 20px;
-  margin: 0;
-}
+  const isCompMount = useRef(true);
 
-.applicationId {
-  background: #87CEEB;
-  color: #1A61C1;
-  padding: 8px 16px;
-  border-radius: 4px;
-  font-size: 14px;
-  font-weight: 600;
-}
+  const {
+    register,
+    watch,
+    setValue,
+    clearErrors,
+    trigger,
+    getValues,
+    setError,
+    formState: { errors },
+  } = methods;
 
-.statusBanner {
-  background: #e3f2fd;
-  color: #1976d2;
-  padding: 15px 20px;
-  font-size: 14px;
-  border: 2px solid #1976d2;
-  border-radius: 8px;
-  margin: 0 20px 20px 20px;
-  font-weight: 500;
-}
+  const constructedBy = watch("constructedBy");
+  const category = watch("category");
 
-.namesCard {
-  border: 1px solid #e0e0e0;
-  border-radius: 8px;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-}
+  const mapApiValueToDropdown = useCallback((apiValue, masterDataArray) => {
+    if (!apiValue || !masterDataArray) return "";
 
-.nameField {
-  margin-bottom: 12px;
-}
+    const exactMatch = masterDataArray.find(
+      (item) => item.valueCode === apiValue || item.valueLabel === apiValue
+    );
+    if (exactMatch) return exactMatch.valueCode;
 
-.nameField:last-child {
-  margin-bottom: 0;
-}
+    const caseInsensitiveMatch = masterDataArray.find(
+      (item) =>
+        item.valueCode?.toLowerCase() === apiValue.toLowerCase() ||
+        item.valueLabel?.toLowerCase() === apiValue.toLowerCase()
+    );
+    if (caseInsensitiveMatch) return caseInsensitiveMatch.valueCode;
 
-.fieldLabel {
-  color: #666;
-  font-size: 14px;
-  font-weight: 500;
-  margin-bottom: 4px;
-}
+    const partialMatch = masterDataArray.find((item) => {
+      const itemCode = item.valueCode?.toLowerCase() || "";
+      const itemLabel = item.valueLabel?.toLowerCase() || "";
+      const apiVal = apiValue.toLowerCase();
 
-.fieldValue {
-  color: #333;
-  font-size: 16px;
-  font-weight: 600;
-}
+      return (
+        itemCode.includes(apiVal) ||
+        itemLabel.includes(apiVal) ||
+        apiVal.includes(itemCode) ||
+        apiVal.includes(itemLabel)
+      );
+    });
+    if (partialMatch) return partialMatch.valueCode;
 
-.fileCard {
-  border: 1px solid #e0e0e0;
-  border-radius: 8px;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-}
+    return apiValue;
+  }, []);
 
-.warningText {
-  color: #856404;
-  font-size: 14px;
-  margin-bottom: 12px;
-}
+  useEffect(() => {
+    if (!masterData || !vesselRegisData?.vesselDetails) return;
 
-.fileRow {
-  background: #f0f0f0;
-  border-radius: 4px;
-  padding: 12px 16px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
+    const vesselDetails = vesselRegisData?.vesselDetails;
 
-.fileName {
-  color: #999;
-  font-size: 14px;
-  font-weight: 400;
-}
+    const mappings = [
+      {
+        field: "vesselType",
+        apiValue: vesselDetails.typeOfVessel,
+        masterArray: masterData.vesselTypes,
+      },
+      {
+        field: "category",
+        apiValue: vesselDetails.categoryOfVessel,
+        masterArray: masterData.vesselCategories,
+      },
+      {
+        field: "zone",
+        apiValue: vesselDetails.zone,
+        masterArray: masterData.zones,
+      },
+      {
+        field: "supervisionAuthority",
+        apiValue: vesselDetails.supervisionAuthority,
+        masterArray: masterData.supervisionAuthorites,
+      },
+      {
+        field: "purchaseType",
+        apiValue: vesselDetails.purchaseType,
+        masterArray: masterData.purchaseTypes,
+      },
+      {
+        field: "builderAuth",
+        apiValue: vesselDetails.builderAuth,
+        masterArray: masterData.builderAuthorizations,
+      },
+    ];
 
-.fileActions {
-  display: flex;
-  gap: 8px;
-}
+    mappings.forEach(({ field, apiValue, masterArray }) => {
+      if (apiValue && masterArray) {
+        const mappedValue = mapApiValueToDropdown(apiValue, masterArray);
+        if (mappedValue) {
+          setValue(field, mappedValue, { shouldValidate: false });
+          setFormData((prev) => ({ ...prev, [field]: mappedValue }));
+        }
+      }
+    });
 
-.iconButton {
-  background: transparent;
-  border: 2px solid #00A3E0;
-  color: #00A3E0;
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: all 0.3s ease;
-}
+    if (
+      vesselRegisData.basicDetails?.builderDetails?.id &&
+      masterData.builderNames
+    ) {
+      const builderId = vesselRegisData.basicDetails.builderDetails.id;
+      const builderMatch = masterData.builderNames.find(
+        (builder) => builder.valueCode === builderId || builder.id === builderId
+      );
+      if (builderMatch) {
+        setValue("builder", builderMatch.valueCode, { shouldValidate: false });
+        setFormData((prev) => ({ ...prev, builder: builderMatch.valueCode }));
+      }
+    }
 
-.iconButton:hover {
-  background: #00A3E0;
-  color: white;
-}
+    console.log("Mapped dropdown values:", {
+      vesselType: getValues("vesselType"),
+      category: getValues("category"),
+      zone: getValues("zone"),
+      supervisionAuthority: getValues("supervisionAuthority"),
+      purchaseType: getValues("purchaseType"),
+      builder: getValues("builder"),
+    });
+  }, [masterData, vesselRegisData, setValue, mapApiValueToDropdown, getValues]);
 
-.iconButton:first-child {
-  border-color: #8BB92A;
-  color: #8BB92A;
-}
+  useEffect(() => {
+    if (isCompMount.current) {
+      isCompMount.current = false;
+      return;
+    }
+    const fieldsWithErrors = Object.keys(errors);
+    trigger(fieldsWithErrors);
+  }, [i18n.language]);
 
-.iconButton:first-child:hover {
-  background: #8BB92A;
-  color: white;
-}
+  useEffect(() => {
+    setTimeout(() => {
+      Object.keys(formData).forEach((key) => {
+        if (formData[key] !== undefined) {
+          setValue(key, formData[key], { shouldValidate: false });
+        }
+      });
+    }, 0);
+  }, [setValue, formData]);
 
-.vesselSection {
-  margin-bottom: 30px;
-}
+  const handleDropdownChange = useCallback(
+    (name, value) => {
+      setValue(name, value, { shouldValidate: true });
+      clearErrors(name);
+      setFormData((prev) => ({
+        ...prev,
+        [name]: value,
+      }));
+      if (name === "builder") {
+        handleBuilderChange(value);
+      }
+    },
+    [setValue, clearErrors]
+  );
 
-.tableContainer {
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
-  border: 1px solid #e0e0e0;
-  border-radius: 8px;
-  background: white;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-  scrollbar-width: thin;
-  scrollbar-color: #888 #f1f1f1;
-}
+  // const handleFileChange = useCallback(
+  //   async (name, file) => {
+  //     if (!file) return;
 
-.tableContainer::-webkit-scrollbar {
-  height: 8px;
-}
+  //     const validTypes = [
+  //       "application/pdf",
+  //       "image/jpeg",
+  //       "image/png",
+  //       "image/jpg",
+  //     ];
+  //     if (!validTypes.includes(file.type)) {
+  //       setError(name, {
+  //         type: "manual",
+  //         message: t("Only PDF, JPG or PNG files are allowed"),
+  //       });
+  //       setValue(name, null);
+  //       return;
+  //     }
 
-.tableContainer::-webkit-scrollbar-track {
-  background: #f1f1f1;
-  border-radius: 4px;
-}
+  //     if (file.size > 10 * 1024 * 1024) {
+  //       setError(name, {
+  //         type: "manual",
+  //         message: t("File size should not exceed 10MB"),
+  //       });
+  //       setValue(name, null);
+  //       return;
+  //     }
 
-.tableContainer::-webkit-scrollbar-thumb {
-  background: #888;
-  border-radius: 4px;
-}
+  //     const extension = file?.name?.substring(file?.name?.lastIndexOf("."));
+  //     const fileName = `${name}${extension}`;
+  //     file.originalName = fileName;
+  //     const renamedFile = renameFile(file, fileName);
 
-.tableContainer::-webkit-scrollbar-thumb:hover {
-  background: #555;
-}
+  //     clearErrors(name);
+  //     setValue(name, renamedFile, { shouldValidate: true });
+  //     setFormData((prev) => ({
+  //       ...prev,
+  //       [name]: renamedFile,
+  //     }));
 
-.vesselHeader {
-  background: linear-gradient(90deg, #1056B2 0%, #20AEE4 56.71%, #00D2E0 97.12%);
-  color: white;
-  padding: 12px 16px;
-  display: grid;
-  grid-template-columns: 0.5fr 1.5fr 1fr 1fr 1fr 1fr;
-  gap: 16px;
-  border-radius: 8px 8px 0 0;
-  min-width: 800px;
-  position: sticky;
-  top: 0;
-  z-index: 10;
-}
+  //     if (name === "authLetter") {
+  //       setValue("authLetterFileStoreId", null);
+  //       try {
+  //         const formData = new FormData();
+  //         formData.append("file", file);
+  //         const uploadUrl =
+  //           BASE_IP + URLS_ENDPOINT.FILE_STORE_SERVICE.UPLOAD_FILE;
+  //         loaderRef?.current?.show();
+  //         const response = await postFORMdata(uploadUrl, formData);
+  //         loaderRef?.current?.hide();
+  //         const fileStoreId = response?.data?.files[0]?.fileStoreId;
+  //         if (fileStoreId) {
+  //           console.log("authfileStoreId ", fileStoreId);
+  //           setValue("authLetterFileStoreId", fileStoreId);
+  //         } else {
+  //           toast.error("File addition failed. Please try again.");
+  //           setValue("authLetter", null);
+  //           setFormData((prev) => ({
+  //             ...prev,
+  //             [name]: null,
+  //           }));
+  //         }
+  //       } catch (error) {
+  //         loaderRef?.current?.hide();
+  //         clearErrors(name);
+  //         setValue("authLetter", null);
+  //         setFormData((prev) => ({
+  //           ...prev,
+  //           [name]: null,
+  //         }));
+  //         console.error("File upload failed", error);
+  //         toast.error("File upload failed. Please try again.");
+  //       }
+  //     }
+  //   },
+  //   [setValue, clearErrors, setError, t]
+  // );
+  const handleFileChange = useCallback(
+    async (name, file) => {
+      if (!file) return;
 
-.sectionTitle {
-  font-size: 14px;
-  font-weight: 600;
-  text-align: center;
-}
+      const validTypes = [
+        "application/pdf",
+        "image/jpeg",
+        "image/png",
+        "image/jpg",
+      ];
+      if (!validTypes.includes(file.type)) {
+        setError(name, {
+          type: "manual",
+          message: t("Only PDF, JPG or PNG files are allowed"),
+        });
+        setValue(name, null);
+        return;
+      }
 
-.vesselRow {
-  display: grid;
-  grid-template-columns: 0.5fr 1.5fr 1fr 1fr 1fr 1fr;
-  gap: 16px;
-  padding: 12px 16px;
-  border-bottom: 1px solid #e0e0e0;
-  background: white;
-  align-items: center;
-  min-width: 800px;
-}
+      if (file.size > 10 * 1024 * 1024) {
+        setError(name, {
+          type: "manual",
+          message: t("File size should not exceed 10MB"),
+        });
+        setValue(name, null);
+        return;
+      }
 
-.vesselRow:last-child {
-  border-bottom: none;
-}
+      const extension = file?.name?.substring(file?.name?.lastIndexOf("."));
+      const fileName = `${name}${extension}`;
+      file.originalName = fileName;
+      const renamedFile = renameFile(file, fileName);
 
-.vesselCell {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
+      clearErrors(name);
+      setValue(name, renamedFile, { shouldValidate: true });
+      setFormData((prev) => ({
+        ...prev,
+        [name]: renamedFile,
+      }));
 
-.vesselCell:first-child {
-  justify-content: center;
-}
+      if (name === "authLetter") {
+        setValue("authLetterFileStoreId", null);
 
-.vesselNumber {
-  background: #f0f0f0;
-  color: #333;
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 12px;
-  font-weight: 600;
-}
+        const standardizedName = `Authorization Letter${extension}`;
 
-.vesselName {
-  color: #333;
-  font-size: 14px;
-  font-weight: 500;
-}
+        const displayFile = new File([file], standardizedName, {
+          type: file.type,
+        });
 
-.vesselActions {
-  display: flex;
-  gap: 6px;
-  justify-content: center;
-  align-items: center;
-}
+        setValue("authLetter", displayFile);
+        setValue("authLetterOriginalName", file.name);
 
-.vesselIconButton {
-  background: transparent;
-  border: 2px solid #00A3E0;
-  color: #00A3E0;
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  font-size: 10px;
-}
+        try {
+          const formData = new FormData();
+          formData.append("file", file);
+          const uploadUrl =
+            BASE_IP + URLS_ENDPOINT.FILE_STORE_SERVICE.UPLOAD_FILE;
+          loaderRef?.current?.show();
+          const response = await postFORMdata(uploadUrl, formData);
+          loaderRef?.current?.hide();
+          const fileStoreId = response?.data?.files[0]?.fileStoreId;
+          if (fileStoreId) {
+            console.log("authfileStoreId ", fileStoreId);
+            setValue("authLetterFileStoreId", fileStoreId);
+          } else {
+            toast.error("File addition failed. Please try again.");
+            setValue("authLetter", null);
+            setValue("authLetterOriginalName", null);
+            setFormData((prev) => ({
+              ...prev,
+              [name]: null,
+            }));
+          }
+        } catch (error) {
+          loaderRef?.current?.hide();
+          clearErrors(name);
+          setValue("authLetter", null);
+          setValue("authLetterOriginalName", null);
+          setFormData((prev) => ({
+            ...prev,
+            [name]: null,
+          }));
+          console.error("File upload failed", error);
+          toast.error("File upload failed. Please try again.");
+        }
+      }
+    },
+    [setValue, clearErrors, setError, t]
+  );
 
-.vesselIconButton:hover {
-  background: #00A3E0;
-  color: white;
-}
+  useEffect(() => {
+    if (category === "A" && masterData) {
+      const zone1 = masterData?.zones?.find(
+        (zone) =>
+          zone.valueCode === "ZONE 1" || zone.valueLabel?.includes("ZONE 1")
+      );
+      const zone1Value = zone1 ? zone1.valueCode : "ZONE 1";
 
-.vesselIconButton:first-child {
-  border-color: #8BB92A;
-  color: #8BB92A;
-}
+      const classificationSociety = masterData?.supervisionAuthorites?.find(
+        (auth) =>
+          auth.valueCode === "CLASSIFICATION SOCIETY" ||
+          auth.valueLabel?.includes("CLASSIFICATION")
+      );
+      const classificationSocietyValue = classificationSociety
+        ? classificationSociety.valueCode
+        : "CLASSIFICATION SOCIETY";
 
-.vesselIconButton:first-child:hover {
-  background: #8BB92A;
-  color: white;
-}
+      setValue("zone", zone1Value, { shouldValidate: true });
+      setValue("supervisionAuthority", classificationSocietyValue, {
+        shouldValidate: true,
+      });
 
-.paymentSection {
-  margin-bottom: 30px;
-}
+      clearErrors("zone");
+      clearErrors("supervisionAuthority");
 
-.paymentHeader {
-  background: #CDE9EB;
-  color: #1A61C1;
-  padding: 12px 16px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  border-radius: 8px 8px 0 0;
-}
+      setFormData((prev) => ({
+        ...prev,
+        zone: zone1Value,
+        supervisionAuthority: classificationSocietyValue,
+      }));
+    }
+  }, [category, masterData, setValue, clearErrors, setFormData]);
 
-.paymentIcon {
-  font-size: 18px;
-}
+  useEffect(() => {
+    if (!!getValues("builderAuth")) {
+      setIsBuilderDataLoaded(true);
+    }
+  }, []);
 
-.paymentTitle {
-  font-size: 16px;
-  font-weight: 600;
-}
+  const handleBuilderChange = async (selectedValue) => {
+    setIsBuilderDataLoaded(false);
+    setSelectedBuilderId("");
 
-.paymentTableHeader {
-  background: linear-gradient(90deg, #1056B2 0%, #20AEE4 56.71%, #00D2E0 97.12%);
-  color: white;
-  padding: 12px 16px;
-  display: grid;
-  grid-template-columns: 2fr 1.5fr 1fr 1fr 1fr 1fr;
-  gap: 16px;
-  min-width: 700px;
-  position: sticky;
-  top: 0;
-  z-index: 10;
-}
+    const fieldsMap = {
+      builderName: "builderName",
+      builderAddress: "address",
+      builderEmail: "emailId",
+      builderMobile: "phone",
+      builderTradeLicence: "tradeLicenseNumber",
+      builderGST: "gstNo",
+      builderAuth: "",
+    };
 
-.tableHeaderCell {
-  font-size: 14px;
-  font-weight: 600;
-  text-align: center;
-}
+    Object.keys(fieldsMap).forEach((field) => setValue(field, ""));
 
-.paymentRow {
-  display: grid;
-  grid-template-columns: 2fr 1.5fr 1fr 1fr 1fr 1fr;
-  gap: 16px;
-  padding: 12px 16px;
-  border-bottom: 1px solid #e0e0e0;
-  background: white;
-  align-items: center;
-  min-width: 700px;
-}
+    if (!selectedValue) return;
 
-.paymentRow:last-child {
-  border-bottom: none;
-}
+    try {
+      const URL = `${process.env.REACT_APP_AUTH_URL}${URLS_ENDPOINT.USER_SERVICE.BUILDER_SEARCH}`;
 
-.paymentCell {
-  font-size: 14px;
-  text-align: center;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-}
+      loaderRef?.current?.show();
+      const response = await postData(URL, {
+        ids: [selectedValue],
+      });
+      if (response?.data?.data?.length > 0) {
+        loaderRef?.current?.hide();
+        const builderDetails = response.data.data?.map((obj) => ({
+          ...obj,
+          address: [obj.addressLine1, obj.addressLine2]
+            .filter(Boolean)
+            .join(", "),
+        }));
 
-.tableIconButton {
-  background: transparent;
-  border: 2px solid #00A3E0;
-  color: #00A3E0;
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  margin: 0 2px;
-}
+        Object.entries(fieldsMap).forEach(([formField, apiField]) => {
+          setValue(formField, builderDetails[0]?.[apiField] || "");
+        });
+        setIsBuilderDataLoaded(true);
+        setSelectedBuilderId(selectedValue);
+      }
+    } catch (err) {
+      setIsBuilderDataLoaded(false);
+      setSelectedBuilderId("");
+      console.error("Failed to fetch builder details", err);
+      loaderRef?.current?.hide();
+      handleErrorMessage(err?.response?.data);
+      Object.keys(fieldsMap).forEach((field) => setValue(field, ""));
+    }
+  };
 
-.tableIconButton:hover {
-  background: #00A3E0;
-  color: white;
-}
+  const handleDownload = async (fileStoreId, fileName) => {
+    try {
+      if (!fileStoreId) return;
+      const url = `${BASE_IP}/filestore/v1/files/id?fileStoreId=${fileStoreId}`;
 
-.tableIconButton:first-child {
-  border-color: #8BB92A;
-  color: #8BB92A;
-}
+      loaderRef.current?.show();
 
-.tableIconButton:first-child:hover {
-  background: #8BB92A;
-  color: white;
-}
+      const accessToken = getFromLocalStorage("access_token");
+      const tokenDetails = getFromLocalStorage("tokenDetails");
+      const sessionState = tokenDetails
+        ? JSON.parse(tokenDetails)?.session_state
+        : "";
 
-.paginationContainer {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 15px 20px;
-  background: #f8f9fa;
-  border-top: 1px solid #e0e0e0;
-  margin-top: 0;
-  border-radius: 0 0 8px 8px;
-}
+      const response = await axios({
+        method: "GET",
+        url: url,
+        responseType: "blob",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "X-Request-ID": sessionState,
+          Accept: "application/octet-stream",
+        },
+      });
 
-.paginationInfo {
-  font-size: 14px;
-  color: #666;
-  font-weight: 500;
-}
+      if (response.data) {
+        let filename = fileName || "document";
+        const contentDisposition = response.headers["content-disposition"];
+        if (contentDisposition) {
+          const filenameMatch = contentDisposition.match(
+            /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/
+          );
+          if (filenameMatch && filenameMatch[1]) {
+            filename = filenameMatch[1].replace(/['"]/g, "");
+          }
+        }
 
-.paginationControls {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-}
+        const blob = new Blob([response.data], {
+          type: response.headers["content-type"] || "application/octet-stream",
+        });
+        const blobUrl = window.URL.createObjectURL(blob);
 
-.paginationBtn {
-  min-width: 36px;
-  height: 36px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 6px;
-  font-weight: 500;
-  border-width: 1px;
-}
+        const link = document.createElement("a");
+        link.href = blobUrl;
+        link.setAttribute("download", filename);
+        document.body.appendChild(link);
+        link.click();
 
-.paginationDots {
-  padding: 0 8px;
-  color: #999;
-  font-weight: bold;
-}
+        setTimeout(() => {
+          document.body.removeChild(link);
+          window.URL.revokeObjectURL(blobUrl);
+        }, 100);
+      }
+    } catch (error) {
+      console.error("Error downloading file:", error);
+      toast.error("Failed to download file. Please try again.");
+    } finally {
+      loaderRef.current?.hide();
+    }
+  };
 
-.actionSection {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: 30px;
-}
+  const handleRemoveAuthLetter = async () => {
+    const fileStoreId = watch("authLetterFileStoreId");
+    const res = await deleteFile(fileStoreId, loaderRef);
+    if (res) {
+      clearErrors("authLetter");
+      setValue("authLetter", null);
+      setValue("authLetterFileStoreId", null);
+    }
+  };
 
-/* Mobile Responsive */
-@media (max-width: 768px) {
-  .container {
-    overflow-x: hidden;
-  }
-  
-  .mainContent {
-    margin: 10px;
-    padding: 15px;
-    overflow-x: hidden;
-  }
-  
-  .headerRow {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 10px;
-  }
-  
-  .title {
-    font-size: 18px;
-  }
-  
-  .statusBanner {
-    margin: 0 15px 15px 15px;
-    padding: 12px 15px;
-    font-size: 13px;
-  }
-  
-  .tableContainer {
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-    max-width: 100%;
-  }
-  
-  .tableContainer::-webkit-scrollbar {
-    height: 6px;
-  }
-  
-  .vesselHeader,
-  .paymentTableHeader {
-    min-width: 800px;
-  }
-  
-  .vesselRow,
-  .paymentRow {
-    min-width: 800px;
-  }
-  
-  .paginationContainer {
-    flex-direction: column;
-    gap: 10px;
-    padding: 12px 15px;
-  }
-  
-  .paginationControls {
-    flex-wrap: wrap;
-    justify-content: center;
-    gap: 3px;
-  }
-  
-  .paginationBtn {
-    min-width: 32px;
-    height: 32px;
-    font-size: 12px;
-  }
-  
-  .actionSection {
-    justify-content: center;
-    margin-top: 20px;
-  }
-}
+  return (
+    <>
+      <NewLoader ref={loaderRef} />
+      <form autoComplete="off">
+        <Collapsible
+          title={
+            <>
+              <FaClipboardList className="me-2" />
+              <span>{t("Basic Information")}</span>
+            </>
+          }
+          openStat={true}
+        >
+          <Row className="gy-3" style={{ padding: "1rem" }}>
+            <Col md={4}>
+              <InputText
+                label={t("vesselDetails.Name of Owner")}
+                required={true}
+                name="ownerName"
+                placeholder={t("vesselDetails.Please enter Name of Owner")}
+                register={register("ownerName", {
+                  required: t("vesselDetails.Name is required"),
+                })}
+                errors={errors}
+                disabled={
+                  viewMode || (!errors?.ownerName && !!getValues("ownerName"))
+                }
+              />
+            </Col>
+            <Col md={4}>
+              <InputText
+                label={t("vesselDetails.Address of Owner")}
+                required={true}
+                name="ownerAddress"
+                placeholder={t("vesselDetails.Please enter Address of Owner")}
+                register={register("ownerAddress", {
+                  required: t("vesselDetails.Address is required"),
+                })}
+                errors={errors}
+                disabled={
+                  viewMode ||
+                  (!errors?.ownerAddress && !!getValues("ownerAddress"))
+                }
+              />
+            </Col>
+            <Col md={4}>
+              <InputText
+                label={t("vesselDetails.Mobile")}
+                required={true}
+                name="mobile"
+                placeholder={t("vesselDetails.Please enter Mobile")}
+                register={register("mobile", {
+                  required: t("vesselDetails.Mobile is required"),
+                })}
+                errors={errors}
+                disabled={
+                  viewMode || (!errors?.mobile && !!getValues("mobile"))
+                }
+              />
+            </Col>
+            <Col md={4}>
+              <InputText
+                label={t("vesselDetails.Email Id")}
+                required={true}
+                name="email"
+                type="email"
+                placeholder={t("vesselDetails.Please enter Email Id")}
+                register={register("email", {
+                  required: t("vesselDetails.Email is required"),
+                })}
+                errors={errors}
+                disabled={viewMode || (!errors?.email && !!getValues("email"))}
+              />
+            </Col>
+            <Col md={4}>
+              <InputText
+                label={t("vesselDetails.PAN")}
+                required={true}
+                name="pan"
+                placeholder={t("vesselDetails.Please enter PAN")}
+                register={register("pan", {
+                  required: t("vesselDetails.PAN is required"),
+                })}
+                errors={errors}
+                disabled={viewMode || (!errors?.pan && !!getValues("pan"))}
+              />
+            </Col>
+            <Col md={4}>
+              <InputText
+                label={t("vesselDetails.Aadhar")}
+                required={true}
+                name="aadhar"
+                placeholder={t("vesselDetails.Please enter Aadhar")}
+                register={register("aadhar", {
+                  required: t("vesselDetails.Aadhar is required"),
+                })}
+                errors={errors}
+                maxLength={12}
+                disabled={
+                  viewMode || (!errors?.aadhar && !!getValues("aadhar"))
+                }
+              />
+            </Col>
+            <Col md={4}>
+              <InputText
+                label={t("vesselDetails.Trade Licence")}
+                required={true}
+                name="tradeLicence"
+                placeholder={t("vesselDetails.Please enter Trade Licence")}
+                register={register("tradeLicence", {
+                  required: t("vesselDetails.Trade Licence is required"),
+                })}
+                errors={errors}
+                disabled={
+                  viewMode ||
+                  (!errors?.tradeLicence && !!getValues("tradeLicence"))
+                }
+              />
+            </Col>
+            <Col md={4}>
+              <InputText
+                label={t("vesselDetails.GST")}
+                required={
+                  JSON.parse(getFromLocalStorage("ownerDetails") || "{}")
+                    ?.categoryOfOwner !== "INDIVIDUAL"
+                }
+                name="gst"
+                placeholder={t("vesselDetails.Please enter GST")}
+                register={register("gst", {
+                  required:
+                    JSON.parse(getFromLocalStorage("ownerDetails") || "{}")
+                      ?.categoryOfOwner !== "INDIVIDUAL"
+                      ? t("vesselDetails.GST is required")
+                      : false,
+                })}
+                errors={errors}
+                disabled={viewMode || (!errors?.gst && !!getValues("gst"))}
+              />
+            </Col>
+          </Row>
+        </Collapsible>
 
-@media (max-width: 480px) {
-  .mainContent {
-    margin: 5px;
-    padding: 10px;
-  }
-  
-  .headerRow {
-    padding: 15px;
-  }
-  
-  .title {
-    font-size: 16px;
-  }
-  
-  .applicationId {
-    font-size: 12px;
-    padding: 6px 12px;
-  }
-  
-  .statusBanner {
-    margin: 0 10px 10px 10px;
-    padding: 10px 12px;
-    font-size: 12px;
-  }
-  
-  .tableContainer::-webkit-scrollbar {
-    height: 4px;
-  }
-  
-  .paginationContainer {
-    padding: 10px 12px;
-  }
-  
-  .paginationInfo {
-    font-size: 12px;
-    text-align: center;
-  }
-  
-  .paginationBtn {
-    min-width: 28px;
-    height: 28px;
-    font-size: 11px;
-  }
-  
-  .paginationDots {
-    padding: 0 4px;
-    font-size: 12px;
-  }
-  
-  .vesselIconButton {
-    width: 18px;
-    height: 18px;
-    font-size: 8px;
-  }
-  
-  .tableIconButton {
-    width: 20px;
-    height: 20px;
-    font-size: 10px;
-  }
-  
-  .iconButton {
-    width: 28px;
-    height: 28px;
-  }
-  
-  .actionSection {
-    margin-top: 15px;
-  }
-}
+        <Collapsible
+          title={
+            <div className="d-flex align-items-center">
+              <FaShip className="me-2" style={{ color: "#2466BF" }} />
+              <span style={{ color: "#2466BF" }}>{t("Vessel Details")}</span>
+            </div>
+          }
+          openStat={true}
+        >
+          <Row className="gy-3" style={{ padding: "1rem" }}>
+            <Col md={4}>
+              <InputSelect
+                label={t("vesselDetails.Type of Vessel")}
+                required={true}
+                name="vesselType"
+                options={[
+                  {
+                    value: "",
+                    label: "-- Select --",
+                  },
+                  ...(masterData?.vesselTypes?.map((type) => ({
+                    value: type?.valueCode,
+                    label: type?.valueLabel,
+                  })) || []),
+                ]}
+                register={register("vesselType", {
+                  required: t("vesselDetails.vesselType is required"),
+                })}
+                errors={errors}
+                value={formData.vesselType || watch("vesselType") || ""}
+                onChange={(value) =>
+                  !viewMode && handleDropdownChange("vesselType", value)
+                }
+                disabled={viewMode}
+              />
+            </Col>
+            <Col md={4}>
+              <InputSelect
+                label={t("vesselDetails.Category")}
+                required={true}
+                name="category"
+                options={[
+                  {
+                    value: "",
+                    label: "-- Select --",
+                  },
+                  ...(masterData?.vesselCategories?.map((type) => ({
+                    value: type.valueCode,
+                    label: type.valueLabel,
+                  })) || []),
+                ]}
+                register={register("category", {
+                  required: t("vesselDetails.category is required"),
+                })}
+                errors={errors}
+                value={formData.category || watch("category") || ""}
+                onChange={(value) =>
+                  !viewMode && handleDropdownChange("category", value)
+                }
+                disabled={viewMode}
+              />
+            </Col>
+            <Col md={4}>
+              <InputSelect
+                label={t("vesselDetails.Zone")}
+                required={true}
+                name="zone"
+                options={[
+                  {
+                    value: "",
+                    label: "-- Select --",
+                  },
+                  ...(masterData?.zones?.map((type) => ({
+                    value: type.valueCode,
+                    label: type.valueLabel,
+                  })) || []),
+                ]}
+                register={register("zone", {
+                  required: category !== "A" && t("zone is required"),
+                })}
+                errors={errors}
+                value={formData.zone || watch("zone") || ""}
+                onChange={(value) =>
+                  !viewMode &&
+                  category !== "A" &&
+                  handleDropdownChange("zone", value)
+                }
+                disabled={viewMode || category === "A"}
+                style={{
+                  backgroundColor: category === "A" ? "#f8f9fa" : "",
+                  cursor: category === "A" ? "not-allowed" : "pointer",
+                }}
+              />
+            </Col>
+
+            <Col md={4}>
+              <InputSelect
+                label={t("vesselDetails.Supervision Authority")}
+                required={true}
+                name="supervisionAuthority"
+                options={[
+                  {
+                    value: "",
+                    label: "-- Select --",
+                  },
+                  ...(masterData?.supervisionAuthorites?.map((type) => ({
+                    value: type.valueCode,
+                    label: type.valueLabel,
+                  })) || []),
+                ]}
+                register={register("supervisionAuthority", {
+                  required:
+                    category !== "A" &&
+                    t("vesselDetails.Supervision Authority is required"),
+                })}
+                errors={errors}
+                value={
+                  formData.supervisionAuthority ||
+                  watch("supervisionAuthority") ||
+                  ""
+                }
+                onChange={(value) =>
+                  !viewMode &&
+                  category !== "A" &&
+                  handleDropdownChange("supervisionAuthority", value)
+                }
+                disabled={viewMode || category === "A"}
+                style={{
+                  backgroundColor: category === "A" ? "#f8f9fa" : "",
+                  cursor: category === "A" ? "not-allowed" : "pointer",
+                }}
+              />
+            </Col>
+
+            {(formData?.supervisionAuthority === "CLASSIFICATION SOCIETY" ||
+              watch("supervisionAuthority") === "CLASSIFICATION SOCIETY") && (
+                <Col md={8}>
+                  <InputText
+                    label={t("vesselDetails.Name of the Classification Society")}
+                    name="classificationSociety"
+                    placeholder={t(
+                      "vesselDetails.Please enter Name of the Classification Society"
+                    )}
+                    register={register("classificationSociety")}
+                    errors={errors}
+                    disabled={viewMode}
+                  />
+                </Col>
+              )}
+
+            <Col md={4}>
+              <InputSelect
+                label={t("vesselDetails.Constructed By ?")}
+                required={true}
+                name="constructedBy"
+                options={[
+                  { label: t("vesselDetails.Self"), value: "1" },
+                  { label: t("vesselDetails.Builder"), value: "2" },
+                ]}
+                register={register("constructedBy", {
+                  required: t("vesselDetails.Please select a Constructor Type"),
+                })}
+                rules={{
+                  required: t("vesselDetails.Please select a Constructor Type"),
+                }}
+                errors={errors}
+                value={formData.constructedBy || watch("constructedBy") || ""}
+                onChange={(value) =>
+                  !viewMode && handleDropdownChange("constructedBy", value)
+                }
+                disabled={viewMode}
+              />
+            </Col>
+            {constructedBy === "2" && (
+              <Col md={4}>
+                <InputSelect
+                  label={t("vesselDetails.Builder")}
+                  required={true}
+                  name="builder"
+                  options={[
+                    {
+                      value: "",
+                      label: "-- Select --",
+                    },
+                    ...(masterData?.builderNames?.map((type) => ({
+                      value: type.valueCode,
+                      label: type.valueLabel,
+                    })) || []),
+                  ]}
+                  register={register("builder", {
+                    required: t("vesselDetails.Builder is required"),
+                  })}
+                  errors={errors}
+                  value={formData.builder || watch("builder") || ""}
+                  onChange={(value) =>
+                    !viewMode && handleDropdownChange("builder", value)
+                  }
+                  disabled={viewMode}
+                />
+              </Col>
+            )}
+
+            <Col md={4}>
+              <InputText
+                label={t("vesselDetails.Gross Tonnage (GRT)")}
+                required={true}
+                name="grt"
+                placeholder={t("vesselDetails.Please enter GRT")}
+                register={register("grt", {
+                  required: t("vesselDetails.GRT is required"),
+                })}
+                errors={errors}
+                disabled={viewMode}
+              />
+            </Col>
+            <Col md={4}>
+              <InputText
+                label={
+                  constructedBy === "1"
+                    ? t("vesselDetails.Valuation")
+                    : t("vesselDetails.Work Order Value")
+                }
+                tooltipText={
+                  constructedBy === "1" ? t("vesselDetails.Valution_tt") : ""
+                }
+                required={true}
+                name="workOrderValue"
+                placeholder={t("vesselDetails.Enter Work Order Value")}
+                register={register("workOrderValue", {
+                  required: t("vesselDetails.Work Order Value is required"),
+                  pattern: {
+                    value: /^[0-9]+$/,
+                    message: t("vesselDetails.Please enter a valid number"),
+                  },
+                })}
+                errors={errors}
+                disabled={viewMode}
+              />
+            </Col>
+
+            <Col md={4}>
+              <InputSelect
+                label={t("vesselDetails.Purchase Type")}
+                required={true}
+                name="purchaseType"
+                options={[
+                  {
+                    value: "",
+                    label: "-- Select --",
+                  },
+                  ...(masterData?.purchaseTypes?.map((type) => ({
+                    value: type.valueCode,
+                    label: type.valueLabel,
+                  })) || []),
+                ]}
+                register={register("purchaseType", {
+                  required: t("vesselDetails.Purchase Type is required"),
+                })}
+                errors={errors}
+                value={formData.purchaseType || watch("purchaseType") || ""}
+                onChange={(value) =>
+                  !viewMode && handleDropdownChange("purchaseType", value)
+                }
+                disabled={viewMode}
+              />
+            </Col>
+          </Row>
+        </Collapsible>
+
+        {constructedBy === "2" && (
+          <Collapsible
+            title={
+              <div className="d-flex align-items-center">
+                <FaUser className="me-2" style={{ color: "#2466BF" }} />
+                <span style={{ color: "#2466BF" }}>{t("Builder Details")}</span>
+              </div>
+            }
+            openStat={true}
+          >
+            <Row className="gy-3" style={{ padding: "1rem" }}>
+              <Col md={4}>
+                <InputText
+                  label={t("vesselDetails.Builder Name")}
+                  required={true}
+                  name="builderName"
+                  placeholder={t("vesselDetails.Please enter Builder Name")}
+                  register={register("builderName", {
+                    required: t("vesselDetails.Builder Name is required"),
+                  })}
+                  errors={errors}
+                  disabled={
+                    viewMode ||
+                    (isBuilderDataLoaded && !!getValues("builderName"))
+                  }
+                />
+              </Col>
+              <Col md={4}>
+                <InputText
+                  label={t("vesselDetails.Builder Address")}
+                  required={true}
+                  name="builderAddress"
+                  placeholder={t("vesselDetails.Please enter Builder Address")}
+                  register={register("builderAddress", {
+                    required: t("vesselDetails.Builder Address is required"),
+                  })}
+                  errors={errors}
+                  disabled={
+                    viewMode ||
+                    (isBuilderDataLoaded && !!getValues("builderAddress"))
+                  }
+                />
+              </Col>
+              <Col md={4}>
+                <InputText
+                  label={t("vesselDetails.Builder Email Id")}
+                  required={true}
+                  name="builderEmail"
+                  type="email"
+                  placeholder={t("vesselDetails.Please enter Builder Email Id")}
+                  register={register("builderEmail", {
+                    required: t("vesselDetails.Builder Email is required"),
+                    pattern: {
+                      value: /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i,
+                      message: t("vesselDetails.Invalid email address"),
+                    },
+                  })}
+                  errors={errors}
+                  disabled={
+                    viewMode ||
+                    (isBuilderDataLoaded && !!getValues("builderEmail"))
+                  }
+                />
+              </Col>
+              <Col md={4}>
+                <InputText
+                  label={t("vesselDetails.Mobile")}
+                  required={true}
+                  name="builderMobile"
+                  placeholder={t("vesselDetails.Please enter Mobile")}
+                  register={register("builderMobile", {
+                    required: t("vesselDetails.Builder Mobile is required"),
+                    pattern: {
+                      value: /^[0-9]{10}$/,
+                      message: t("vesselDetails.Invalid mobile number"),
+                    },
+                  })}
+                  errors={errors}
+                  disabled={
+                    viewMode ||
+                    (isBuilderDataLoaded && !!getValues("builderMobile"))
+                  }
+                />
+              </Col>
+              <Col md={4}>
+                <InputText
+                  label={t("vesselDetails.Trade Licence")}
+                  required={true}
+                  name="builderTradeLicence"
+                  placeholder={t("vesselDetails.Please enter Trade Licence")}
+                  register={register("builderTradeLicence", {
+                    required: t(
+                      "vesselDetails.Builder Trade Licence is required"
+                    ),
+                  })}
+                  errors={errors}
+                  disabled={
+                    viewMode ||
+                    (isBuilderDataLoaded && !!getValues("builderTradeLicence"))
+                  }
+                />
+              </Col>
+              <Col md={4}>
+                <InputText
+                  label={t("vesselDetails.GST")}
+                  required={true}
+                  name="builderGST"
+                  placeholder={t("vesselDetails.Please enter GST")}
+                  register={register("builderGST", {
+                    required: t("vesselDetails.Builder GST is required"),
+                  })}
+                  errors={errors}
+                  disabled={
+                    viewMode ||
+                    (isBuilderDataLoaded && !!getValues("builderGST"))
+                  }
+                />
+              </Col>
+              <Col md={4}>
+                <InputSelect
+                  label={t("vesselDetails.Builder Authorization")}
+                  required={true}
+                  name="builderAuth"
+                  options={[
+                    {
+                      value: "",
+                      label: "-- Select --",
+                    },
+                    ...(masterData?.builderAuthorizations?.map((type) => ({
+                      value: type?.valueCode,
+                      label: type?.valueLabel,
+                    })) || []),
+                  ]}
+                  register={register("builderAuth", {
+                    required: t(
+                      "vesselDetails.Builder Authorization is required"
+                    ),
+                  })}
+                  errors={errors}
+                  value={formData?.builderAuth || watch("builderAuth") || ""}
+                  onChange={(value) =>
+                    !viewMode && handleDropdownChange("builderAuth", value)
+                  }
+                  disabled={viewMode}
+                />
+              </Col>
+              <Col md={6}>
+                {viewMode ? (
+                  watch("authLetter") && watch("authLetter").name ? (
+                    <div className="mb-3">
+                      <label
+                        className="form-label fw-bold"
+                        style={{ fontSize: "0.9rem" }}
+                      >
+                        {t("Authorization Letter")}
+                      </label>
+                      <div className="p-2 p-sm-3 border rounded bg-light">
+                        <div className="d-flex flex-column flex-sm-row justify-content-between align-items-start align-items-sm-center gap-2">
+                          <div className=" min-width-0">
+                            <div
+                              className="fw-semibold text-primary mb-1"
+                              style={{
+                                fontSize: "0.8rem",
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap",
+                              }}
+                            >
+                              {watch("authLetter").name}
+                            </div>
+                            <small
+                              className="text-muted"
+                              style={{ fontSize: "0.7rem" }}
+                            >
+                              {(
+                                (watch("authLetter").size || 0) /
+                                1024 /
+                                1024
+                              ).toFixed(1)}{" "}
+                              MB
+                            </small>
+                          </div>
+                          <button
+                            type="button"
+                            className="btn btn-outline-success btn-sm d-flex align-items-center flex-shrink-0"
+                            style={{ fontSize: "0.75rem", padding: "4px 8px" }}
+                            onClick={() =>
+                              fetchAndViewFile(watch("authLetterFileStoreId") || "")
+                            }
+                          >
+                            <BsEyeFill size={12} className="me-1" />
+                            <span>{t("View")}</span>
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-outline-primary btn-sm d-flex align-items-center flex-shrink-0"
+                            style={{ fontSize: "0.75rem", padding: "4px 8px" }}
+                            onClick={() =>
+                              handleDownload(
+                                watch("authLetterFileStoreId"),
+                                watch("authLetter").name
+                              )
+                            }
+                          >
+                            <BsDownload size={12} className="me-1" />
+                            <span>{t("Download")}</span>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="mb-3">
+                      <label
+                        className="form-label fw-bold"
+                        style={{ fontSize: "0.9rem" }}
+                      >
+                        {t("Authorization Letter")}
+                      </label>
+                      <div
+                        className="p-2 p-sm-3 border rounded bg-light text-muted text-center"
+                        style={{ fontSize: "0.8rem" }}
+                      >
+                        {t("No file uploaded")}
+                      </div>
+                    </div>
+                  )
+                ) : (
+                  <div className="mb-2" style={{ display: "flex" }}>
+                    <InputFile
+                      style={{ width: "100%" }}
+                      label={t("Authorization Letter")}
+                      required={formData?.builderAuth?.toLowerCase() === "y"}
+                      name="authLetter"
+                      register={register("authLetter", {
+                        required:
+                          formData?.builderAuth?.toLowerCase() === "y"
+                            ? t(
+                              "vesselDetails.Authorization Letter is required"
+                            )
+                            : false,
+                      })}
+                      errors={errors}
+                      onChange={(e) => {
+                        if (viewMode) return;
+                        if (e.target.files?.[0]) {
+                          handleFileChange("authLetter", e.target.files[0]);
+                        }
+                      }}
+                      disabled={viewMode}
+                      watch={watch}
+                      defaultValue={watch("authLetter")}
+                      clearErrors={clearErrors}
+                      accept=".pdf,.jpg,.jpeg,.png"
+                    />
+
+                    {watch("authLetter") && !viewMode && (
+                      <FaTimesCircle
+                        className={`${styles.crossIcon} text-danger position-relative`}
+                        size={18}
+                        title="Remove file"
+                        onClick={handleRemoveAuthLetter}
+                      />
+                    )}
+                  </div>
+                )}
+
+                {editMode && watch("authLetter") && (
+                  <div
+                    className=" text-end gap-1"
+                    style={{
+                      display: "flex",
+                      justifyContent: "flex-end",
+                      marginRight: "0.9rem",
+                    }}
+                  >
+                    <button
+                      type="button"
+                      className="btn btn-outline-success btn-sm rounded-pill d-flex align-items-center"
+                      style={{ fontSize: "0.65rem", padding: "4px 8px" }}
+                      onClick={() =>
+                        fetchAndViewFile(
+                          watch("authLetterFileStoreId") || ""
+                        )
+                      }
+                    >
+                      <BsEyeFill size={10} />
+                      <span className="ms-1">View</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-outline-primary btn-sm rounded-pill d-flex align-items-center"
+                      style={{ fontSize: "0.65rem", padding: "4px 8px" }}
+                      onClick={() =>
+                        handleDownload(
+                          watch("authLetterFileStoreId"),
+                          watch("authLetter").name
+                        )
+                      }
+                    >
+                      <BsDownload size={10} />
+                      <span className="ms-1">Download</span>
+                    </button>
+                  </div>
+                )}
+              </Col>
+            </Row>
+          </Collapsible>
+        )}
+      </form>
+    </>
+  );
+};
+
+export default VesselDetails;
