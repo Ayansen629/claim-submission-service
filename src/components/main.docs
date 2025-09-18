@@ -1,9 +1,2401 @@
-const [paymentData, setPaymentData] = useState({
-  invoiceBreakupInfo: [],
-  summary: {
-    subTotal: 0,
-    cgst: 0,
-    sgst: 0,
-    totalPayable: 0,
-  },
-});
+import React, { useState, useEffect, useRef, useCallback } from "react";
+import { useForm } from "react-hook-form";
+import { Row, Col } from "react-bootstrap";
+import InputText from "../../../common/InputText.tsx";
+import InputSelect from "../../../common/InputSelect.tsx";
+import InputRadio from "../../../common/InputRadio.tsx";
+import InputFile from "../../../common/InputFile.tsx";
+import Collapsible from "../../../common/Collapsible.js";
+import { useTranslation } from "react-i18next";
+import { useLanguageContext } from "../../../common/LanguageContext.js";
+import { fetchAndViewFile, renameFile } from "../../../../utils/constants.ts";
+import { BsDownload, BsEyeFill } from "react-icons/bs";
+import { FaClipboardList, FaShip, FaTimesCircle, FaUser } from "react-icons/fa";
+import { useMasterData } from "../../../context/MasterDataContext.js";
+import { handleErrorMessage } from "../../../../utils/errorMessageHandler.js";
+import NewLoader from "../../../common/NewLoader.js";
+import { BASE_IP, URLS_ENDPOINT } from "../../../../utils/urlsConstants.ts";
+import { postData, postFORMdata } from "../../../../services/http.service.ts";
+import { Tooltip, IconButton } from "@mui/material";
+import InfoOutlinedIcon from "@mui/icons-material/InfoOutlined";
+import { toast } from "react-toastify";
+import { getFromLocalStorage } from "../../../../utils/localStorageUtils.js";
+import axios from "axios";
+import { deleteFile } from "../../../../utils/deleteFile.js";
+import styles from "./VesselDetails.module.css";
+
+const VesselDetails = ({
+  formMethods,
+  viewMode = false,
+  editMode = false,
+  vesselRegisData,
+}) => {
+  const { i18n, t } = useTranslation();
+  const [formData, setFormData] = useState({});
+  const { masterData } = useMasterData();
+  const loaderRef = useRef();
+  const [isBuilderDataLoaded, setIsBuilderDataLoaded] = useState(false);
+  const [selectedBuilderId, setSelectedBuilderId] = useState("");
+
+  const defaultValues = {
+    ownerName: "",
+    ownerAddress: "",
+    mobile: "",
+    email: "",
+    pan: "",
+    aadhar: "",
+    tradeLicence: "",
+    gst: "",
+    grt: "",
+    workOrderValue: "",
+    vesselType: "",
+    category: "",
+    zone: "",
+    supervisionAuthority: "",
+    purchaseType: "",
+    classificationSociety: "",
+    constructedBy: 1,
+    builder: "",
+    builderName: "",
+    builderAddress: "",
+    builderEmail: "",
+    builderMobile: "",
+    builderTradeLicence: "",
+    builderGST: "",
+    builderAuth: "",
+    authLetter: "",
+    authLetterFileStoreId: "",
+    termsAccepted: false,
+    tonnageBooklets: null,
+    stabilityBooklets: null,
+  };
+
+  const internalFormMethods = useForm({
+    defaultValues,
+    mode: "onTouched",
+  });
+
+  const methods = formMethods || internalFormMethods;
+
+  const isCompMount = useRef(true);
+
+  const {
+    register,
+    watch,
+    setValue,
+    clearErrors,
+    trigger,
+    getValues,
+    setError,
+    formState: { errors },
+  } = methods;
+
+  const constructedBy = watch("constructedBy");
+  const category = watch("category");
+
+  const mapApiValueToDropdown = useCallback((apiValue, masterDataArray) => {
+    if (!apiValue || !masterDataArray) return "";
+
+    const exactMatch = masterDataArray.find(
+      (item) => item.valueCode === apiValue || item.valueLabel === apiValue
+    );
+    if (exactMatch) return exactMatch.valueCode;
+
+    const caseInsensitiveMatch = masterDataArray.find(
+      (item) =>
+        item.valueCode?.toLowerCase() === apiValue.toLowerCase() ||
+        item.valueLabel?.toLowerCase() === apiValue.toLowerCase()
+    );
+    if (caseInsensitiveMatch) return caseInsensitiveMatch.valueCode;
+
+    const partialMatch = masterDataArray.find((item) => {
+      const itemCode = item.valueCode?.toLowerCase() || "";
+      const itemLabel = item.valueLabel?.toLowerCase() || "";
+      const apiVal = apiValue.toLowerCase();
+
+      return (
+        itemCode.includes(apiVal) ||
+        itemLabel.includes(apiVal) ||
+        apiVal.includes(itemCode) ||
+        apiVal.includes(itemLabel)
+      );
+    });
+    if (partialMatch) return partialMatch.valueCode;
+
+    return apiValue;
+  }, []);
+
+  useEffect(() => {
+    if (!masterData || !vesselRegisData?.vesselDetails) return;
+
+    const vesselDetails = vesselRegisData?.vesselDetails;
+
+    const mappings = [
+      {
+        field: "vesselType",
+        apiValue: vesselDetails.typeOfVessel,
+        masterArray: masterData.vesselTypes,
+      },
+      {
+        field: "category",
+        apiValue: vesselDetails.categoryOfVessel,
+        masterArray: masterData.vesselCategories,
+      },
+      {
+        field: "zone",
+        apiValue: vesselDetails.zone,
+        masterArray: masterData.zones,
+      },
+      {
+        field: "supervisionAuthority",
+        apiValue: vesselDetails.supervisionAuthority,
+        masterArray: masterData.supervisionAuthorites,
+      },
+      {
+        field: "purchaseType",
+        apiValue: vesselDetails.purchaseType,
+        masterArray: masterData.purchaseTypes,
+      },
+      {
+        field: "builderAuth",
+        apiValue: vesselDetails.builderAuth,
+        masterArray: masterData.builderAuthorizations,
+      },
+    ];
+
+    mappings.forEach(({ field, apiValue, masterArray }) => {
+      if (apiValue && masterArray) {
+        const mappedValue = mapApiValueToDropdown(apiValue, masterArray);
+        if (mappedValue) {
+          setValue(field, mappedValue, { shouldValidate: false });
+          setFormData((prev) => ({ ...prev, [field]: mappedValue }));
+        }
+      }
+    });
+
+    if (
+      vesselRegisData.basicDetails?.builderDetails?.id &&
+      masterData.builderNames
+    ) {
+      const builderId = vesselRegisData.basicDetails.builderDetails.id;
+      const builderMatch = masterData.builderNames.find(
+        (builder) => builder.valueCode === builderId || builder.id === builderId
+      );
+      if (builderMatch) {
+        setValue("builder", builderMatch.valueCode, { shouldValidate: false });
+        setFormData((prev) => ({ ...prev, builder: builderMatch.valueCode }));
+      }
+    }
+
+    console.log("Mapped dropdown values:", {
+      vesselType: getValues("vesselType"),
+      category: getValues("category"),
+      zone: getValues("zone"),
+      supervisionAuthority: getValues("supervisionAuthority"),
+      purchaseType: getValues("purchaseType"),
+      builder: getValues("builder"),
+    });
+  }, [masterData, vesselRegisData, setValue, mapApiValueToDropdown, getValues]);
+
+  useEffect(() => {
+    if (isCompMount.current) {
+      isCompMount.current = false;
+      return;
+    }
+    const fieldsWithErrors = Object.keys(errors);
+    trigger(fieldsWithErrors);
+  }, [i18n.language]);
+
+  useEffect(() => {
+    setTimeout(() => {
+      Object.keys(formData).forEach((key) => {
+        if (formData[key] !== undefined) {
+          setValue(key, formData[key], { shouldValidate: false });
+        }
+      });
+    }, 0);
+  }, [setValue, formData]);
+
+  const handleDropdownChange = useCallback(
+    (name, value) => {
+      setValue(name, value, { shouldValidate: true });
+      clearErrors(name);
+      setFormData((prev) => ({
+        ...prev,
+        [name]: value,
+      }));
+      if (name === "builder") {
+        handleBuilderChange(value);
+      }
+    },
+    [setValue, clearErrors]
+  );
+
+  // const handleFileChange = useCallback(
+  //   async (name, file) => {
+  //     if (!file) return;
+
+  //     const validTypes = [
+  //       "application/pdf",
+  //       "image/jpeg",
+  //       "image/png",
+  //       "image/jpg",
+  //     ];
+  //     if (!validTypes.includes(file.type)) {
+  //       setError(name, {
+  //         type: "manual",
+  //         message: t("Only PDF, JPG or PNG files are allowed"),
+  //       });
+  //       setValue(name, null);
+  //       return;
+  //     }
+
+  //     if (file.size > 10 * 1024 * 1024) {
+  //       setError(name, {
+  //         type: "manual",
+  //         message: t("File size should not exceed 10MB"),
+  //       });
+  //       setValue(name, null);
+  //       return;
+  //     }
+
+  //     const extension = file?.name?.substring(file?.name?.lastIndexOf("."));
+  //     const fileName = `${name}${extension}`;
+  //     file.originalName = fileName;
+  //     const renamedFile = renameFile(file, fileName);
+
+  //     clearErrors(name);
+  //     setValue(name, renamedFile, { shouldValidate: true });
+  //     setFormData((prev) => ({
+  //       ...prev,
+  //       [name]: renamedFile,
+  //     }));
+
+  //     if (name === "authLetter") {
+  //       setValue("authLetterFileStoreId", null);
+  //       try {
+  //         const formData = new FormData();
+  //         formData.append("file", file);
+  //         const uploadUrl =
+  //           BASE_IP + URLS_ENDPOINT.FILE_STORE_SERVICE.UPLOAD_FILE;
+  //         loaderRef?.current?.show();
+  //         const response = await postFORMdata(uploadUrl, formData);
+  //         loaderRef?.current?.hide();
+  //         const fileStoreId = response?.data?.files[0]?.fileStoreId;
+  //         if (fileStoreId) {
+  //           console.log("authfileStoreId ", fileStoreId);
+  //           setValue("authLetterFileStoreId", fileStoreId);
+  //         } else {
+  //           toast.error("File addition failed. Please try again.");
+  //           setValue("authLetter", null);
+  //           setFormData((prev) => ({
+  //             ...prev,
+  //             [name]: null,
+  //           }));
+  //         }
+  //       } catch (error) {
+  //         loaderRef?.current?.hide();
+  //         clearErrors(name);
+  //         setValue("authLetter", null);
+  //         setFormData((prev) => ({
+  //           ...prev,
+  //           [name]: null,
+  //         }));
+  //         console.error("File upload failed", error);
+  //         toast.error("File upload failed. Please try again.");
+  //       }
+  //     }
+  //   },
+  //   [setValue, clearErrors, setError, t]
+  // );
+  const handleFileChange = useCallback(
+    async (name, file) => {
+      if (!file) return;
+
+      const validTypes = [
+        "application/pdf",
+        "image/jpeg",
+        "image/png",
+        "image/jpg",
+      ];
+      if (!validTypes.includes(file.type)) {
+        setError(name, {
+          type: "manual",
+          message: t("Only PDF, JPG or PNG files are allowed"),
+        });
+        setValue(name, null);
+        return;
+      }
+
+      if (file.size > 10 * 1024 * 1024) {
+        setError(name, {
+          type: "manual",
+          message: t("File size should not exceed 10MB"),
+        });
+        setValue(name, null);
+        return;
+      }
+
+      const extension = file?.name?.substring(file?.name?.lastIndexOf("."));
+      const fileName = `${name}${extension}`;
+      file.originalName = fileName;
+      const renamedFile = renameFile(file, fileName);
+
+      clearErrors(name);
+      setValue(name, renamedFile, { shouldValidate: true });
+      setFormData((prev) => ({
+        ...prev,
+        [name]: renamedFile,
+      }));
+
+      if (name === "authLetter") {
+        setValue("authLetterFileStoreId", null);
+
+        const standardizedName = `Authorization Letter${extension}`;
+
+        const displayFile = new File([file], standardizedName, {
+          type: file.type,
+        });
+
+        setValue("authLetter", displayFile);
+        setValue("authLetterOriginalName", file.name);
+
+        try {
+          const formData = new FormData();
+          formData.append("file", file);
+          const uploadUrl =
+            BASE_IP + URLS_ENDPOINT.FILE_STORE_SERVICE.UPLOAD_FILE;
+          loaderRef?.current?.show();
+          const response = await postFORMdata(uploadUrl, formData);
+          loaderRef?.current?.hide();
+          const fileStoreId = response?.data?.files[0]?.fileStoreId;
+          if (fileStoreId) {
+            console.log("authfileStoreId ", fileStoreId);
+            setValue("authLetterFileStoreId", fileStoreId);
+          } else {
+            toast.error("File addition failed. Please try again.");
+            setValue("authLetter", null);
+            setValue("authLetterOriginalName", null);
+            setFormData((prev) => ({
+              ...prev,
+              [name]: null,
+            }));
+          }
+        } catch (error) {
+          loaderRef?.current?.hide();
+          clearErrors(name);
+          setValue("authLetter", null);
+          setValue("authLetterOriginalName", null);
+          setFormData((prev) => ({
+            ...prev,
+            [name]: null,
+          }));
+          console.error("File upload failed", error);
+          toast.error("File upload failed. Please try again.");
+        }
+      }
+    },
+    [setValue, clearErrors, setError, t]
+  );
+
+  useEffect(() => {
+    if (category === "A" && masterData) {
+      const zone1 = masterData?.zones?.find(
+        (zone) =>
+          zone.valueCode === "ZONE 1" || zone.valueLabel?.includes("ZONE 1")
+      );
+      const zone1Value = zone1 ? zone1.valueCode : "ZONE 1";
+
+      const classificationSociety = masterData?.supervisionAuthorites?.find(
+        (auth) =>
+          auth.valueCode === "CLASSIFICATION SOCIETY" ||
+          auth.valueLabel?.includes("CLASSIFICATION")
+      );
+      const classificationSocietyValue = classificationSociety
+        ? classificationSociety.valueCode
+        : "CLASSIFICATION SOCIETY";
+
+      setValue("zone", zone1Value, { shouldValidate: true });
+      setValue("supervisionAuthority", classificationSocietyValue, {
+        shouldValidate: true,
+      });
+
+      clearErrors("zone");
+      clearErrors("supervisionAuthority");
+
+      setFormData((prev) => ({
+        ...prev,
+        zone: zone1Value,
+        supervisionAuthority: classificationSocietyValue,
+      }));
+    }
+  }, [category, masterData, setValue, clearErrors, setFormData]);
+
+  useEffect(() => {
+    if (!!getValues("builderAuth")) {
+      setIsBuilderDataLoaded(true);
+    }
+  }, []);
+
+  const handleBuilderChange = async (selectedValue) => {
+    setIsBuilderDataLoaded(false);
+    setSelectedBuilderId("");
+
+    const fieldsMap = {
+      builderName: "builderName",
+      builderAddress: "address",
+      builderEmail: "emailId",
+      builderMobile: "phone",
+      builderTradeLicence: "tradeLicenseNumber",
+      builderGST: "gstNo",
+      builderAuth: "",
+    };
+
+    Object.keys(fieldsMap).forEach((field) => setValue(field, ""));
+
+    if (!selectedValue) return;
+
+    try {
+      const URL = `${process.env.REACT_APP_AUTH_URL}${URLS_ENDPOINT.USER_SERVICE.BUILDER_SEARCH}`;
+
+      loaderRef?.current?.show();
+      const response = await postData(URL, {
+        ids: [selectedValue],
+      });
+      if (response?.data?.data?.length > 0) {
+        loaderRef?.current?.hide();
+        const builderDetails = response.data.data?.map((obj) => ({
+          ...obj,
+          address: [obj.addressLine1, obj.addressLine2]
+            .filter(Boolean)
+            .join(", "),
+        }));
+
+        Object.entries(fieldsMap).forEach(([formField, apiField]) => {
+          setValue(formField, builderDetails[0]?.[apiField] || "");
+        });
+        setIsBuilderDataLoaded(true);
+        setSelectedBuilderId(selectedValue);
+      }
+    } catch (err) {
+      setIsBuilderDataLoaded(false);
+      setSelectedBuilderId("");
+      console.error("Failed to fetch builder details", err);
+      loaderRef?.current?.hide();
+      handleErrorMessage(err?.response?.data);
+      Object.keys(fieldsMap).forEach((field) => setValue(field, ""));
+    }
+  };
+
+  const handleDownload = async (fileStoreId, fileName) => {
+    try {
+      if (!fileStoreId) return;
+      const url = `${BASE_IP}/filestore/v1/files/id?fileStoreId=${fileStoreId}`;
+
+      loaderRef.current?.show();
+
+      const accessToken = getFromLocalStorage("access_token");
+      const tokenDetails = getFromLocalStorage("tokenDetails");
+      const sessionState = tokenDetails
+        ? JSON.parse(tokenDetails)?.session_state
+        : "";
+
+      const response = await axios({
+        method: "GET",
+        url: url,
+        responseType: "blob",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "X-Request-ID": sessionState,
+          Accept: "application/octet-stream",
+        },
+      });
+
+      if (response.data) {
+        let filename = fileName || "document";
+        const contentDisposition = response.headers["content-disposition"];
+        if (contentDisposition) {
+          const filenameMatch = contentDisposition.match(
+            /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/
+          );
+          if (filenameMatch && filenameMatch[1]) {
+            filename = filenameMatch[1].replace(/['"]/g, "");
+          }
+        }
+
+        const blob = new Blob([response.data], {
+          type: response.headers["content-type"] || "application/octet-stream",
+        });
+        const blobUrl = window.URL.createObjectURL(blob);
+
+        const link = document.createElement("a");
+        link.href = blobUrl;
+        link.setAttribute("download", filename);
+        document.body.appendChild(link);
+        link.click();
+
+        setTimeout(() => {
+          document.body.removeChild(link);
+          window.URL.revokeObjectURL(blobUrl);
+        }, 100);
+      }
+    } catch (error) {
+      console.error("Error downloading file:", error);
+      toast.error("Failed to download file. Please try again.");
+    } finally {
+      loaderRef.current?.hide();
+    }
+  };
+
+  const handleRemoveAuthLetter = async () => {
+    const fileStoreId = watch("authLetterFileStoreId");
+    const res = await deleteFile(fileStoreId, loaderRef);
+    if (res) {
+      clearErrors("authLetter");
+      setValue("authLetter", null);
+      setValue("authLetterFileStoreId", null);
+    }
+  };
+
+  return (
+    <>
+      <NewLoader ref={loaderRef} />
+      <form autoComplete="off">
+        <Collapsible
+          title={
+            <>
+              <FaClipboardList className="me-2" />
+              <span>{t("Basic Information")}</span>
+            </>
+          }
+          openStat={true}
+        >
+          <Row className="gy-3" style={{ padding: "1rem" }}>
+            <Col md={4}>
+              <InputText
+                label={t("vesselDetails.Name of Owner")}
+                required={true}
+                name="ownerName"
+                placeholder={t("vesselDetails.Please enter Name of Owner")}
+                register={register("ownerName", {
+                  required: t("vesselDetails.Name is required"),
+                })}
+                errors={errors}
+                disabled={
+                  viewMode || (!errors?.ownerName && !!getValues("ownerName"))
+                }
+              />
+            </Col>
+            <Col md={4}>
+              <InputText
+                label={t("vesselDetails.Address of Owner")}
+                required={true}
+                name="ownerAddress"
+                placeholder={t("vesselDetails.Please enter Address of Owner")}
+                register={register("ownerAddress", {
+                  required: t("vesselDetails.Address is required"),
+                })}
+                errors={errors}
+                disabled={
+                  viewMode ||
+                  (!errors?.ownerAddress && !!getValues("ownerAddress"))
+                }
+              />
+            </Col>
+            <Col md={4}>
+              <InputText
+                label={t("vesselDetails.Mobile")}
+                required={true}
+                name="mobile"
+                placeholder={t("vesselDetails.Please enter Mobile")}
+                register={register("mobile", {
+                  required: t("vesselDetails.Mobile is required"),
+                })}
+                errors={errors}
+                disabled={
+                  viewMode || (!errors?.mobile && !!getValues("mobile"))
+                }
+              />
+            </Col>
+            <Col md={4}>
+              <InputText
+                label={t("vesselDetails.Email Id")}
+                required={true}
+                name="email"
+                type="email"
+                placeholder={t("vesselDetails.Please enter Email Id")}
+                register={register("email", {
+                  required: t("vesselDetails.Email is required"),
+                })}
+                errors={errors}
+                disabled={viewMode || (!errors?.email && !!getValues("email"))}
+              />
+            </Col>
+            <Col md={4}>
+              <InputText
+                label={t("vesselDetails.PAN")}
+                required={true}
+                name="pan"
+                placeholder={t("vesselDetails.Please enter PAN")}
+                register={register("pan", {
+                  required: t("vesselDetails.PAN is required"),
+                })}
+                errors={errors}
+                disabled={viewMode || (!errors?.pan && !!getValues("pan"))}
+              />
+            </Col>
+            <Col md={4}>
+              <InputText
+                label={t("vesselDetails.Aadhar")}
+                required={true}
+                name="aadhar"
+                placeholder={t("vesselDetails.Please enter Aadhar")}
+                register={register("aadhar", {
+                  required: t("vesselDetails.Aadhar is required"),
+                })}
+                errors={errors}
+                maxLength={12}
+                disabled={
+                  viewMode || (!errors?.aadhar && !!getValues("aadhar"))
+                }
+              />
+            </Col>
+            <Col md={4}>
+              <InputText
+                label={t("vesselDetails.Trade Licence")}
+                required={true}
+                name="tradeLicence"
+                placeholder={t("vesselDetails.Please enter Trade Licence")}
+                register={register("tradeLicence", {
+                  required: t("vesselDetails.Trade Licence is required"),
+                })}
+                errors={errors}
+                disabled={
+                  viewMode ||
+                  (!errors?.tradeLicence && !!getValues("tradeLicence"))
+                }
+              />
+            </Col>
+            {
+              JSON.parse(getFromLocalStorage("ownerDetails") || "{}")
+                    ?.categoryOfOwner !== "INDIVIDUAL" && getValues("gst") && 
+                    getValues("gst").trim() !== "" && (
+                        <Col md={4}>
+              <InputText
+                label={t("vesselDetails.GST")}
+                required={
+                  JSON.parse(getFromLocalStorage("ownerDetails") || "{}")
+                    ?.categoryOfOwner !== "INDIVIDUAL"
+                }
+                name="gst"
+                placeholder={t("vesselDetails.Please enter GST")}
+                register={register("gst", {
+                  required:
+                    JSON.parse(getFromLocalStorage("ownerDetails") || "{}")
+                      ?.categoryOfOwner !== "INDIVIDUAL"
+                      ? t("vesselDetails.GST is required")
+                      : false,
+                })}
+                errors={errors}
+                disabled={viewMode || (!errors?.gst && !!getValues("gst"))}
+              />
+            </Col>
+
+                    )
+            }
+          
+          </Row>
+        </Collapsible>
+
+        <Collapsible
+          title={
+            <div className="d-flex align-items-center">
+              <FaShip className="me-2" style={{ color: "#2466BF" }} />
+              <span style={{ color: "#2466BF" }}>{t("Vessel Details")}</span>
+            </div>
+          }
+          openStat={true}
+        >
+          <Row className="gy-3" style={{ padding: "1rem" }}>
+            <Col md={4}>
+              <InputSelect
+                label={t("vesselDetails.Type of Vessel")}
+                required={true}
+                name="vesselType"
+                options={[
+                  {
+                    value: "",
+                    label: "-- Select --",
+                  },
+                  ...(masterData?.vesselTypes?.map((type) => ({
+                    value: type?.valueCode,
+                    label: type?.valueLabel,
+                  })) || []),
+                ]}
+                register={register("vesselType", {
+                  required: t("vesselDetails.vesselType is required"),
+                })}
+                errors={errors}
+                value={formData.vesselType || watch("vesselType") || ""}
+                onChange={(value) =>
+                  !viewMode && handleDropdownChange("vesselType", value)
+                }
+                disabled={viewMode}
+              />
+            </Col>
+            <Col md={4}>
+              <InputSelect
+                label={t("vesselDetails.Category")}
+                required={true}
+                name="category"
+                options={[
+                  {
+                    value: "",
+                    label: "-- Select --",
+                  },
+                  ...(masterData?.vesselCategories?.map((type) => ({
+                    value: type.valueCode,
+                    label: type.valueLabel,
+                  })) || []),
+                ]}
+                register={register("category", {
+                  required: t("vesselDetails.category is required"),
+                })}
+                errors={errors}
+                value={formData.category || watch("category") || ""}
+                onChange={(value) =>
+                  !viewMode && handleDropdownChange("category", value)
+                }
+                disabled={viewMode}
+              />
+            </Col>
+            <Col md={4}>
+              <InputSelect
+                label={t("vesselDetails.Zone")}
+                required={true}
+                name="zone"
+                options={[
+                  {
+                    value: "",
+                    label: "-- Select --",
+                  },
+                  ...(masterData?.zones?.map((type) => ({
+                    value: type.valueCode,
+                    label: type.valueLabel,
+                  })) || []),
+                ]}
+                register={register("zone", {
+                  required: category !== "A" && t("zone is required"),
+                })}
+                errors={errors}
+                value={formData.zone || watch("zone") || ""}
+                onChange={(value) =>
+                  !viewMode &&
+                  category !== "A" &&
+                  handleDropdownChange("zone", value)
+                }
+                disabled={viewMode || category === "A"}
+                style={{
+                  backgroundColor: category === "A" ? "#f8f9fa" : "",
+                  cursor: category === "A" ? "not-allowed" : "pointer",
+                }}
+              />
+            </Col>
+
+            <Col md={4}>
+              <InputSelect
+                label={t("vesselDetails.Supervision Authority")}
+                required={true}
+                name="supervisionAuthority"
+                options={[
+                  {
+                    value: "",
+                    label: "-- Select --",
+                  },
+                  ...(masterData?.supervisionAuthorites?.map((type) => ({
+                    value: type.valueCode,
+                    label: type.valueLabel,
+                  })) || []),
+                ]}
+                register={register("supervisionAuthority", {
+                  required:
+                    category !== "A" &&
+                    t("vesselDetails.Supervision Authority is required"),
+                })}
+                errors={errors}
+                value={
+                  formData.supervisionAuthority ||
+                  watch("supervisionAuthority") ||
+                  ""
+                }
+                onChange={(value) =>
+                  !viewMode &&
+                  category !== "A" &&
+                  handleDropdownChange("supervisionAuthority", value)
+                }
+                disabled={viewMode || category === "A"}
+                style={{
+                  backgroundColor: category === "A" ? "#f8f9fa" : "",
+                  cursor: category === "A" ? "not-allowed" : "pointer",
+                }}
+              />
+            </Col>
+
+            {(formData?.supervisionAuthority === "CLASSIFICATION SOCIETY" ||
+              watch("supervisionAuthority") === "CLASSIFICATION SOCIETY") && (
+                <Col md={8}>
+                  <InputText
+                    label={t("vesselDetails.Name of the Classification Society")}
+                    name="classificationSociety"
+                    placeholder={t(
+                      "vesselDetails.Please enter Name of the Classification Society"
+                    )}
+                    register={register("classificationSociety")}
+                    errors={errors}
+                    disabled={viewMode}
+                  />
+                </Col>
+              )}
+
+            <Col md={4}>
+              <InputSelect
+                label={t("vesselDetails.Constructed By ?")}
+                required={true}
+                name="constructedBy"
+                options={[
+                  { label: t("vesselDetails.Self"), value: "1" },
+                  { label: t("vesselDetails.Builder"), value: "2" },
+                ]}
+                register={register("constructedBy", {
+                  required: t("vesselDetails.Please select a Constructor Type"),
+                })}
+                rules={{
+                  required: t("vesselDetails.Please select a Constructor Type"),
+                }}
+                errors={errors}
+                value={formData.constructedBy || watch("constructedBy") || ""}
+                onChange={(value) =>
+                  !viewMode && handleDropdownChange("constructedBy", value)
+                }
+                disabled={viewMode}
+              />
+            </Col>
+            {constructedBy === "2" && (
+              <Col md={4}>
+                <InputSelect
+                  label={t("vesselDetails.Builder")}
+                  required={true}
+                  name="builder"
+                  options={[
+                    {
+                      value: "",
+                      label: "-- Select --",
+                    },
+                    ...(masterData?.builderNames?.map((type) => ({
+                      value: type.valueCode,
+                      label: type.valueLabel,
+                    })) || []),
+                  ]}
+                  register={register("builder", {
+                    required: t("vesselDetails.Builder is required"),
+                  })}
+                  errors={errors}
+                  value={formData.builder || watch("builder") || ""}
+                  onChange={(value) =>
+                    !viewMode && handleDropdownChange("builder", value)
+                  }
+                  disabled={viewMode}
+                />
+              </Col>
+            )}
+
+            <Col md={4}>
+              <InputText
+                label={t("vesselDetails.Gross Tonnage (GRT)")}
+                required={true}
+                name="grt"
+                placeholder={t("vesselDetails.Please enter GRT")}
+                register={register("grt", {
+                  required: t("vesselDetails.GRT is required"),
+                })}
+                errors={errors}
+                disabled={viewMode}
+              />
+            </Col>
+            <Col md={4}>
+              <InputText
+                label={
+                  constructedBy === "1"
+                    ? t("vesselDetails.Valuation")
+                    : t("vesselDetails.Work Order Value")
+                }
+                tooltipText={
+                  constructedBy === "1" ? t("vesselDetails.Valution_tt") : ""
+                }
+                required={true}
+                name="workOrderValue"
+                placeholder={t("vesselDetails.Enter Work Order Value")}
+                register={register("workOrderValue", {
+                  required: t("vesselDetails.Work Order Value is required"),
+                  pattern: {
+                    value: /^[0-9]+$/,
+                    message: t("vesselDetails.Please enter a valid number"),
+                  },
+                })}
+                errors={errors}
+                disabled={viewMode}
+              />
+            </Col>
+
+            <Col md={4}>
+              <InputSelect
+                label={t("vesselDetails.Purchase Type")}
+                required={true}
+                name="purchaseType"
+                options={[
+                  {
+                    value: "",
+                    label: "-- Select --",
+                  },
+                  ...(masterData?.purchaseTypes?.map((type) => ({
+                    value: type.valueCode,
+                    label: type.valueLabel,
+                  })) || []),
+                ]}
+                register={register("purchaseType", {
+                  required: t("vesselDetails.Purchase Type is required"),
+                })}
+                errors={errors}
+                value={formData.purchaseType || watch("purchaseType") || ""}
+                onChange={(value) =>
+                  !viewMode && handleDropdownChange("purchaseType", value)
+                }
+                disabled={viewMode}
+              />
+            </Col>
+          </Row>
+        </Collapsible>
+
+        {constructedBy === "2" && (
+          <Collapsible
+            title={
+              <div className="d-flex align-items-center">
+                <FaUser className="me-2" style={{ color: "#2466BF" }} />
+                <span style={{ color: "#2466BF" }}>{t("Builder Details")}</span>
+              </div>
+            }
+            openStat={true}
+          >
+            <Row className="gy-3" style={{ padding: "1rem" }}>
+              <Col md={4}>
+                <InputText
+                  label={t("vesselDetails.Builder Name")}
+                  required={true}
+                  name="builderName"
+                  placeholder={t("vesselDetails.Please enter Builder Name")}
+                  register={register("builderName", {
+                    required: t("vesselDetails.Builder Name is required"),
+                  })}
+                  errors={errors}
+                  disabled={
+                    viewMode ||
+                    (isBuilderDataLoaded && !!getValues("builderName"))
+                  }
+                />
+              </Col>
+              <Col md={4}>
+                <InputText
+                  label={t("vesselDetails.Builder Address")}
+                  required={true}
+                  name="builderAddress"
+                  placeholder={t("vesselDetails.Please enter Builder Address")}
+                  register={register("builderAddress", {
+                    required: t("vesselDetails.Builder Address is required"),
+                  })}
+                  errors={errors}
+                  disabled={
+                    viewMode ||
+                    (isBuilderDataLoaded && !!getValues("builderAddress"))
+                  }
+                />
+              </Col>
+              <Col md={4}>
+                <InputText
+                  label={t("vesselDetails.Builder Email Id")}
+                  required={true}
+                  name="builderEmail"
+                  type="email"
+                  placeholder={t("vesselDetails.Please enter Builder Email Id")}
+                  register={register("builderEmail", {
+                    required: t("vesselDetails.Builder Email is required"),
+                    pattern: {
+                      value: /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i,
+                      message: t("vesselDetails.Invalid email address"),
+                    },
+                  })}
+                  errors={errors}
+                  disabled={
+                    viewMode ||
+                    (isBuilderDataLoaded && !!getValues("builderEmail"))
+                  }
+                />
+              </Col>
+              <Col md={4}>
+                <InputText
+                  label={t("vesselDetails.Mobile")}
+                  required={true}
+                  name="builderMobile"
+                  placeholder={t("vesselDetails.Please enter Mobile")}
+                  register={register("builderMobile", {
+                    required: t("vesselDetails.Builder Mobile is required"),
+                    pattern: {
+                      value: /^[0-9]{10}$/,
+                      message: t("vesselDetails.Invalid mobile number"),
+                    },
+                  })}
+                  errors={errors}
+                  disabled={
+                    viewMode ||
+                    (isBuilderDataLoaded && !!getValues("builderMobile"))
+                  }
+                />
+              </Col>
+              <Col md={4}>
+                <InputText
+                  label={t("vesselDetails.Trade Licence")}
+                  required={true}
+                  name="builderTradeLicence"
+                  placeholder={t("vesselDetails.Please enter Trade Licence")}
+                  register={register("builderTradeLicence", {
+                    required: t(
+                      "vesselDetails.Builder Trade Licence is required"
+                    ),
+                  })}
+                  errors={errors}
+                  disabled={
+                    viewMode ||
+                    (isBuilderDataLoaded && !!getValues("builderTradeLicence"))
+                  }
+                />
+              </Col>
+              <Col md={4}>
+                <InputText
+                  label={t("vesselDetails.GST")}
+                  required={true}
+                  name="builderGST"
+                  placeholder={t("vesselDetails.Please enter GST")}
+                  register={register("builderGST", {
+                    required: t("vesselDetails.Builder GST is required"),
+                  })}
+                  errors={errors}
+                  disabled={
+                    viewMode ||
+                    (isBuilderDataLoaded && !!getValues("builderGST"))
+                  }
+                />
+              </Col>
+              <Col md={4}>
+                <InputSelect
+                  label={t("vesselDetails.Builder Authorization")}
+                  required={true}
+                  name="builderAuth"
+                  options={[
+                    {
+                      value: "",
+                      label: "-- Select --",
+                    },
+                    ...(masterData?.builderAuthorizations?.map((type) => ({
+                      value: type?.valueCode,
+                      label: type?.valueLabel,
+                    })) || []),
+                  ]}
+                  register={register("builderAuth", {
+                    required: t(
+                      "vesselDetails.Builder Authorization is required"
+                    ),
+                  })}
+                  errors={errors}
+                  value={formData?.builderAuth || watch("builderAuth") || ""}
+                  onChange={(value) =>
+                    !viewMode && handleDropdownChange("builderAuth", value)
+                  }
+                  disabled={viewMode}
+                />
+              </Col>
+              <Col md={6}>
+                {viewMode ? (
+                  watch("authLetter") && watch("authLetter").name ? (
+                    <div className="mb-3">
+                      <label
+                        className="form-label fw-bold"
+                        style={{ fontSize: "0.9rem" }}
+                      >
+                        {t("Authorization Letter")}
+                      </label>
+                      <div className="p-2 p-sm-3 border rounded bg-light">
+                        <div className="d-flex flex-column flex-sm-row justify-content-between align-items-start align-items-sm-center gap-2">
+                          <div className=" min-width-0">
+                            <div
+                              className="fw-semibold text-primary mb-1"
+                              style={{
+                                fontSize: "0.8rem",
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap",
+                              }}
+                            >
+                              {watch("authLetter").name}
+                            </div>
+                            <small
+                              className="text-muted"
+                              style={{ fontSize: "0.7rem" }}
+                            >
+                              {(
+                                (watch("authLetter").size || 0) /
+                                1024 /
+                                1024
+                              ).toFixed(1)}{" "}
+                              MB
+                            </small>
+                          </div>
+                          <button
+                            type="button"
+                            className="btn btn-outline-success btn-sm d-flex align-items-center flex-shrink-0"
+                            style={{ fontSize: "0.75rem", padding: "4px 8px" }}
+                            onClick={() =>
+                              fetchAndViewFile(watch("authLetterFileStoreId") || "")
+                            }
+                          >
+                            <BsEyeFill size={12} className="me-1" />
+                            <span>{t("View")}</span>
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-outline-primary btn-sm d-flex align-items-center flex-shrink-0"
+                            style={{ fontSize: "0.75rem", padding: "4px 8px" }}
+                            onClick={() =>
+                              handleDownload(
+                                watch("authLetterFileStoreId"),
+                                watch("authLetter").name
+                              )
+                            }
+                          >
+                            <BsDownload size={12} className="me-1" />
+                            <span>{t("Download")}</span>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="mb-3">
+                      <label
+                        className="form-label fw-bold"
+                        style={{ fontSize: "0.9rem" }}
+                      >
+                        {t("Authorization Letter")}
+                      </label>
+                      <div
+                        className="p-2 p-sm-3 border rounded bg-light text-muted text-center"
+                        style={{ fontSize: "0.8rem" }}
+                      >
+                        {t("No file uploaded")}
+                      </div>
+                    </div>
+                  )
+                ) : (
+                  <div className="mb-2" style={{ display: "flex" }}>
+                    <InputFile
+                      style={{ width: "100%" }}
+                      label={t("Authorization Letter")}
+                      required={formData?.builderAuth?.toLowerCase() === "y"}
+                      name="authLetter"
+                      register={register("authLetter", {
+                        required:
+                          formData?.builderAuth?.toLowerCase() === "y"
+                            ? t(
+                              "vesselDetails.Authorization Letter is required"
+                            )
+                            : false,
+                      })}
+                      errors={errors}
+                      onChange={(e) => {
+                        if (viewMode) return;
+                        if (e.target.files?.[0]) {
+                          handleFileChange("authLetter", e.target.files[0]);
+                        }
+                      }}
+                      disabled={viewMode}
+                      watch={watch}
+                      defaultValue={watch("authLetter")}
+                      clearErrors={clearErrors}
+                      accept=".pdf,.jpg,.jpeg,.png"
+                    />
+
+                    {watch("authLetter") && !viewMode && (
+                      <FaTimesCircle
+                        className={`${styles.crossIcon} text-danger position-relative`}
+                        size={18}
+                        title="Remove file"
+                        onClick={handleRemoveAuthLetter}
+                      />
+                    )}
+                  </div>
+                )}
+
+                {editMode && watch("authLetter") && (
+                  <div
+                    className=" text-end gap-1"
+                    style={{
+                      display: "flex",
+                      justifyContent: "flex-end",
+                      marginRight: "0.9rem",
+                    }}
+                  >
+                    <button
+                      type="button"
+                      className="btn btn-outline-success btn-sm rounded-pill d-flex align-items-center"
+                      style={{ fontSize: "0.65rem", padding: "4px 8px" }}
+                      onClick={() =>
+                        fetchAndViewFile(
+                          watch("authLetterFileStoreId") || ""
+                        )
+                      }
+                    >
+                      <BsEyeFill size={10} />
+                      <span className="ms-1">View</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-outline-primary btn-sm rounded-pill d-flex align-items-center"
+                      style={{ fontSize: "0.65rem", padding: "4px 8px" }}
+                      onClick={() =>
+                        handleDownload(
+                          watch("authLetterFileStoreId"),
+                          watch("authLetter").name
+                        )
+                      }
+                    >
+                      <BsDownload size={10} />
+                      <span className="ms-1">Download</span>
+                    </button>
+                  </div>
+                )}
+              </Col>
+            </Row>
+          </Collapsible>
+        )}
+      </form>
+    </>
+  );
+};
+
+export default VesselDetails;
+import React, { useState, useEffect, useRef } from "react";
+import { useSearchParams } from "react-router-dom";
+import { Box, Typography, Stack } from "@mui/material";
+import { useParams, useLocation, useNavigate } from "react-router-dom";
+import Stepper from "../../../common/Stepper.jsx";
+import VesselDetails from "./VesselDetails.js";
+import Documents from "./Documents.js";
+import NoteSheet from "./NoteSheet.js";
+import { useForm } from "react-hook-form";
+import Invoicing from "../../../common/Invoicing.js";
+import PaymentModal from "../../../common/PaymentModal.js";
+import ApprovalModal from "../../../common/ApprovalModal";
+import NewVesselRegistrationSuccess from "./newVesselRegistrationSuccess.js";
+import { useTranslation } from "react-i18next";
+import { toast } from "react-toastify";
+import { Button } from "react-bootstrap";
+import { BsSticky, BsArrowLeft } from "react-icons/bs";
+// import PaymentDetailsView from "./paymentDetailsView.js";
+import { getFromLocalStorage } from "../../../../utils/localStorageUtils.js";
+import { handleErrorMessage } from "../../../../utils/errorMessageHandler.js";
+import { postData, postFORMdata } from "../../../../services/http.service.ts";
+import {
+  SERVICE_BASE,
+  URLS_ENDPOINT,
+} from "../../../../utils/urlsConstants.ts";
+import NewLoader from "../../../common/NewLoader.js";
+import { faL } from "@fortawesome/free-solid-svg-icons";
+
+const NewVesselRegistration = () => {
+  const { t } = useTranslation();
+  // const { id } = useParams();
+  const [searchParams] = useSearchParams();
+  const id = searchParams.get("applicationNo");
+  const location = useLocation();
+  const navigate = useNavigate();
+  const ownerDetails = getFromLocalStorage("ownerDetails")
+    ? JSON.parse(getFromLocalStorage("ownerDetails"))
+    : "";
+  const isEditMode = !!id && location.pathname.includes("/edit");
+  const isViewMode = !!id && location.pathname.includes("/view");
+  const isNormalMode = !isEditMode && !isViewMode;
+  const stepperRef = useRef();
+
+  const methods = useForm({ mode: "onTouched" });
+  const {
+    trigger,
+    getValues,
+    watch,
+    setError,
+    setValue,
+    reset,
+    clearErrors,
+    formState: { errors },
+  } = methods;
+
+  const [showModal, setShowModal] = useState(false);
+  const [paymentMode, setPaymentMode] = useState("offline");
+  const [challanFile, setChallanFile] = useState(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [showApprovalModal, setShowApprovalModal] = useState(false);
+  const [selectedAction, setSelectedAction] = useState("");
+  const [showNoteSheet, setShowNoteSheet] = useState(false);
+  const [paymentData, setPaymentData] = useState(null);
+  const [parentWorkOrderFiles, setParentWorkOrderFiles] = useState([{ id: 1 }]);
+  const [parentDrawingsFiles, setParentDrawingsFiles] = useState([{ id: 1 }]);
+
+  const loaderRef = useRef();
+
+  const [vesselRegisData, setVesselRegisData] = useState({});
+
+  const [originalGRT, setOriginalGRT] = useState(null);
+  const [fullPaymentData, setFullPaymentData] = useState({});
+  const initialNotes = [
+    {
+      id: 1,
+      title: "Initial Review",
+      content:
+        "Document verification completed successfully. All required documents are present and properly formatted.",
+      date: "2024-01-15",
+      author: "John Doe",
+    },
+    {
+      id: 2,
+      title: "Technical Assessment",
+      content:
+        "All technical drawings have been reviewed and approved by the engineering team.",
+      date: "2024-01-16",
+      author: "Jane Smith",
+    },
+  ];
+  const fetchRegistrationData = async () => {
+    if (!isEditMode && !isViewMode) return;
+
+    try {
+      loaderRef?.current?.show();
+      const payload = {
+        applicationNumbers: [id],
+        // applicationNumber: "REG-2025-782674"
+      };
+
+      const apiUrl =
+        SERVICE_BASE.IWT_REGISTRATION +
+        URLS_ENDPOINT.USER_SERVICE.REGISTRATION_SEARCH_BY_ID;
+      const response = await postData(apiUrl, payload);
+
+      // if (response?.status === 200 && response?.data?.responseStatus?.status === "Registration details fetched successfully") {
+      if (response?.status === 200) {
+        const data = response?.data?.data[0];
+        setVesselRegisData(data);
+
+        const { basicDetails, vesselDetails, documents } = data;
+
+        // Owner details
+        if (basicDetails?.ownerDetails) {
+          const owner = basicDetails?.ownerDetails;
+          setValue("ownerName", owner?.ownerCompanyName || "");
+          setValue(
+            "ownerAddress",
+            `${owner?.addressLine1 || ""}, ${
+              owner?.addressLine2 || ""
+            }`.replace(/^,\s*|,\s*$/g, "")
+          );
+          setValue("mobile", owner?.phoneNumber || "");
+          setValue("email", owner?.emailId || "");
+          setValue("pan", owner?.panNo || "");
+          setValue("aadhar", owner?.aadharNumber || "");
+          setValue("tradeLicence", owner?.tradeLicenseNumber || "");
+          setValue("gst", owner?.gstNo || "");
+        }
+
+        // Vessel details
+        if (vesselDetails) {
+          setValue("grt", vesselDetails.grossTonnage?.toString() || "");
+          setValue("workOrderValue", vesselDetails.workOrderValue || "");
+          setValue("vesselType", vesselDetails.typeOfVessel || "");
+          setValue("category", vesselDetails.categoryOfVessel || "");
+          setValue("zone", vesselDetails.zone || "");
+          setValue(
+            "supervisionAuthority",
+            vesselDetails.supervisionAuthority || ""
+          );
+          setValue("purchaseType", vesselDetails.purchaseType || "");
+          setValue(
+            "classificationSociety",
+            vesselDetails.nameOfClassificationSociety || ""
+          );
+
+          if (isEditMode) {
+            setOriginalGRT(vesselDetails.grossTonnage?.toString() || "");
+          }
+        }
+
+        // Builder details
+        if (basicDetails?.builderDetails && basicDetails.builderDetails.id) {
+          const builder = basicDetails.builderDetails;
+          setValue("constructedBy", "2");
+          setValue("builder", builder.id || "");
+          setValue("builderName", builder.builderName || "");
+          setValue(
+            "builderAddress",
+            `${builder.addressLine1 || ""}, ${
+              builder.addressLine2 || ""
+            }`.replace(/^,\s*|,\s*$/g, "")
+          );
+          setValue("builderEmail", builder.emailId || "");
+          setValue("builderMobile", builder.phone || "");
+          setValue("builderTradeLicence", builder.tradeLicenseNumber || "");
+          setValue("builderGST", builder.gstNo || "");
+          setValue("builderAuth", basicDetails.builderAuthorization || "");
+        } else {
+          setValue("constructedBy", "1");
+        }
+
+        // Authorization letter
+        if (basicDetails?.authorizationLetter) {
+          const authLetter = basicDetails.authorizationLetter;
+          setValue("authLetter", {
+            name: authLetter.documentName,
+            size: 256000,
+            fileViewURL: authLetter?.fileViewURL || "",
+          });
+          setValue("authLetterFileStoreId", authLetter.fileStoreId);
+        }
+
+        // Documents
+        if (documents && documents.length > 0) {
+          let workOrderIndex = 1;
+          let drawingIndex = 1;
+
+          documents.forEach((doc) => {
+            if (doc.documentType === "TONNAGE_BOOKLETS") {
+              setValue("TONNAGE_BOOKLETS", {
+                name: doc.documentName,
+                size: 512000,
+                fileViewURL: doc?.fileViewURL || "",
+              });
+              setValue("TONNAGE_BOOKLETS_fileStoreId", doc.fileStoreId);
+            } else if (doc.documentType === "STABILITY_BOOKLETS") {
+              setValue("STABILITY_BOOKLETS", {
+                name: doc.documentName,
+                size: 768000,
+                fileViewURL: doc?.fileViewURL || "",
+              });
+              setValue("STABILITY_BOOKLETS_fileStoreId", doc.fileStoreId);
+            } else if (doc.documentType === "WORK_ORDER") {
+              setValue(`WORK_ORDER_file_${workOrderIndex}`, {
+                name: doc.documentName,
+                size: 1200000,
+                fileViewURL: doc?.fileViewURL || "",
+              });
+              setValue(
+                `WORK_ORDER_desc_${workOrderIndex}`,
+                doc.description || "Work order document"
+              );
+              setValue(
+                `WORK_ORDER_fileStoreId_${workOrderIndex}`,
+                doc.fileStoreId
+              );
+              workOrderIndex++;
+            } else if (doc.documentType === "DRAWINGS") {
+              setValue(`DRAWINGS_file_${drawingIndex}`, {
+                name: doc.documentName,
+                size: 2100000,
+                fileViewURL: doc?.fileViewURL || "",
+              });
+              setValue(
+                `DRAWINGS_desc_${drawingIndex}`,
+                doc.description || "Technical drawing"
+              );
+              setValue(`DRAWINGS_fileStoreId_${drawingIndex}`, doc.fileStoreId);
+              drawingIndex++;
+            }
+          });
+        }
+
+        setValue("termsAccepted", true);
+      }
+    } catch (err) {
+      console.error("Failed to fetch registration data:", err);
+      toast.error("Failed to fetch registration data");
+    } finally {
+      loaderRef?.current?.hide();
+    }
+  };
+
+  useEffect(() => {
+    if (isNormalMode) {
+      reset();
+    } else if (isEditMode || isViewMode) {
+      fetchRegistrationData();
+    }
+  }, [isEditMode, isViewMode, isNormalMode, setValue, reset]);
+
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      if (!ownerDetails || !isNormalMode) return;
+
+      const userInfoFields = {
+        ownerName: ownerDetails.ownerCompanyName || "",
+        ownerAddress: [ownerDetails.addressLine1, ownerDetails.addressLine2]
+          .filter(Boolean)
+          .join(" , "),
+        mobile: ownerDetails.phoneNumber || "",
+        email: ownerDetails.emailId || "",
+        pan: ownerDetails.panNo || "",
+        gst: ownerDetails.gstNo || "",
+        category: ownerDetails.categoryOfOwner || "",
+        aadhar: ownerDetails.aadharNumber || "",
+        tradeLicence: ownerDetails.tradeLicenseNumber || "",
+      };
+
+      Object.entries(userInfoFields).forEach(([key, value]) => {
+        setValue(key, value, { shouldDirty: false, shouldTouch: false });
+      });
+    });
+
+    return () => clearTimeout(timeoutId);
+  }, []);
+
+  // const getSortedFileIndex = (obj, term) => {
+  //   return Object.keys(obj)
+  //     .filter(key => key.startsWith(term))
+  //     .map(key => key.split("_").pop())
+  //     .sort((a, b) => {
+  //       const numA = Number(a), numB = Number(b);
+  //       if (!isNaN(numA) && !isNaN(numB)) {
+  //         return numA - numB; // numeric sort
+  //       }
+  //       return a.localeCompare(b); // string sort
+  //     });
+  // }
+
+  const validateDocuments = async () => {
+    if (isViewMode) return true;
+    //  if (isNormalMode) return true;
+
+    let hasErrors = false;
+    const requiredFields = [];
+    const tonnageBooklets = getValues("TONNAGE_BOOKLETS");
+    const stabilityBooklets = getValues("STABILITY_BOOKLETS");
+    const termsAccepted = getValues("termsAccepted");
+    const currentGRT = getValues("grt");
+
+    const isFilePresent = (fileObj) =>
+      !!fileObj && (fileObj.name || fileObj.filestoreId);
+
+    // Check if GRT changed in edit mode
+    if (
+      isEditMode &&
+      originalGRT !== null &&
+      currentGRT !== undefined &&
+      String(currentGRT) !== String(originalGRT)
+    ) {
+      if (!isFilePresent(tonnageBooklets)) {
+        requiredFields.push("TONNAGE_BOOKLETS");
+      }
+      if (!isFilePresent(stabilityBooklets)) {
+        requiredFields.push("STABILITY_BOOKLETS");
+      }
+    }
+
+    if (!termsAccepted) {
+      setError("termsAccepted", {
+        type: "required",
+        message: "Terms and Conditions must be accepted",
+      });
+      hasErrors = true;
+    }
+
+    requiredFields.forEach((fieldName) => {
+      const fieldValue = getValues(fieldName);
+      if (
+        !fieldValue ||
+        (fieldValue instanceof FileList && fieldValue.length === 0)
+      ) {
+        setError(fieldName, {
+          type: "required",
+          message: `${fieldName} is required`,
+        });
+        hasErrors = true;
+      }
+    });
+
+    Object.keys(getValues()).forEach((fieldName) => {
+      if (
+        !requiredFields.includes(fieldName) &&
+        fieldName !== "termsAccepted"
+      ) {
+        clearErrors(fieldName);
+      }
+    });
+
+    // Validation for dynamic work order and drawing files
+    const formData = watch();
+    // console.log("formData", formData);
+    const files = extractDocuments(formData);
+    // console.log("extracted files", files);
+
+    const localWorkOrderFiles = files.filter(
+      (file) => file.documentType === "WORK_ORDER" && file.fileStoreId
+    );
+    if (localWorkOrderFiles.length === 0) {
+      // const indexes = getSortedFileIndex(formData, "WORK_ORDER_file_");
+      // console.log("Work Order file indexes:", indexes);
+      if (parentWorkOrderFiles?.length > 0) {
+        setError(`WORK_ORDER_file_${parentWorkOrderFiles[0]?.id}`, {
+          type: "required",
+          message: "Work Order file is required",
+        });
+        hasErrors = true;
+      }
+    }
+    const localDrawingFiles = files.filter(
+      (file) => file.documentType === "DRAWINGS" && file.fileStoreId
+    );
+    if (localDrawingFiles.length === 0) {
+      // const indexes = getSortedFileIndex(formData, "DRAWINGS_file_");
+      // console.log("Drawing file indexes:", indexes);
+      if (parentDrawingsFiles?.length > 0) {
+        setError(`DRAWINGS_file_${parentDrawingsFiles[0]?.id}`, {
+          type: "required",
+          message: "Drawing file is required",
+        });
+        hasErrors = true;
+      }
+    }
+
+    return !hasErrors;
+  };
+
+  console.log("errorsss", errors);
+
+  const handleActionClick = (action) => {
+    setSelectedAction(action);
+    setShowApprovalModal(true);
+  };
+
+  const handleActionSubmit = (formData) => {
+    const payload = {
+      action: selectedAction,
+      comments: formData.comments,
+    };
+
+    toast.success(`${selectedAction} action submitted successfully`);
+
+    setShowApprovalModal(false);
+    setSelectedAction("");
+  };
+
+  const handleCloseModal = () => {
+    setShowApprovalModal(false);
+    setSelectedAction("");
+  };
+
+  // const handleChallanUpload = (e) => {
+  //   setChallanFile(e.target.files?.[0] || null);
+  // };
+
+  // const handleOnlinePay = () => {
+  //   setIsLoading(true);
+  //   setShowModal(false);
+
+  //   setTimeout(() => {
+  //     setIsLoading(false);
+  //     navigate("/new-vessel/registration-success", {
+  //       state: { registrationId: "VR2024001" },
+  //     });
+  //   }, 1500);
+  // };
+
+  const handlePayNow = () => {
+    navigate(`/payment?paymentId=${vesselRegisData?.applicationNumber}`, {
+      state: {
+        paymentData,
+        applicationNumber: vesselRegisData.applicationNumber,
+        fullPaymentData,
+      },
+    });
+  };
+
+  const validateVesselDetails = async () => {
+    if (isViewMode) return true;
+    const basicFields = [
+      "ownerName",
+      "ownerAddress",
+      "mobile",
+      "email",
+      "pan",
+      "aadhar",
+      "tradeLicence",
+      "gst",
+      "grt",
+      "workOrderValue",
+      "vesselType",
+      "category",
+      "purchaseType",
+      "constructedBy",
+    ];
+
+    const constructedBy = getValues("constructedBy");
+    if (constructedBy === "2") {
+      basicFields.push(
+        "builderName",
+        "builderAddress",
+        "builderEmail",
+        "builderMobile",
+        "builderTradeLicence",
+        "builderGST",
+        "builderAuth"
+      );
+
+      const authLetter = getValues("authLetter");
+      if (!authLetter && !isEditMode) {
+        basicFields.push("authLetter");
+      }
+    }
+
+    const valid = await trigger(basicFields);
+    return valid;
+  };
+
+  const tonnageRequired =
+    isEditMode &&
+    originalGRT !== null &&
+    getValues("grt") !== undefined &&
+    String(getValues("grt")) !== String(originalGRT) &&
+    !getValues("TONNAGE_BOOKLETS");
+
+  const stabilityRequired =
+    isEditMode &&
+    originalGRT !== null &&
+    getValues("grt") !== undefined &&
+    String(getValues("grt")) !== String(originalGRT) &&
+    !getValues("STABILITY_BOOKLETS");
+
+  const supervisionAuthority = methods.watch("supervisionAuthority");
+
+  const fetchPaymentDetails = async () => {
+    try {
+      const payload = {
+        category: "REG_DRAWINGAPPROVAL",
+        paymentProcess: "DRAWINGAPPROVAL",
+        application_no: vesselRegisData?.applicationNumber || "",
+      };
+
+      const apiUrl =
+        SERVICE_BASE.IWT_REGISTRATION +
+        URLS_ENDPOINT.VESSEL_SERVICE.PAYMENT_GENERATE;
+      const response = await postData(apiUrl, payload);
+
+      if (
+        response?.status === 200 &&
+        response?.data?.responseStatus?.status === "FeeSlab found successfully"
+      ) {
+        const apiData = response.data.data;
+
+        const formattedData = {
+          invoiceBreakupInfo:
+            apiData.feesDetailsl?.map((fee, index) => ({
+              id: fee.id || index.toString(),
+              label: fee.category_description || fee.category_name,
+              amount: fee.totalCalucation || fee.old_data,
+              categoryHeader: fee.catHeaderName,
+            })) || [],
+          summary: {
+            subTotal: apiData.totalAmount || 0,
+            cgst: apiData.cgst || 0,
+            sgst: apiData.sgst || 0,
+            igst: apiData.igst || 0,
+            totalPayable: apiData.totalAmountAtergst || 0,
+          },
+        };
+
+        setPaymentData(formattedData);
+        setFullPaymentData(response.data);
+      }
+    } catch (error) {
+      console.error("Error fetching payment details:", error);
+    }
+  };
+
+  const steps = isViewMode
+    ? [
+        {
+          label: t("Vessel Details"),
+          component: (
+            <VesselDetails
+              formMethods={methods}
+              viewMode={isViewMode}
+              editMode={isEditMode}
+              vesselRegisData={vesselRegisData}
+            />
+          ),
+          validate: validateVesselDetails,
+        },
+        {
+          label: t("Documents"),
+          component: (
+            <Documents
+              formMethods={methods}
+              viewMode={isViewMode}
+              editMode={isEditMode}
+              vesselRegisData={vesselRegisData}
+              // parentWorkOrderFiles={parentWorkOrderFiles}
+              setParentWorkOrderFiles={setParentWorkOrderFiles}
+              // parentDrawingsFiles={parentDrawingsFiles}
+              setParentDrawingsFiles={setParentDrawingsFiles}
+            />
+          ),
+          validate: validateDocuments,
+        },
+        // {
+        //   label: t("Payment Details"),
+        //   component: (
+        //     <PaymentDetailsView
+        //       supervisionAuthority={supervisionAuthority}
+        //       formData={methods.getValues()}
+        //       vesselRegisData={vesselRegisData}
+        //     />
+        //   ),
+        //   validate: () => true,
+        // },
+      ]
+    : [
+        {
+          label: t("vesselDetails.Vessel Details"),
+          component: (
+            <VesselDetails
+              formMethods={methods}
+              viewMode={isViewMode}
+              editMode={isEditMode}
+              vesselRegisData={vesselRegisData}
+            />
+          ),
+          validate: validateVesselDetails,
+          getFormData: () => methods?.getValues(),
+        },
+        {
+          label: t("vesselDetails.Documents"),
+          component: (
+            <Documents
+              formMethods={methods}
+              viewMode={isViewMode}
+              editMode={isEditMode}
+              vesselRegisData={vesselRegisData}
+              tonnageRequired={tonnageRequired}
+              stabilityRequired={stabilityRequired}
+              // parentWorkOrderFiles={parentWorkOrderFiles}
+              setParentWorkOrderFiles={setParentWorkOrderFiles}
+              // parentDrawingsFiles={parentDrawingsFiles}
+              setParentDrawingsFiles={setParentDrawingsFiles}
+            />
+          ),
+          validate: validateDocuments,
+          getFormData: () => methods?.getValues(),
+        },
+        //  {
+        //   label : t("Preview"),
+        //   component: <VesselRegistrationPreview formData={methods.getValues()} isPreview={true}
+        // />
+        // },
+        {
+          label: t("vesselDetails.Invoicing"),
+          component: (
+            <Invoicing
+              supervisionAuthority={supervisionAuthority}
+              onPayNow={handlePayNow}
+              vesselRegisData={vesselRegisData}
+              paymentData={paymentData}
+            />
+          ),
+          showPayBtn: paymentData?.summary?.totalPayable > 0,
+          showCloseButton: paymentData?.summary?.totalPayable === 0,
+          validate: () => paymentData?.summary?.totalPayable > 0,
+        },
+      ];
+
+  const extractDocuments = (formData) => {
+    const documents = [];
+    // console.log("vesselRegisData", vesselRegisData);
+    const existingDocs = vesselRegisData?.documents || [];
+    // console.log("existingDocs", existingDocs);
+    const staticDocs = [
+      {
+        key: "TONNAGE_BOOKLETS",
+        name: "Tonnage Booklet",
+        description: "Tonnage document",
+      },
+      {
+        key: "STABILITY_BOOKLETS",
+        name: "Stability Booklet",
+        description: "Stability document",
+      },
+    ];
+
+    staticDocs.forEach(({ key, name, description }) => {
+      const fileStoreId = formData?.[`${key}_fileStoreId`];
+      const fileObj = formData?.[key];
+      const existingDoc = existingDocs?.find((doc) => doc.documentType === key);
+      if (fileStoreId) {
+        documents.push({
+          id: existingDoc?.id || "",
+          fileStoreId,
+          documentName: fileObj?.name || name,
+          documentType: key,
+          documentSource: key,
+          description,
+          fileViewURL: existingDocs?.fileViewURL || "",
+        });
+      }
+    });
+
+    const dynamicTypes = ["WORK_ORDER", "DRAWINGS"];
+    dynamicTypes.forEach((type) => {
+      Object.keys(formData)
+        .filter((key) => key.startsWith(`${type}_fileStoreId_`))
+        .forEach((storeKey) => {
+          const index = storeKey.split("_").pop();
+          const fileStoreId = formData[storeKey];
+          const description = formData[`${type}_desc_${index}`] || "";
+          const fileObj = formData?.[`${type}_file_${index}`];
+          const existingDoc = existingDocs.find(
+            (doc) =>
+              doc.documentType === type &&
+              doc.documentName?.includes(index.padStart(2, "0"))
+          );
+
+          if (fileStoreId) {
+            documents.push({
+              id: existingDoc?.id || "",
+              fileStoreId,
+              documentName:
+                // fileObj?.name || `${type}_${index.padStart(2, "0")}.pdf`,
+                fileObj?.name,
+              documentType: type,
+              documentSource: type,
+              description,
+              fileViewURL: existingDocs?.fileViewURL || "",
+            });
+          }
+        });
+    });
+    //   if (vesselRegisData && vesselRegisData?.documents?.length > 0) {
+    //   let existingDocs = new Map();
+    //   vesselRegisData?.documents?.forEach((doc) => {
+    //     existingDocs?.set(doc?.fileStoreId, doc);
+    //   });
+
+    //   const updatedCurrentDocs = documents?.map((doc) => {
+    //     const match = existingDocs?.get(doc?.fileStoreId);
+    //     if (match) {
+    //       return {
+    //         ...doc,
+    //         id: match?.id,
+    //         applicationNumber: match?.applicationNumber,
+    //       };
+    //     }
+    //     return doc;
+    //   });
+
+    //   documents = updatedCurrentDocs?.length > 0 ? [...updatedCurrentDocs] : documents;
+    // }
+
+    return documents;
+  };
+  //--- SAVE / UPDATE  API CALLS ------------
+  // const onVesselRegisFormSubmit = async (stepInfo) => {
+  //   const formValues = stepInfo?.getFormData?.() || {};
+  //   //-- First Step or Second Step
+  //   if (stepInfo.index === 0 || stepInfo.index === 1) {
+  //     let request = {
+  //       id: vesselRegisData?.id || vesselRegisData?.basicDetails?.id || "", //-- UPDATE
+  //       applicationNumber: vesselRegisData?.applicationNumber || "", //-- UPDATE
+  //       basicDetails: {
+  //         id: vesselRegisData?.basicDetails?.id || "", //-- UPDATE
+  //         applicationNumber: vesselRegisData?.applicationNumber || "", //-- UPDATE
+  //         status: vesselRegisData?.basicDetails?.status || "", //-- UPDATE
+  //         constructedBy: formValues?.constructedBy,
+  //         ownerDetails: {
+  //           id: vesselRegisData?.basicDetails?.ownerDetails?.id || ownerDetails?.id,
+  //         },
+  //         builderDetails: {
+  //           id: vesselRegisData?.basicDetails?.builderDetails?.id || formValues?.builder || null,
+  //         },
+  //         builderAuthorization: formValues?.builderAuth,
+  //         authorizationLetter: {
+  //           id: vesselRegisData?.basicDetails?.authorizationLetter?.id || "", //-- UPDATE
+  //           fileStoreId: formValues?.authLetterFileStoreId,
+  //           documentName: "Authorization_Letter.pdf",
+  //           documentType: "AUTHORIZATION_LETTER",
+  //           documentSource: "AUTHORIZATION_LETTER",
+  //           descriptions: "",
+  //         },
+  //       },
+  //       vesselDetails: {
+  //         id: vesselRegisData?.vesselDetails?.id || "",
+  //         typeOfVessel: formValues?.vesselType,
+  //         categoryOfVessel: formValues?.category,
+  //         zone: formValues?.zone,
+  //         grossTonnage: formValues?.grt,
+  //         workOrderValue: formValues?.workOrderValue,
+  //         purchaseType: formValues?.purchaseType,
+  //         supervisionAuthority: formValues?.supervisionAuthority,
+  //         nameOfMaster: vesselRegisData?.vesselDetails?.nameOfMaster || "",
+  //         certficateNumber: vesselRegisData?.vesselDetails?.certficateNumber || "",
+  //         nameOfRegistry: vesselRegisData?.vesselDetails?.nameOfRegistry || "",
+  //         registrationNumber: vesselRegisData?.vesselDetails?.registrationNumber || "",
+  //         vesselName: vesselRegisData?.vesselDetails?.vesselName || "",
+  //         kindOfVessel: vesselRegisData?.vesselDetails?.kindOfVessel || "",
+  //         mortgage: vesselRegisData?.vesselDetails?.mortgage || "",
+  //         placeOfBuild: vesselRegisData?.vesselDetails?.placeOfBuild || "",
+  //         insuranceDetails: vesselRegisData?.vesselDetails?.insuranceDetails || "",
+  //         yearOfBuild: vesselRegisData?.vesselDetails?.yearOfBuild || null,
+  //         pniClubNo: vesselRegisData?.vesselDetails?.pniClubNo || "",
+  //         pniClubName: vesselRegisData?.vesselDetails?.pniClubName || "",
+  //         applicationNo: vesselRegisData?.applicationNumber || "",
+  //         nameOfClassificationSociety: formValues?.classificationSociety,
+  //         iwtVesselBasicDetailsTFk: vesselRegisData?.basicDetails?.id || "",
+  //         insuranceValidDate: vesselRegisData?.vesselDetails?.insuranceValidDate || "",
+  //       },
+  //     };
+
+  //     if (stepInfo.index === 1) {
+  //       request = { ...request, documents: extractDocuments(formValues) };
+  //     }
+
+  //     try {
+  //       loaderRef?.current?.show();
+  //       const URL = SERVICE_BASE.IWT_REGISTRATION + URLS_ENDPOINT.VESSEL_SERVICE.CREATE;
+
+  //       const response = await postData(URL, request);
+  //       const apiRes = { ...response?.data };
+  //       if (response?.status === 200 && apiRes?.responseStatus) {
+  //         loaderRef?.current?.hide();
+  //         setVesselRegisData((data) => {
+  //           return apiRes?.data ? { ...apiRes?.data, documents: data?.documents ? [...data?.documents] : [] } : {}
+  //         });
+  //         toast.success(
+  //           apiRes?.responseStatus?.message || "Vessel details saved successfully.",
+  //           { position: "top-right" }
+  //         );
+
+  //         if (stepInfo.index === 1) {
+  //           fetchPaymentDetails();
+  //         }
+
+  //         setTimeout(() => {
+  //           stepperRef?.current?.goToNextStep();
+  //           window.scrollTo(0, 0);
+  //         }, 1000);
+  //       } else {
+  //         loaderRef?.current?.hide();
+  //         toast.warning(
+  //           apiRes?.responseStatus?.message || "Something went wrong..",
+  //           { position: "top-right" }
+  //         );
+  //       }
+  //     } catch (err) {
+  //       loaderRef?.current?.hide();
+  //       handleErrorMessage(err?.response?.data);
+  //     }
+  //   }
+  // };
+
+  const onVesselRegisFormSubmit = async (stepInfo) => {
+    const formValues = stepInfo?.getFormData?.() || {};
+    console.log("formValues", formValues);
+    if (stepInfo.index === 0 || stepInfo.index === 1) {
+      const authLetterFile = formValues?.authLetter;
+      const authLetterFileName =
+        authLetterFile?.name || "Authorization Letter.pdf";
+
+      let request = {
+        id: vesselRegisData?.id || vesselRegisData?.basicDetails?.id || "",
+        applicationNumber: vesselRegisData?.applicationNumber || "",
+        basicDetails: {
+          id: vesselRegisData?.basicDetails?.id || "",
+          applicationNumber: vesselRegisData?.applicationNumber || "",
+          status: vesselRegisData?.basicDetails?.status || "",
+          constructedBy: formValues?.constructedBy,
+          ownerDetails: {
+            id:
+              vesselRegisData?.basicDetails?.ownerDetails?.id ||
+              ownerDetails?.id,
+          },
+          builderDetails: {
+            id:
+              vesselRegisData?.basicDetails?.builderDetails?.id ||
+              formValues?.builder ||
+              null,
+          },
+          builderAuthorization: formValues?.builderAuth,
+          authorizationLetter: {
+            id: vesselRegisData?.basicDetails?.authorizationLetter?.id || "",
+            fileStoreId: formValues?.authLetterFileStoreId,
+            documentName: authLetterFileName,
+            documentType: "AUTHORIZATION_LETTER",
+            documentSource: "AUTHORIZATION_LETTER",
+            descriptions: "",
+          },
+        },
+        vesselDetails: {
+          id: vesselRegisData?.vesselDetails?.id || "",
+          typeOfVessel: formValues?.vesselType,
+          categoryOfVessel: formValues?.category,
+          zone: formValues?.zone,
+          grossTonnage: formValues?.grt,
+          workOrderValue: formValues?.workOrderValue,
+          purchaseType: formValues?.purchaseType,
+          supervisionAuthority: formValues?.supervisionAuthority,
+          nameOfMaster: vesselRegisData?.vesselDetails?.nameOfMaster || "",
+          certficateNumber:
+            vesselRegisData?.vesselDetails?.certficateNumber || "",
+          nameOfRegistry: vesselRegisData?.vesselDetails?.nameOfRegistry || "",
+          registrationNumber:
+            vesselRegisData?.vesselDetails?.registrationNumber || "",
+          vesselName: vesselRegisData?.vesselDetails?.vesselName || "",
+          kindOfVessel: vesselRegisData?.vesselDetails?.kindOfVessel || "",
+          mortgage: vesselRegisData?.vesselDetails?.mortgage || "",
+          placeOfBuild: vesselRegisData?.vesselDetails?.placeOfBuild || "",
+          insuranceDetails:
+            vesselRegisData?.vesselDetails?.insuranceDetails || "",
+          yearOfBuild: vesselRegisData?.vesselDetails?.yearOfBuild || null,
+          pniClubNo: vesselRegisData?.vesselDetails?.pniClubNo || "",
+          pniClubName: vesselRegisData?.vesselDetails?.pniClubName || "",
+          applicationNo: vesselRegisData?.applicationNumber || "",
+          nameOfClassificationSociety: formValues?.classificationSociety,
+          iwtVesselBasicDetailsTFk: vesselRegisData?.basicDetails?.id || "",
+          insuranceValidDate:
+            vesselRegisData?.vesselDetails?.insuranceValidDate || "",
+        },
+      };
+
+      if (stepInfo.index === 1) {
+        request = { ...request, documents: extractDocuments(formValues) };
+      }
+
+      console.log("request", request);
+
+      try {
+        loaderRef?.current?.show();
+        const URL =
+          SERVICE_BASE.IWT_REGISTRATION + URLS_ENDPOINT.VESSEL_SERVICE.CREATE;
+
+        const response = await postData(URL, request);
+        const apiRes = { ...response?.data };
+        if (
+          (response?.status === 200 || response?.status === 201) &&
+          apiRes?.responseStatus
+        ) {
+          loaderRef?.current?.hide();
+          setVesselRegisData((data) => {
+            console.log("apiRes?.data", apiRes?.data);
+            console.log("data?.documents", data?.documents);
+            return apiRes?.data
+              ? {
+                  ...apiRes?.data,
+                  documents: apiRes?.data?.documents
+                    ? [...apiRes?.data?.documents]
+                    : data?.documents
+                    ? [...data?.documents]
+                    : [],
+                }
+              : {};
+          });
+
+          const message = request?.applicationNumber
+            ? `Vessel Registration with App No.  ${request.applicationNumber} updated successfully.`
+            : "Vessel Registration created successfully.";
+          toast.success(message, { position: "top-right" });
+
+          if (stepInfo.index === 1) {
+            fetchPaymentDetails();
+          }
+
+          setTimeout(() => {
+            stepperRef?.current?.goToNextStep();
+            window.scrollTo(0, 0);
+          }, 1000);
+        } else {
+          loaderRef?.current?.hide();
+          toast.warning(
+            apiRes?.responseStatus?.message || "Something went wrong..",
+            { position: "top-right" }
+          );
+        }
+      } catch (err) {
+        loaderRef?.current?.hide();
+        handleErrorMessage(err?.response?.data);
+      }
+    }
+  };
+  const handleSave = () => {
+    setIsLoading(true);
+    setTimeout(() => {
+      setIsLoading(false);
+      navigate("/new-vessel/registration-success", {
+        state: { registrationId: "VR2024001" },
+      });
+    }, 1500);
+  };
+
+  return (
+    <>
+      <NewLoader ref={loaderRef} />
+
+      <Box
+        sx={{
+          padding: "1rem 0.5rem 0 0.5rem",
+          backgroundColor: "#f5f6fa",
+          minHeight: "100vh",
+        }}
+      >
+        <div className="d-flex flex-column flex-md-row justify-content-between align-items-start align-items-md-center mb-4 gap-3">
+          <div
+            className="d-flex align-items-center flex-grow-1"
+            style={{ gap: "16px" }}
+          >
+            <Button
+              variant="outline-primary"
+              onClick={() => navigate("/dashboard")}
+              className="d-flex align-items-center justify-content-center shadow-sm"
+              style={{
+                borderRadius: "50%",
+                width: "40px",
+                height: "40px",
+                border: "2px solid #2E57A7",
+                color: "#2E57A7",
+                backgroundColor: "#fff",
+                transition: "all 0.3s ease",
+                padding: "0",
+              }}
+              onMouseEnter={(e) => {
+                e.target.style.backgroundColor = "#2E57A7";
+                e.target.style.color = "#fff";
+                e.target.style.transform = "translateY(-2px)";
+                e.target.style.boxShadow = "0 4px 12px rgba(46, 87, 167, 0.3)";
+              }}
+              onMouseLeave={(e) => {
+                e.target.style.backgroundColor = "#fff";
+                e.target.style.color = "#2E57A7";
+                e.target.style.transform = "translateY(0)";
+                e.target.style.boxShadow = "0 2px 4px rgba(0,0,0,0.1)";
+              }}
+            >
+              <BsArrowLeft size={16} />
+            </Button>
+            <Stack spacing={0.5} className="flex-grow-1">
+              <Typography
+                sx={{
+                  fontWeight: 550,
+                  color: "#2E57A7",
+                  fontSize: { xs: "1rem", sm: "1.1rem", md: "1.2rem" },
+                  lineHeight: 1.2,
+                }}
+              >
+                {isViewMode
+                  ? t("View Vessel Registration") + ` - ${id}`
+                  : isEditMode
+                  ? t("Edit Vessel Registration") + ` - ${id}`
+                  : t("vesselDetails.New Vessel Registration")}
+              </Typography>
+              <Typography
+                sx={{
+                  color: "#666",
+                  fontSize: { xs: "0.6rem", sm: "0.65rem" },
+                  lineHeight: 1.3,
+                }}
+              >
+                {isViewMode
+                  ? t("(View vessel registration details)")
+                  : isEditMode
+                  ? t("(Update vessel registration details)")
+                  : t(
+                      "vesselDetails.(Fill in the vessel details to complete registration)"
+                    )}
+              </Typography>
+            </Stack>
+          </div>
+          {/* Note Sheet Button - Only for View Mode */}
+          {/* {isViewMode && (
+                <Button
+                  variant="primary"
+                  className="d-flex align-items-center shadow-sm flex-shrink-0"
+                  style={{
+                    background:
+                      "linear-gradient(135deg, #2466bf 0%, #1a4fa0 100%)",
+                    border: "none",
+                    borderRadius: "8px",
+                    padding: "6px 12px",
+                    fontSize: "0.8rem",
+                    fontWeight: "600",
+                    minWidth: "auto",
+                    whiteSpace: "nowrap",
+                  }}
+                  onClick={() => setShowNoteSheet(true)}
+                >
+                  <BsSticky className="me-1 me-sm-2" size={14} />
+                  <span className="d-none d-sm-inline">{t("Note Sheet")}</span>
+                  <span className="d-sm-none">{t("Notes")}</span>
+                </Button>
+              )} */}
+        </div>
+
+        <Stepper
+          ref={stepperRef}
+          steps={steps}
+          onSave={handleSave}
+          viewMode={isViewMode}
+          onPayNow={handlePayNow}
+          onSyncData={onVesselRegisFormSubmit}
+        />
+        {/* <NoteSheet
+              show={showNoteSheet}
+              onHide={() => setShowNoteSheet(false)}
+              initialNotes={initialNotes}
+            /> */}
+
+        {/* {!isViewMode && (
+          <PaymentModal
+            show={showModal}
+            onHide={() => setShowModal(false)}
+
+            
+            paymentMode={paymentMode}
+            setPaymentMode={setPaymentMode}
+            challanFile={challanFile}
+            onChallanUpload={handleChallanUpload}
+            onOnlinePay={handleOnlinePay}
+            onOfflineSubmit={handleOfflineSubmit}
+            isLoading={isLoading}
+            formMethods={methods}
+          />
+        )} */}
+
+        {isViewMode && (
+          <ApprovalModal
+            show={showApprovalModal}
+            handleClose={handleCloseModal}
+            handleSubmitData={handleActionSubmit}
+            selectedAction={selectedAction}
+          />
+        )}
+      </Box>
+    </>
+  );
+};
+
+export default NewVesselRegistration;
