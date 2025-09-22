@@ -1,43 +1,583 @@
-const mapFilesByFieldName = (supportingDocument = {}) => {
-  const regularFiles = {};
-  const additionalFiles = [];
+import { forwardRef, useEffect, useState } from "react";
+import { Button, Card } from "react-bootstrap";
+import { BsDownload, BsFileEarmarkPdf, BsPlus, BsTrash } from "react-icons/bs";
+import styles from "../private/vessel-registration/new-vessel/Documents.module.css";
+import { useTranslation } from "react-i18next";
+import { BASE_IP, URLS_ENDPOINT } from "../../utils/urlsConstants.ts";
+import { getFromLocalStorage } from "../../utils/localStorageUtils.js";
+import axios from "axios";
+import { toast } from "react-toastify";
+import { deleteFile } from "../../utils/deleteFile.js";
+import InputFile from "./InputFile.tsx";
+import { renameFile } from "../../utils/constants.ts";
+import { postFORMdata } from "../../services/http.service.ts";
+import { FaTimesCircle } from "react-icons/fa";
+import InputText from "./InputText.tsx";
 
-  const categoryKey = Object.keys(supportingDocument).find(key => 
-    supportingDocument[key] && Array.isArray(supportingDocument[key])
-  );
-  
-  if (!categoryKey || !supportingDocument[categoryKey]) return { regularFiles, additionalFiles };
+const DocumentCard = ({
+    fileName,
+    description,
+    onDownload,
+    fileSize,
+    onRemove,
+    showRemove = false,
+    t,
+}) => {
+    const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
 
-  const documents = supportingDocument[categoryKey];
+    useEffect(() => {
+        const handleResize = () => setIsMobile(window.innerWidth <= 768);
+        window.addEventListener("resize", handleResize);
+        return () => window.removeEventListener("resize", handleResize);
+    }, []);
 
-  documents.forEach(doc => {
-    if (doc.documentType === 'ADDITIONAL_DOCUMENT') {
-      additionalFiles.push({
-        fileName: doc.documentName,
-        fileStoreId: doc.fileStoreId,
-        downLoadFile: `${BASE_IP}/filestore/v1/files/id?fileStoreId=${doc.fileStoreId}&tenantId=iwt`
-      });
-    } else {
-      const fieldMapping = {
-        'PAN_CARD': 'panCardUpload',
-        'GST_CERTIFICATE': 'gstCertificate', 
-        'TRADE_LICENSE': 'tradeLicenseUpload',
-        'AADHAAR_CARD': 'aadhaarUpload',
-        'DRIVING_LICENSE': 'dlUpload',
-        'AUTHORIZATION_LETTER': 'authorizationLetter',
-        'EXISTING_DOCUMENT': 'existingDocuments'
-      };
-
-      const fieldName = fieldMapping[doc.documentType];
-      if (fieldName) {
-        regularFiles[fieldName] = {
-          fileName: doc.documentName,
-          fileStoreId: doc.fileStoreId,
-          downLoadFile: `${BASE_IP}/filestore/v1/files/id?fileStoreId=${doc.fileStoreId}&tenantId=iwt`
-        };
-      }
-    }
-  });
-
-  return { regularFiles, additionalFiles };
+    return (
+        <Card className="mb-1 border-0 shadow-sm">
+            <Card.Body className="p-2">
+                <div className="d-flex justify-content-between align-items-center">
+                    <div
+                        className="d-flex align-items-center flex-grow-1 me-2"
+                        style={{ minWidth: 0 }}
+                    >
+                        {!isMobile && (
+                            <div className="bg-danger bg-opacity-10 rounded-circle p-1 me-2 flex-shrink-0">
+                                <BsFileEarmarkPdf className="text-danger" size={10} />
+                            </div>
+                        )}
+                        <div style={{ minWidth: 0 }}>
+                            <div
+                                className="text-primary fw-semibold"
+                                style={{
+                                    fontSize: isMobile ? "0.8rem" : "0.7rem",
+                                    overflow: "hidden",
+                                    textOverflow: "ellipsis",
+                                    whiteSpace: "nowrap",
+                                    lineHeight: "1.3",
+                                    marginBottom: isMobile ? "0" : "4px",
+                                }}
+                                title={fileName}
+                            >
+                                {fileName}
+                            </div>
+                            {!isMobile && (
+                                <>
+                                    <p
+                                        className="mb-0 text-muted"
+                                        style={{
+                                            fontSize: "0.6rem",
+                                            overflow: "hidden",
+                                            textOverflow: "ellipsis",
+                                            whiteSpace: "nowrap",
+                                        }}
+                                    >
+                                        {description}
+                                    </p>
+                                    {fileSize && (
+                                        <span
+                                            className="badge bg-light text-dark mt-1"
+                                            style={{ fontSize: "0.55rem" }}
+                                        >
+                                            {(fileSize / 1024 / 1024).toFixed(1)} MB
+                                        </span>
+                                    )}
+                                </>
+                            )}
+                        </div>
+                    </div>
+                    <div className="flex-shrink-0">
+                        <Button
+                            variant="outline-primary"
+                            size="sm"
+                            onClick={() => onDownload(fileName)}
+                            className="rounded-pill d-flex align-items-center"
+                            style={{
+                                minWidth: "auto",
+                                fontSize: "0.6rem",
+                                padding: isMobile ? "6px 8px" : "4px 6px",
+                            }}
+                        >
+                            {isMobile && <BsFileEarmarkPdf className="me-1" size={12} />}
+                            <BsDownload size={isMobile ? 12 : 8} />
+                            {!isMobile && <span className="ms-1">{t("Download")}</span>}
+                        </Button>
+                        {showRemove && (
+                            <Button
+                                variant="outline-danger"
+                                size="sm"
+                                onClick={onRemove}
+                                className="rounded-pill ms-1"
+                                style={{ minWidth: "auto", padding: "4px 6px" }}
+                            >
+                                <BsTrash size={8} />
+                            </Button>
+                        )}
+                    </div>
+                </div>
+            </Card.Body>
+        </Card>
+    );
 };
+
+const FileUploadCard = forwardRef(({
+    label,
+    name,
+    fileDownloadKey,
+    onRemove,
+    showRemove = false,
+    fileIndex,
+    displayIndex,
+    watch,
+    clearErrors,
+    setValue,
+    register,
+    errors,
+    setError,
+    t,
+    uploadFile,
+    viewMode,
+    editMode,
+    handleDownload,
+    type,
+    isRegistrationMode = false
+}, loaderRef) => {
+    const fileData = watch(name);
+    const fileStoreId = watch(fileDownloadKey);
+    const hasFile = fileData && (fileData.name || fileData.size);
+
+    const handleDeleteFile = async (name) => {
+        // In registration mode, just clear the file without API call
+        if (isRegistrationMode) {
+            clearErrors(name);
+            setValue(name, null);
+            setValue(name.replace("_file_", "_fileStoreId_"), null);
+            return;
+        }
+
+        // For logged-in users, call API to delete
+        const res = await deleteFile(fileStoreId, loaderRef);
+        if (res) {
+            clearErrors(name);
+            setValue(name, null);
+            setValue(name.replace("_file_", "_fileStoreId_"), null);
+        }
+    }
+
+    return (
+        <Card className="mb-2 border-2 border-dashed border-primary border-opacity-25">
+            <Card.Body className="p-2">
+                <div className="mb-2">
+                    <div style={{ fontSize: "0.75rem", position: "relative" }}>
+                        <InputFile
+                            label={`${label} ${displayIndex}`}
+                            name={name}
+                            register={register(name)}
+                            errors={errors}
+                            onChange={(e) => {
+                                if (e?.target?.files && e?.target?.files[0]) {
+                                    const file = e.target.files[0];
+
+                                    if (file.size > 30 * 1024 * 1024) {
+                                        setError(name, {
+                                            type: "manual",
+                                            message: t(
+                                                "vesselDetails..File size should not exceed 30MB"
+                                            ),
+                                        });
+                                        return;
+                                    }
+
+                                    const extension = file?.name?.substring(
+                                        file?.name?.lastIndexOf(".")
+                                    );
+                                    const fileType = name.includes(type)
+                                        ? type
+                                        : "UNKNOWN";
+                                    const fileName = `${fileType}_${String(fileIndex).padStart(
+                                        2,
+                                        "0"
+                                    )}${extension}`;
+                                    file.originalName = fileName;
+                                    const renamedFile = renameFile(file, fileName);
+                                    uploadFile(file, name, renamedFile, fileType, fileIndex);
+                                }
+                            }}
+                            watch={watch}
+                            defaultValue={watch(name)}
+                            clearErrors={clearErrors}
+                            accept=".pdf,.jpg,.jpeg,.png"
+                            className="mobile-file-input"
+                            style={{ width: "100%" }}
+                        />
+
+                        {hasFile && !viewMode && (
+                            <FaTimesCircle
+                                className="text-danger position-absolute"
+                                style={{
+                                    top: "55%",
+                                    right: "1.5rem",
+                                    transform: "translateY(-50%)",
+                                    cursor: "pointer",
+                                    zIndex: 10,
+                                }}
+                                size={16}
+                                title="Remove file"
+                                onClick={() => handleDeleteFile(name)}
+                            />
+                        )}
+                    </div>
+                </div>
+                <div className="mb-2">
+                    <div style={{ fontSize: "0.75rem" }}>
+                        <InputText
+                            label={t("vesselOwnerRegistration.Description")}
+                            name={name?.replace("_file_", "_desc_")}
+                            placeholder={t("vesselOwnerRegistration.Enter_file_description")}
+                            register={register(name.replace("_file_", "_desc_"))}
+                            errors={errors}
+                            className="mobile-text-input"
+                        />
+                    </div>
+                </div>
+                <div className="text-end d-flex justify-content-end gap-1">
+                    {editMode && hasFile && (
+                        <Button
+                            variant="outline-primary"
+                            size="sm"
+                            onClick={() => handleDownload(fileStoreId, fileData.name)}
+                            className="rounded-pill"
+                            style={{ fontSize: "0.65rem", padding: "2px 6px" }}
+                        >
+                            <BsDownload className="me-1" size={8} />
+                            <span className="d-none d-sm-inline">Download</span>
+                            <span className="d-sm-none">↓</span>
+                        </Button>
+                    )}
+                    {showRemove && (
+                        <Button
+                            variant="outline-danger"
+                            size="sm"
+                            onClick={onRemove}
+                            className="rounded-pill"
+                            style={{ fontSize: "0.65rem", padding: "2px 6px" }}
+                        >
+                            <BsTrash className="me-1" size={8} />
+                            <span className="d-none d-sm-inline">Remove</span>
+                            <span className="d-sm-none">×</span>
+                        </Button>
+                    )}
+                </div>
+            </Card.Body>
+        </Card>
+    );
+});
+
+const MultiFile = forwardRef(({ title, files, type, icon, watch, viewMode, editMode, clearErrors, register, errors, setError, setValue, unregister, localFiles, setFiles, isRegistrationMode = false }, loaderRef) => {
+    const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
+    const { t } = useTranslation();
+
+    useEffect(() => {
+        const handleResize = () => setIsMobile(window.innerWidth <= 768);
+        window.addEventListener("resize", handleResize);
+        return () => window.removeEventListener("resize", handleResize);
+    }, []);
+
+    const filesWithData = files.filter((file) => {
+        const fileData = watch(`${type}_file_${file.id}`);
+        return fileData && (fileData.name || fileData.size);
+    });
+
+    const addFileInput = (type) => {
+        if (viewMode) return;
+        if (files.length >= 50) return;
+
+        const existingIds = files.map(f => f.id);
+        let nextId = 1;
+        while (existingIds.includes(nextId)) {
+            nextId++;
+        }
+
+        setFiles(prev => [...prev, { id: nextId }].sort((a, b) => a.id - b.id));
+    };
+
+    const handleDownload = async (fileStoreId, fileName) => {
+        try {
+            if (!fileStoreId) return;
+            const url = `${BASE_IP}/filestore/v1/files/id?fileStoreId=${fileStoreId}`;
+
+            loaderRef.current?.show();
+
+            const accessToken = getFromLocalStorage("access_token");
+            const tokenDetails = getFromLocalStorage("tokenDetails");
+            const sessionState = tokenDetails
+                ? JSON.parse(tokenDetails)?.session_state
+                : "";
+
+            const response = await axios({
+                method: "GET",
+                url: url,
+                responseType: "blob",
+                headers: {
+                    Authorization: `Bearer ${accessToken}`,
+                    "X-Request-ID": sessionState,
+                    Accept: "application/octet-stream",
+                },
+            });
+
+            if (response.data) {
+                let filename = fileName || "document";
+                const contentDisposition = response.headers["content-disposition"];
+                if (contentDisposition) {
+                    const filenameMatch = contentDisposition.match(
+                        /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/
+                    );
+                    if (filenameMatch && filenameMatch[1]) {
+                        filename = filenameMatch[1].replace(/['"]/g, "");
+                    }
+                }
+
+                const blob = new Blob([response.data], {
+                    type: response.headers["content-type"] || "application/octet-stream",
+                });
+                const blobUrl = window.URL.createObjectURL(blob);
+
+                const link = document.createElement("a");
+                link.href = blobUrl;
+                link.setAttribute("download", filename);
+                document.body.appendChild(link);
+                link.click();
+
+                setTimeout(() => {
+                    document.body.removeChild(link);
+                    window.URL.revokeObjectURL(blobUrl);
+                }, 100);
+            }
+        } catch (error) {
+            console.error("Error downloading file:", error);
+            toast.error("Failed to download file. Please try again.");
+        } finally {
+            loaderRef.current?.hide();
+        }
+    };
+
+const uploadFile = async (
+  file,
+  formValueName,
+  renamedFile,
+  fileType,
+  fileIndex
+) => {
+  try {
+    loaderRef?.current?.show();
+    
+    // If registration mode when not login
+    if (isRegistrationMode) {
+      const formData = new FormData();
+      formData.append("file", file);
+      
+      const uploadUrl = BASE_IP + URLS_ENDPOINT.FILE_STORE_SERVICE.UPLOAD_FILE_PUBLIC;
+      const response = await axios.post(uploadUrl, formData, {
+        headers: {
+          "Content-Type": "multipart/form-data",
+        },
+      });
+      
+      const fileStoreId = response?.data?.files[0]?.fileStoreId;
+      
+      clearErrors(formValueName);
+      setValue(formValueName, renamedFile, { shouldValidate: true });
+      setValue(fileType + "_fileStoreId_" + fileIndex, fileStoreId);
+    //   if (fileType === "ADDITIONALDOCS") {
+    //     setValue(`supportingDocument_${fileIndex}`, {
+    //       id: "",
+    //       documentName: renamedFile.name,
+    //       documentType: "ADDITIONAL_DOCUMENT",
+    //       documentSource: "ADDITIONAL",
+    //       fileStoreId,
+    //       description: watch(`${fileType}_desc_${fileIndex}`) || "Additional Document",
+    //     });
+    //   }
+      
+      toast.success("File uploaded successfully!");
+      loaderRef?.current?.hide();
+      return;
+    }
+    
+    // For logged-in users, call API with auth
+    const formData = new FormData();
+    formData.append("file", file);
+    const uploadUrl = BASE_IP + URLS_ENDPOINT.FILE_STORE_SERVICE.UPLOAD_FILE;
+    const response = await postFORMdata(uploadUrl, formData);
+    const fileStoreId = response?.data?.files[0]?.fileStoreId;
+
+    clearErrors(formValueName);
+    setValue(formValueName, renamedFile, { shouldValidate: true });
+
+    if (fileType === 'STABILITY_BOOKLETS' || fileType === 'TONNAGE_BOOKLETS') {
+      setValue(fileType + "_fileStoreId", fileStoreId);
+    } else {
+      setValue(fileType + "_fileStoreId_" + fileIndex, fileStoreId);
+    }
+
+    toast.success("File uploaded successfully!");
+    loaderRef?.current?.hide();
+
+  } catch (err) {
+    loaderRef?.current?.hide();
+    console.error(err);
+    setError(formValueName, {
+      type: "manual",
+      message: t("File upload failed"),
+    });
+    toast.error("File upload failed...");
+  }
+};
+
+    const removeFileInput = async (type, id, fileDownloadKey) => {
+        if (viewMode) return;
+
+        // In registration mode, just remove from state without API call
+        if (isRegistrationMode) {
+            setFiles(prev => prev.filter((file) => file.id !== id));
+            
+            unregister(`${type}_file_${id}`);
+            unregister(`${type}_desc_${id}`);
+            unregister(`${type}_fileStoreId_${id}`);
+            clearErrors([`${type}_file_${id}`, `${type}_desc_${id}`]);
+
+            setValue(`${type}_file_${id}`, null);
+            setValue(`${type}_desc_${id}`, "");
+            setValue(`${type}_fileStoreId_${id}`, null);
+            return;
+        }
+
+        // For logged-in users, call API to delete
+        const fileStoreId = watch(`${type}_fileStoreId_${id}`);
+        if (fileStoreId) {
+            const res = await deleteFile(fileStoreId, loaderRef);
+            if (!res) {
+                return;
+            }
+        }
+        
+        setFiles(prev => prev.filter((file) => file.id !== id));
+
+        unregister(`${type}_file_${id}`);
+        unregister(`${type}_desc_${id}`);
+        unregister(`${type}_fileStoreId_${id}`);
+        clearErrors([`${type}_file_${id}`, `${type}_desc_${id}`]);
+
+        setValue(`${type}_file_${id}`, null);
+        setValue(`${type}_desc_${id}`, "");
+        setValue(`${type}_fileStoreId_${id}`, null);
+    };
+
+    return (
+        <Card className="h-100 shadow-sm border-0">
+            <Card.Header className="bg-light border-0 py-2">
+                <div className="d-flex justify-content-between align-items-start">
+                    <div className="d-flex justify-content-start align-items-start p-1">
+                        <h6
+                            className="mb-0 text-primary fw-bold d-flex align-items-center"
+                            style={{ fontSize: isMobile ? "0.8rem" : "0.75rem" }}
+                        >
+                            {icon}
+                            <span className="ms-2">{title}</span>
+                        </h6>
+                        <span
+                            className="ms-2 badge bg-primary rounded-pill"
+                            style={{ fontSize: "0.6rem" }}
+                        >
+                            {viewMode ? filesWithData.length : editMode ? `${filesWithData.length}/50` : filesWithData.length} files
+                        </span>
+                    </div>
+                    <div className="d-flex justify-content-end align-items-start">
+                        {!viewMode && (
+                            <Button
+                                variant="primary"
+                                size="sm"
+                                onClick={() => addFileInput(type)}
+                                className={`${styles.addBtn} ms-2 badge bg-primary rounded-pill`}
+                                style={{ fontSize: "0.6rem" }}
+                                disabled={files.length >= 50}
+                            >
+                                <BsPlus className="me-1" size={10} />
+                                <span className={isMobile ? "d-none" : ""}>Add</span>
+                                <span className={isMobile ? "" : "d-none"}>+</span>
+                            </Button>
+                        )}
+                    </div>
+                </div>
+            </Card.Header>
+
+            <Card.Body className="p-1">
+                <div
+                    style={{
+                        maxHeight: isMobile ? "350px" : "250px",
+                        overflowY: "auto",
+                    }}
+                >
+                    {viewMode ? (
+                        filesWithData.length > 0 ? (
+                            filesWithData.map((fileInput, index) => {
+                                const fileData = watch(`${type}_file_${fileInput.id}`);
+                                const descData = watch(`${type}_desc_${fileInput.id}`);
+
+                                return (
+                                    <DocumentCard
+                                        key={fileInput.id}
+                                        fileName={fileData.name}
+                                        description={descData || `${title} document ${index + 1}`}
+                                        fileSize={fileData.size}
+                                        onDownload={() => handleDownload(watch(`${type}_fileStoreId_${fileInput.id}`), watch(`${type}_file_${fileInput.id}`)?.name)}
+                                        t={t}
+                                    />
+                                );
+                            })
+                        ) : (
+                            <div className="text-center py-3 text-muted">
+                                <div className="bg-light rounded-circle p-2 d-inline-flex mb-2">
+                                    <BsFileEarmarkPdf size={20} className="opacity-50" />
+                                </div>
+                                <p className="mb-0" style={{ fontSize: "0.7rem" }}>
+                                    No files uploaded
+                                </p>
+                            </div>
+                        )
+                    ) : (
+                        files.map((fileInput, idx) => {
+                            return (
+                                <div key={fileInput.id}>
+                                    <FileUploadCard
+                                        label={t("vesselOwnerRegistration.Choose_File")}
+                                        name={`${type}_file_${fileInput.id}`}
+                                        fileDownloadKey={`${type}_fileStoreId_${fileInput.id}`}
+                                        fileIndex={fileInput.id}
+                                        displayIndex={idx + 1}
+                                        onRemove={() => removeFileInput(type, fileInput.id)}
+                                        showRemove={files.length > 1}
+                                        watch={watch}
+                                        clearErrors={clearErrors}
+                                        setValue={setValue}
+                                        register={register}
+                                        errors={errors}
+                                        setError={setError}
+                                        t={t}
+                                        uploadFile={uploadFile}
+                                        viewMode={viewMode}
+                                        editMode={editMode}
+                                        handleDownload={handleDownload}
+                                        type={type}
+                                        isRegistrationMode={isRegistrationMode}
+                                        ref={loaderRef}
+                                    />
+                                </div>
+                            );
+                        })
+                    )}
+                </div>
+            </Card.Body>
+        </Card>
+    );
+});
+
+export default MultiFile;
