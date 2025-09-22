@@ -1,3 +1,152 @@
+import React, { useState, useEffect, useRef } from "react";
+import { useForm, FormProvider } from "react-hook-form";
+import { Container, Row, Col, Button, Card, Badge } from "react-bootstrap";
+import {
+  FaFileUpload,
+  FaArrowLeft,
+  FaArrowRight,
+  FaArrowAltCircleLeft,
+  FaCheckCircle,
+  FaUser,
+  FaBuilding,
+} from "react-icons/fa";
+import { BsFileEarmarkPdf, BsDownload } from "react-icons/bs";
+import { useNavigate, useParams, useLocation } from "react-router-dom";
+import ActionDropdown from "../../../common/ActionDropdown";
+import ApprovalModal from "../../../common/ApprovalModal";
+import "./userViewPage.css";
+import NewLoader from "../../../common/NewLoader";
+import DynamicViewFields from "../../../common/DynamicViewFields";
+import { useTranslation } from "react-i18next";
+import { getFromLocalStorage } from "../../../../utils/localStorageUtils";
+import {
+  SERVICE_BASE,
+  URLS_ENDPOINT,
+  BASE_IP,
+} from "../../../../utils/urlsConstants.ts";
+import { toast } from "react-toastify";
+import { postData } from "../../../../services/http.service.ts";
+import { handleErrorMessage } from "../../../../utils/errorMessageHandler";
+import { getDocumentsForOwner } from "../../../public/user-registration/registration-docs.config.js";
+import { useMasterData } from "../../../context/MasterDataContext.js";
+const UserViewPage = () => {
+  const { t } = useTranslation();
+    const { masterData } = useMasterData()
+  const { type, id } = useParams();
+  const location = useLocation();
+  const applicationInfo = location.state?.application;
+  const userRole = getFromLocalStorage("userRole");
+  const userDetails = getFromLocalStorage("userDetails")
+    ? JSON.parse(getFromLocalStorage("userDetails"))
+    : "";
+  const [currentStep, setCurrentStep] = useState(1);
+  const [formData, setFormData] = useState({});
+  const [isLoading, setIsLoading] = useState(true);
+  const [showApprovalModal, setShowApprovalModal] = useState(false);
+  const [selectedAction, setSelectedAction] = useState("");
+  const [completedSteps, setCompletedSteps] = useState(new Set());
+  const navigate = useNavigate();
+  const [actionsFromAPI, setActionsFromAPI] = useState([]);
+  const loaderRef = useRef();
+
+  const isOwner = applicationInfo?.userType === "VESSEL_OWNER";
+  const isBuilder = applicationInfo?.userType === "VESSEL_BUILDER";
+  const totalSteps = isOwner ? 3 : 2;
+
+const mapFilesByFieldName = (fileStoreMap = [], supportingDocument = {}, categoryOfOwner = null) => {
+  // For owner - use new supportingDocument structure
+  if (supportingDocument && Object.keys(supportingDocument).length > 0) {
+    const regularFiles = {};
+    const additionalFiles = [];
+
+    // Use documentSourceName to find the correct array
+    const documentSourceName = supportingDocument.documentSourceName;
+    const documents = supportingDocument[documentSourceName];
+    
+    if (!documents || !Array.isArray(documents)) return { regularFiles, additionalFiles };
+
+    // Get all possible document configs for this owner category
+    const allDocConfigs = getDocumentsForOwner({categoryOfOwner}, null, null);
+    
+    documents.forEach(doc => {
+      if (doc.documentType === 'ADDITIONAL_DOCUMENT') {
+        additionalFiles.push({
+          fileName: doc.documentName,
+          fileStoreId: doc.fileStoreId,
+          downLoadFile: `${BASE_IP}/filestore/v1/files/id?fileStoreId=${doc.fileStoreId}&tenantId=iwt`
+        });
+      } else {
+        // Find matching field name from document config
+        const matchingConfig = allDocConfigs.find(config => config.code === doc.documentType);
+        
+        if (matchingConfig) {
+          regularFiles[matchingConfig.name] = {
+            fileName: doc.documentName,
+            fileStoreId: doc.fileStoreId,
+            downLoadFile: `${BASE_IP}/filestore/v1/files/id?fileStoreId=${doc.fileStoreId}&tenantId=iwt`
+          };
+        }
+      }
+    });
+
+    return { regularFiles, additionalFiles };
+  }
+
+  // For builder - keep existing fileStoreMap logic
+  const mappingConfig = {
+    "company details": "companyDetails",
+    "pan card": "panCardUpload",
+    "gst certificate": "gstCertificate",
+    "factory license": "factoryLicense",
+    "fire certificate": "fireCertificate",
+    "esipf registration": "esipfRegistration",
+    "iso 9001": "iso9001",
+    "iso 14001": "iso14001",
+    "iso 45001": "iso45001",
+    "pollution certificate": "pollutionCertificate",
+    "experience certificate": "experienceCertificate",
+    "address proof": "addressProof",
+  };
+
+  const regularFiles = {};
+  const additionalFiles = [];
+
+  fileStoreMap.forEach(file => {
+    const fieldName = file?.fieldName?.toLowerCase();
+    if (!fieldName) return;
+
+    if (fieldName.includes('additionaldocs')) {
+      additionalFiles.push({
+        fileName: file.fileName,
+        fileStoreId: file.fileStoreId,
+        downLoadFile: file.downLoadFile
+      });
+      return;
+    }
+
+    const matchedKey = Object.keys(mappingConfig).find(key =>
+      fieldName.includes(key)
+    );
+
+    if (matchedKey) {
+      regularFiles[mappingConfig[matchedKey]] = {
+        fileName: file.fileName,
+        fileStoreId: file.fileStoreId,
+        downLoadFile: file.downLoadFile
+      };
+    }
+  });
+
+  return { regularFiles, additionalFiles };
+};
+  const getOwnerCategoryLabel = (categoryCode) => {
+    const ownerType = masterData?.ownerTypes?.find(
+      type => type.valueCode === categoryCode
+    );
+    return ownerType?.valueLabel || categoryCode;
+  };
+ 
+ 
 useEffect(() => {
   setIsLoading(true);
   loaderRef.current?.show?.();
@@ -77,3 +226,630 @@ useEffect(() => {
     loaderRef.current?.hide?.();
   }, 500);
 }, [applicationInfo, isOwner, isBuilder, masterData]);
+
+  const methods = useForm({ defaultValues: { country: "India" } });
+  const { setValue } = methods;
+
+  useEffect(() => {
+    if (!isLoading && Object.keys(formData)?.length > 0) {
+      Object?.keys(formData)?.forEach((key) => {
+        if (formData[key] !== undefined && formData[key] !== null) {
+          setValue(key, formData[key]);
+        }
+      });
+    }
+  }, [isLoading, formData, setValue]);
+
+  const handleActionClick = (action) => {
+    setSelectedAction(action);
+    setShowApprovalModal(true);
+  };
+
+  const workflowApplicationSubmit = async (modalFormData) => {
+    loaderRef?.current?.show();
+
+    try {
+      const URL = `${SERVICE_BASE.IWT_WORKFLOW}${URLS_ENDPOINT.WORK_FLOW_SERVICE.WORKFLOW_ACTION}`;
+
+      const userName =
+        userDetails?.userName ||
+        JSON.parse(getFromLocalStorage("userDetails"))?.userName ||
+        "";
+
+      const payload = {
+        applicationNo: applicationInfo?.userBasicDetails?.registrationNumber,
+        processId: applicationInfo?.processActionMapResponce?.processs?.[0]?.processId,
+        actionId: selectedAction?.actionId,
+        assignerRole: userRole,
+        assignerName: userName,
+        fileId: modalFormData?.document?.url ?? "",
+        remarks: modalFormData?.reason ?? "",
+      };
+
+      const { status, data } = await postData(URL, payload);
+      const { responseStatus } = data || {};
+
+      if (status === 200 && responseStatus?.status === "200") {
+        toast.success(responseStatus?.message || "Action submitted successfully");
+        handleCloseModal();
+
+        setTimeout(() => navigate("/user-registration/view"), 2000);
+      } else {
+        toast.info(responseStatus?.message || "Something went wrong..", {
+          position: "top-right",
+        });
+      }
+    } catch (err) {
+      console.error(err);
+      handleErrorMessage(err?.response?.data);
+    } finally {
+      loaderRef?.current?.hide();
+    }
+  };
+
+  const handleCloseModal = () => {
+    setShowApprovalModal(false);
+    setSelectedAction("");
+  };
+
+  const getFormFieldsConfig = () => {
+    if (isOwner) {
+      return {
+        step1: [
+          {
+            name: "categoryOfOwner",
+            label: t("vesselOwnerRegistration.Category of Owner"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "ownerCompanyName",
+            label: t("vesselOwnerRegistration.Owner/Company Name"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+          name: "existingUser",
+          label: t("vesselOwnerRegistration.Existing User ?"),
+          type: "text",
+          colSize: 6,
+        },
+          {
+            name: "emailId",
+            label: t("vesselOwnerRegistration.Email ID"),
+            type: "email",
+            colSize: 6,
+          },
+          {
+            name: "phoneNumber",
+            label: t("vesselOwnerRegistration.Phone Number"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "panNo",
+            label: t("vesselOwnerRegistration.PAN Number"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "aadharNumber",
+            label: t("vesselOwnerRegistration.aadharNo"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "tradeLicenseNumber",
+            label: t("vesselOwnerRegistration.tradeLicense"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "gstNo",
+            label: t("vesselOwnerRegistration.GST Number"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "cinNo",
+            label: t("vesselOwnerRegistration.CIN Number"),
+            type: "text",
+            colSize: 6,
+            showIf: () => ["COMPANY", "FIRM", "PRIVATE_LTD"].includes(formData.categoryOfOwner),
+          },
+          {
+            name: "dinNo",
+            label: t("vesselOwnerRegistration.DIN Number"),
+            type: "text",
+            colSize: 6,
+            showIf: () => ["COMPANY", "FIRM", "PRIVATE_LTD"].includes(formData.categoryOfOwner),
+          },
+          {
+            name: "addressLine1",
+            label: t("vesselOwnerRegistration.Address Line-1"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "addressLine2",
+            label: t("vesselOwnerRegistration.Address Line-2"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "pin",
+            label: t("vesselOwnerRegistration.PIN"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "district",
+            label: t("vesselOwnerRegistration.District"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "state",
+            label: t("vesselOwnerRegistration.State / UT"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "country",
+            label: t("vesselOwnerRegistration.Country"),
+            type: "text",
+            colSize: 6,
+          },
+        ],
+        step2: [
+          {
+            name: "authorisedFname",
+            label: t("vesselOwnerRegistration.First Name"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "authorisedLname",
+            label: t("vesselOwnerRegistration.Last Name"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "authorisedMob",
+            label: t("vesselOwnerRegistration.Primary Mobile Number"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "authorisedEmail",
+            label: t("vesselOwnerRegistration.Email ID"),
+            type: "email",
+            colSize: 6,
+          },
+          {
+            name: "authorizationLetter",
+            label: t("vesselOwnerRegistration.Letter of Authorization"),
+            type: "file",
+            colSize: 6,
+          },
+        ],
+       step3: [
+  ...getDocumentsForOwner({categoryOfOwner: formData.categoryOfOwnerCode}, null, t).map(doc => ({
+    ...doc,
+    type: "file",
+    disabled: true,
+    inputClassName: "disabled-field",
+  })),
+  ...(formData.existingUser === "Yes" ? [{
+    name: "existingDocuments",
+    label: t("vesselOwnerRegistration.Existing Documents"),
+    type: "file",
+    colSize: 6,
+    disabled: true,
+    inputClassName: "disabled-field",
+  }] : []),
+  {
+    name: "additionalDocuments",
+    label: t("vesselOwnerRegistration.Additional_Documents"),
+    type: "additional_docs",
+    colSize: 12,
+  },
+],
+      };
+    } else {
+      return {
+        step1: [
+          {
+            name: "builderName",
+            label: t("builderRegistration.builderName"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "emailId",
+            label: t("builderRegistration.Email ID"),
+            type: "email",
+            colSize: 6,
+          },
+          {
+            name: "phoneNumber",
+            label: t("builderRegistration.Phone Number"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "panNo",
+            label: t("builderRegistration.PAN Number"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "gstNo",
+            label: t("builderRegistration.GST Number"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "addressLine1",
+            label: t("builderRegistration.Address Line-1"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "addressLine2",
+            label: t("builderRegistration.Address Line-2"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "pin",
+            label: t("builderRegistration.PIN"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "district",
+            label: t("builderRegistration.District"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "state",
+            label: t("builderRegistration.State / UT"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "country",
+            label: t("builderRegistration.Country"),
+            type: "text",
+            colSize: 6,
+          },
+        ],
+        step2: [
+          {
+            name: "companyDetails",
+            label: t("builderRegistration.Company Details"),
+            type: "file",
+            colSize: 6,
+          },
+          {
+            name: "gstCertificate",
+            label: t("builderRegistration.GST Certificate"),
+            type: "file",
+            colSize: 6,
+          },
+          {
+            name: "panCardUpload",
+            label: t("builderRegistration.PAN Card"),
+            type: "file",
+            colSize: 6,
+          },
+          {
+            name: "factoryLicense",
+            label: t("builderRegistration.Factory License"),
+            type: "file",
+            colSize: 6,
+          },
+          {
+            name: "addressProof",
+            label: t("builderRegistration.Address Proof"),
+            type: "file",
+            colSize: 6,
+          },
+          {
+            name: "fireCertificate",
+            label: t("builderRegistration.Fire Certificate"),
+            type: "file",
+            colSize: 6,
+          },
+          {
+            name: "esipfRegistration",
+            label: t("builderRegistration.ESIPF Registration"),
+            type: "file",
+            colSize: 6,
+          },
+          {
+            name: "iso9001",
+            label: t("builderRegistration.ISO 9001 Certificate"),
+            type: "file",
+            colSize: 6,
+          },
+          {
+            name: "iso14001",
+            label: t("builderRegistration.ISO 14001 Certificate"),
+            type: "file",
+            colSize: 6,
+          },
+          {
+            name: "iso45001",
+            label: t("builderRegistration.ISO 45001 Certificate"),
+            type: "file",
+            colSize: 6,
+          },
+          {
+            name: "pollutionCertificate",
+            label: t("builderRegistration.Pollution Certificate"),
+            type: "file",
+            colSize: 6,
+          },
+          {
+            name: "experienceCertificate",
+            label: t("builderRegistration.Experience Certificate"),
+            type: "file",
+            colSize: 6,
+          },
+          // // Additional documents for builder
+          // {
+          //   name: "additionalDocuments",
+          //   label: t("builderRegistration.Additional Documents"),
+          //   type: "additional_docs",
+          //   colSize: 12,
+          // },
+        ],
+      };
+    }
+  };
+
+  const formFields = getFormFieldsConfig();
+
+  const getDisabledFormFieldsConfig = () => {
+    const config = {};
+    Object.keys(formFields).forEach((stepKey) => {
+      config[stepKey] = formFields[stepKey].map((field) => ({
+        ...field,
+        disabled: true,
+        inputClassName: "disabled-field",
+      }));
+    });
+    return config;
+  };
+
+  const disabledFormFields = getDisabledFormFieldsConfig();
+
+  const getCurrentStepFields = () => {
+    let fields = [];
+    switch (currentStep) {
+      case 1:
+        fields = disabledFormFields.step1;
+        break;
+      case 2:
+        fields = disabledFormFields.step2;
+        break;
+      case 3:
+        fields = disabledFormFields.step3 || [];
+        break;
+      default:
+        fields = [];
+    }
+
+    // Filter fields based on showIf condition
+    return fields.filter((field) => !field.showIf || field.showIf());
+  };
+
+  const handleNext = () => {
+    if (currentStep < totalSteps) {
+      setCompletedSteps((prev) => new Set([...prev, currentStep]));
+      setCurrentStep(currentStep + 1);
+      window.scrollTo(0, 0);
+    }
+  };
+
+  const handlePrevious = () => {
+    setCurrentStep(Math.max(1, currentStep - 1));
+    window.scrollTo(0, 0);
+  };
+
+  const handleBackToList = () => {
+    navigate("/user-registration/view");
+  };
+
+  const getStatusBadge = (status) => {
+    const statusMap = {
+      "Pending Review": "warning",
+      Pending: "warning",
+      Approved: "success",
+      Completed: "success",
+      Rejected: "danger",
+      Processing: "info",
+    };
+    return (
+      <Badge bg={statusMap[status] || "secondary"} className="status-badge">
+        {status}
+      </Badge>
+    );
+  };
+
+  const getStepIcon = (stepNumber) => {
+    if (completedSteps.has(stepNumber)) {
+      return <FaCheckCircle className="text-white" size={12} />;
+    }
+
+    if (isOwner) {
+      const ownerIcons = [FaUser, FaUser, FaFileUpload];
+      return currentStep === stepNumber
+        ? React.createElement(ownerIcons[stepNumber - 1], {
+          className: "text-white",
+          size: 12,
+        })
+        : stepNumber;
+    } else {
+      const builderIcons = [FaBuilding, FaFileUpload];
+      return currentStep === stepNumber
+        ? React.createElement(builderIcons[stepNumber - 1], {
+          className: "text-white",
+          size: 12,
+        })
+        : stepNumber;
+    }
+  };
+
+  const getStepTitles = () => {
+    if (isOwner) {
+      return [
+        t("vesselOwnerRegistration.Vessel Owner Details"),
+        t("vesselOwnerRegistration.Authorized Person's Details"),
+        t("vesselOwnerRegistration.Documents Upload"),
+      ];
+    } else {
+      return [
+        t("builderRegistration.Vessel Builder Details"),
+        t("builderRegistration.Documents Upload"),
+      ];
+    }
+  };
+
+  const stepTitles = getStepTitles();
+
+  if (isLoading) {
+    return <NewLoader ref={loaderRef} />;
+  }
+
+  return (
+    <>
+      <Container fluid className="py-4 officer-view-container">
+        <Row className="justify-content-center">
+          <Col size={12}>
+            <Card className="shadow-lg border-0 modern-card">
+              <Card.Header className="modern-header">
+                <div className="header-content">
+                  <div className="header-left">
+                    <button
+                      className="back-btn"
+                      style={{ width: "2.4rem" }}
+                      onClick={handleBackToList}
+                    >
+                      <FaArrowAltCircleLeft
+                        style={{ verticalAlign: "baseline" }}
+                        size={16}
+                      />
+                    </button>
+                  </div>
+
+                  <div className="header-center">
+                    <h2 className="app-title">Application Review</h2>
+                    <div className="app-details">
+                      <div className="app-number">
+                        <span className="app-label">ID:</span>
+                        <span className="app-id">
+                          {formData.registrationNumber || "N/A"}
+                        </span>
+                      </div>
+                      <div className="user-type">
+                        <span className="type-badge">
+                          {isOwner ? "Owner" : "Builder"}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                    {/* <div className="header-right">
+                    {getStatusBadge(formData.status)}
+                  </div> */}
+                </div>
+              </Card.Header>
+
+              <Card.Body className="modern-body">
+                <div className="stepper-container">
+                  {Array.from({ length: totalSteps }, (_, i) => i + 1).map(
+                    (step, index) => (
+                      <React.Fragment key={step}>
+                        <div
+                          className={`stepper-step ${currentStep === step ? "active" : ""
+                            } ${completedSteps.has(step) ? "completed" : ""}`}
+                        >
+                          <div className="step-circle">{getStepIcon(step)}</div>
+                          <div className="step-label">
+                            {stepTitles[step - 1]}
+                          </div>
+                        </div>
+
+                        {index < totalSteps - 1 && (
+                          <div className="step-connector"></div>
+                        )}
+                      </React.Fragment>
+                    )
+                  )}
+                </div>
+
+                <FormProvider {...methods}>
+                  <form>
+                    <div className="form-section">
+                      <Row className="g-3">
+                        <DynamicViewFields
+                          fields={getCurrentStepFields()}
+                          setFormData={setFormData}
+                          formData={formData}
+                        />
+                      </Row>
+                    </div>
+
+                    <div className="form-actions">
+                      {currentStep > 1 && (
+                        <Button
+                          variant="outline-secondary"
+                          onClick={handlePrevious}
+                          className="action-btn prev-btn"
+                        >
+                          <FaArrowLeft size={12} className="me-2" /> Previous
+                        </Button>
+                      )}
+
+                      {currentStep < totalSteps ? (
+                        <Button
+                          variant="primary"
+                          onClick={handleNext}
+                          className="action-btn next-btn"
+                          style={
+                            currentStep === 1 ? { marginLeft: "auto" } : {}
+                          }
+                        >
+                          Next <FaArrowRight size={12} className="ms-2" />
+                        </Button>
+                      ) : (
+                        <ActionDropdown
+                          actions={actionsFromAPI}
+                          onActionClick={handleActionClick}
+                          variant="success"
+                          className="action-dropdown"
+                        />
+                      )}
+                    </div>
+                  </form>
+                </FormProvider>
+              </Card.Body>
+            </Card>
+          </Col>
+        </Row>
+
+        <ApprovalModal
+          show={showApprovalModal}
+          handleClose={handleCloseModal}
+          handleSubmitData={workflowApplicationSubmit}
+          selectedAction={selectedAction}
+        />
+      </Container>
+    </>
+  );
+};
+
+export default UserViewPage;
