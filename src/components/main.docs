@@ -1,64 +1,92 @@
-{
-    "userType": "VESSEL_OWNER",
-    "ownerDetails": {
-        "id": "",
-        "categoryOfOwner": "INDV",
-        "ownerCompanyName": "sdfsdf",
-        "emailId": "sdfsdf@gmail.com",
-        "phoneNumber": "8765353535",
-        "panNo": "GFDVS0987E",
-        "gstNo": "",
-        "aadharNumber": "217635262623",
-        "tradeLicenseNumber": "2323232323",
-        "addressLine1": "adas",
-        "addressLine2": "",
-        "pin": "700155",
-        "district": "24 PARAGANAS NORTH",
-        "state": "WEST BENGAL",
-        "country": "India",
-        "authorisedFname": "SADA",
-        "authorisedLname": "ADS",
-        "authorisedMob": "8763636363",
-        "authorisedEmail": "sadads@gmail.com",
-        "cinNo": "",
-        "dinNo": "",
-        "supportingDocument": {
-            "individualSupportingDocuments": [
-                {
-                    "id": "",
-                    "documentName": "PAN Card",
-                    "documentType": "PAN_CARD",
-                    "documentSource": "INDV",
-                    "fileStoreId": "74d1964d-e9b8-426a-a425-cb62945ae2d7",
-                    "description": "PAN Card"
-                },
-                {
-                    "id": "",
-                    "documentName": "Aadhaar Card",
-                    "documentType": "AADHAAR_CARD",
-                    "documentSource": "INDV",
-                    "fileStoreId": "dac0ca69-7d57-4d34-b67e-1a2af70c7642",
-                    "description": "Aadhaar Card"
-                }
-            ],
-            "additionalDocuments": [
-                {
-                    "id": "",
-                    "documentName": "ADDITIONALDOCS_01.pdf",
-                    "documentType": "ADDITIONAL_DOCUMENT",
-                    "documentSource": "ADDITIONAL",
-                    "fileStoreId": "3ee07520-1714-4e8f-99bd-58a0201b8777",
-                    "description": "Additional Document"
-                },
-                {
-                    "id": "",
-                    "documentName": "ADDITIONALDOCS_02.pdf",
-                    "documentType": "ADDITIONAL_DOCUMENT",
-                    "documentSource": "ADDITIONAL",
-                    "fileStoreId": "d82fc144-fcad-4204-806e-17138e99bd87",
-                    "description": "Additional Document"
-                }
-            ]
+const handleFileUpload = async (file, fieldName, fieldLabel) => {
+  const maxSize = 10 * 1024 * 1024;
+  if (file.size > maxSize) {
+    toast.error("File size must be less than or equal to 10 MB.");
+    return null;
+  }
+
+  try {
+    loaderRef.current?.show();
+    const formData = new FormData();
+    formData.append("file", file);
+
+    const uploadUrl = BASE_IP + URLS_ENDPOINT.FILE_STORE_SERVICE.UPLOAD_FILE_PUBLIC;
+
+    const response = await axios.post(uploadUrl, formData, {
+      headers: { "Content-Type": "multipart/form-data" },
+    });
+
+    if (response?.data?.files?.[0]?.fileStoreId) {
+      const fileStoreId = response?.data?.files[0]?.fileStoreId;
+      const extension = file.name.substring(file.name.lastIndexOf("."));
+
+      const modifiedFile = new File(
+        [file],
+        `${fieldLabel?.replace(/\s+/g, "")?.toLowerCase()}${extension}`,
+        { type: file.type, lastModified: file.lastModified }
+      );
+
+      setValue(fieldName, modifiedFile);
+      
+      setFormData((prev) => {
+        const updated = { ...prev, [fieldName]: modifiedFile };
+        return updated;
+      });
+
+      if (errors[fieldName]) {
+        clearErrors(fieldName);
+      }
+
+      setFormData((prev) => {
+        const category = prev?.categoryOfOwner;
+        let arrayKey = SUPPORTING_DOC_KEYS[category];
+        
+        const allDocs = [
+          ...OWNER_DOC_CONFIG.baseDocuments,
+          ...(OWNER_DOC_CONFIG.categoryDocuments[category] || []),
+        ];
+        const docConfig = allDocs.find((d) => d.name === fieldName);
+
+        let documentType = docConfig?.code;
+        let documentSource = category;
+        
+        if (fieldName === "EXISTING_DOCUMENTS") {
+          documentType = "EXISTING_DOCUMENT";
+          // Keep same array as category documents
+        } else if (fieldName === "authorizationLetter") {
+          documentType = "AUTHORIZATION_LETTER";
+          // Keep same array as category documents
         }
+
+        const newDoc = {
+          id: "",
+          documentName: fieldLabel,
+          documentType,
+          documentSource,
+          fileStoreId,
+          description: fieldLabel,
+        };
+
+        const updatedSupporting = { ...(prev?.supportingDocument || {}) };
+        updatedSupporting[arrayKey] = [
+          ...(updatedSupporting[arrayKey] || []).filter(
+            (d) => d.documentType !== newDoc.documentType
+          ),
+          newDoc,
+        ];
+
+        return { ...prev, supportingDocument: updatedSupporting };
+      });
+
+      loaderRef.current?.hide();
+      return fileStoreId;
+    } else {
+      throw new Error("Invalid response from server");
     }
-}
+  } catch (err) {
+    console.error("File upload failed", err);
+    toast.error("File upload failed. Please try again.");
+    loaderRef.current?.hide();
+    return null;
+  }
+};
