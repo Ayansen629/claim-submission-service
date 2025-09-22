@@ -1,92 +1,40 @@
-const handleFileUpload = async (file, fieldName, fieldLabel) => {
-  const maxSize = 10 * 1024 * 1024;
-  if (file.size > maxSize) {
-    toast.error("File size must be less than or equal to 10 MB.");
-    return null;
-  }
-
-  try {
-    loaderRef.current?.show();
-    const formData = new FormData();
-    formData.append("file", file);
-
-    const uploadUrl = BASE_IP + URLS_ENDPOINT.FILE_STORE_SERVICE.UPLOAD_FILE_PUBLIC;
-
-    const response = await axios.post(uploadUrl, formData, {
-      headers: { "Content-Type": "multipart/form-data" },
-    });
-
-    if (response?.data?.files?.[0]?.fileStoreId) {
-      const fileStoreId = response?.data?.files[0]?.fileStoreId;
-      const extension = file.name.substring(file.name.lastIndexOf("."));
-
-      const modifiedFile = new File(
-        [file],
-        `${fieldLabel?.replace(/\s+/g, "")?.toLowerCase()}${extension}`,
-        { type: file.type, lastModified: file.lastModified }
-      );
-
-      setValue(fieldName, modifiedFile);
-      
-      setFormData((prev) => {
-        const updated = { ...prev, [fieldName]: modifiedFile };
-        return updated;
+const onSubmit = (data) => {
+  const finalData = { ...formData, ...data };
+  
+  // Collect additional documents and add to category array
+  const additionalDocs = [];
+  additionalFiles.forEach((file) => {
+    const fileData = finalData[`ADDITIONALDOCS_file_${file.id}`];
+    const descData = finalData[`ADDITIONALDOCS_desc_${file.id}`];
+    const fileStoreId = finalData[`ADDITIONALDOCS_fileStoreId_${file.id}`];
+    
+    if (fileData && fileStoreId) {
+      additionalDocs.push({
+        id: "",
+        documentName: fileData.name,
+        documentType: "ADDITIONAL_DOCUMENT",
+        documentSource: finalData.categoryOfOwner,
+        fileStoreId,
+        description: descData || "Additional Document",
       });
-
-      if (errors[fieldName]) {
-        clearErrors(fieldName);
-      }
-
-      setFormData((prev) => {
-        const category = prev?.categoryOfOwner;
-        let arrayKey = SUPPORTING_DOC_KEYS[category];
-        
-        const allDocs = [
-          ...OWNER_DOC_CONFIG.baseDocuments,
-          ...(OWNER_DOC_CONFIG.categoryDocuments[category] || []),
-        ];
-        const docConfig = allDocs.find((d) => d.name === fieldName);
-
-        let documentType = docConfig?.code;
-        let documentSource = category;
-        
-        if (fieldName === "EXISTING_DOCUMENTS") {
-          documentType = "EXISTING_DOCUMENT";
-          // Keep same array as category documents
-        } else if (fieldName === "authorizationLetter") {
-          documentType = "AUTHORIZATION_LETTER";
-          // Keep same array as category documents
-        }
-
-        const newDoc = {
-          id: "",
-          documentName: fieldLabel,
-          documentType,
-          documentSource,
-          fileStoreId,
-          description: fieldLabel,
-        };
-
-        const updatedSupporting = { ...(prev?.supportingDocument || {}) };
-        updatedSupporting[arrayKey] = [
-          ...(updatedSupporting[arrayKey] || []).filter(
-            (d) => d.documentType !== newDoc.documentType
-          ),
-          newDoc,
-        ];
-
-        return { ...prev, supportingDocument: updatedSupporting };
-      });
-
-      loaderRef.current?.hide();
-      return fileStoreId;
-    } else {
-      throw new Error("Invalid response from server");
     }
-  } catch (err) {
-    console.error("File upload failed", err);
-    toast.error("File upload failed. Please try again.");
-    loaderRef.current?.hide();
-    return null;
+  });
+
+  // Add additional documents to the same category array
+  if (additionalDocs.length > 0) {
+    const category = finalData.categoryOfOwner;
+    const arrayKey = SUPPORTING_DOC_KEYS[category];
+    
+    finalData.supportingDocument = {
+      ...finalData.supportingDocument,
+      [arrayKey]: [
+        ...(finalData.supportingDocument?.[arrayKey] || []),
+        ...additionalDocs,
+      ],
+    };
   }
+
+  const payload = createOwnerOrBuilderPayload("VESSEL_OWNER", finalData);
+  console.log("payload", payload);
+  submitUserDetails(payload);
 };
