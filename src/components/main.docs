@@ -1,26 +1,1731 @@
-const handleNext = async () => {
-  const isStepValid = await validateStep();
+import React, { useState, useEffect, useRef } from "react";
+import { useForm, FormProvider } from "react-hook-form";
+import { Container, Row, Col, Button, Card, Badge } from "react-bootstrap";
+import {
+  FaFileUpload,
+  FaArrowLeft,
+  FaArrowRight,
+  FaArrowAltCircleLeft,
+  FaCheckCircle,
+  FaUser,
+  FaBuilding,
+} from "react-icons/fa";
+import { BsFileEarmarkPdf, BsDownload } from "react-icons/bs";
+import { useNavigate, useParams, useLocation } from "react-router-dom";
+import ActionDropdown from "../../../common/ActionDropdown";
+import ApprovalModal from "../../../common/ApprovalModal";
+import "./userViewPage.css";
+import NewLoader from "../../../common/NewLoader";
+import DynamicViewFields from "../../../common/DynamicViewFields";
+import { useTranslation } from "react-i18next";
+import { getFromLocalStorage } from "../../../../utils/localStorageUtils";
+import {
+  SERVICE_BASE,
+  URLS_ENDPOINT,
+  BASE_IP,
+} from "../../../../utils/urlsConstants.ts";
+import { toast } from "react-toastify";
+import { postData } from "../../../../services/http.service.ts";
+import { handleErrorMessage } from "../../../../utils/errorMessageHandler";
+import { getDocumentsForOwner } from "../../../public/user-registration/registration-docs.config.js";
+import { useMasterData } from "../../../context/MasterDataContext.js";
+const UserViewPage = () => {
+  const { t } = useTranslation();
+    const { masterData } = useMasterData()
+  const { type, id } = useParams();
+  const location = useLocation();
+  const applicationInfo = location.state?.application;
+  const userRole = getFromLocalStorage("userRole");
+  const userDetails = getFromLocalStorage("userDetails")
+    ? JSON.parse(getFromLocalStorage("userDetails"))
+    : "";
+  const [currentStep, setCurrentStep] = useState(1);
+  const [formData, setFormData] = useState({});
+  const [isLoading, setIsLoading] = useState(true);
+  const [showApprovalModal, setShowApprovalModal] = useState(false);
+  const [selectedAction, setSelectedAction] = useState("");
+  const [completedSteps, setCompletedSteps] = useState(new Set());
+  const navigate = useNavigate();
+  const [actionsFromAPI, setActionsFromAPI] = useState([]);
+  const loaderRef = useRef();
 
-  if (isStepValid) {
-    setValidationMessage("");
-    const currentValues = getValues();
+  const isOwner = applicationInfo?.userType === "VESSEL_OWNER";
+  const isBuilder = applicationInfo?.userType === "VESSEL_BUILDER";
+  const totalSteps = isOwner ? 3 : 2;
+
+const mapFilesByFieldName = (fileStoreMap = [], supportingDocument = {}, categoryOfOwner = null) => {
+  
+  if (supportingDocument && Object.keys(supportingDocument).length > 0) {
+    const regularFiles = {};
+    const additionalFiles = [];
+
     
-    // Capture all current form values, not just file fields
-    setFormData((prev) => ({ ...prev, ...currentValues }));
+    const documentSourceName = supportingDocument.documentSourceName;
+    const documents = supportingDocument[documentSourceName];
+    
+    if (!documents || !Array.isArray(documents)) return { regularFiles, additionalFiles };
 
+    
+    const allDocConfigs = getDocumentsForOwner({categoryOfOwner}, null, null);
+    
+    documents.forEach(doc => {
+      if (doc.documentType === 'ADDITIONAL_DOCUMENT') {
+        additionalFiles.push({
+          fileName: doc.documentName,
+          fileStoreId: doc.fileStoreId,
+          downLoadFile: `${BASE_IP}/filestore/v1/files/id?fileStoreId=${doc.fileStoreId}&tenantId=iwt`
+        });
+      } else {
+        // Handle common documents 
+        if (doc.documentType === 'AUTHORIZATION_LETTER') {
+          regularFiles['authorizationLetter'] = {
+            fileName: doc.documentName,
+            fileStoreId: doc.fileStoreId,
+            downLoadFile: `${BASE_IP}/filestore/v1/files/id?fileStoreId=${doc.fileStoreId}&tenantId=iwt`
+          };
+        } else if (doc.documentType === 'EXISTING_DOCUMENT') {
+          regularFiles['existingDocuments'] = {
+            fileName: doc.documentName,
+            fileStoreId: doc.fileStoreId,
+            downLoadFile: `${BASE_IP}/filestore/v1/files/id?fileStoreId=${doc.fileStoreId}&tenantId=iwt`
+          };
+        } else {
+          
+          const matchingConfig = allDocConfigs.find(config => config.code === doc.documentType);
+          
+          if (matchingConfig) {
+            regularFiles[matchingConfig.name] = {
+              fileName: doc.documentName,
+              fileStoreId: doc.fileStoreId,
+              downLoadFile: `${BASE_IP}/filestore/v1/files/id?fileStoreId=${doc.fileStoreId}&tenantId=iwt`
+            };
+          }
+        }
+      }
+    });
+
+    return { regularFiles, additionalFiles };
+  }
+
+  
+  const mappingConfig = {
+    // pancard: "panCardUpload",
+    //   gstcertificate: "gstCertificate", 
+    //   addressproof: "addressProof",
+    //   letterofauthorization: "authorizationLetter",
+    //   companyregistrationcertificate: "companyRegistrationCertificate",
+    //   moacertificate: "moaCertificate",
+    //   aoacertificate: "aoaCertificate",
+    //   tradelicense: "tradeLicenseUpload",
+    //   aadhaar: "aadhaarUpload",
+    //   "driving license": "dlUpload",
+    //   existingdocuments: "existingDocuments",
+      // Company specific documents
+      // "cos_reg_cert": "cosRegCertUpload",
+      // "cos_resolution": "cosResolutionUpload",
+      // "be_cos_reg_docs": "beCosRegDocsUpload",
+      // "be_cos_gov_docs": "beCosGovDocsUpload",
+      // "be_cos_resolution": "beCosResolutionUpload",
+      // "comp_reg_cert": "compRegCertUpload",
+      // "comp_moa_aoa": "compMoaAoaUpload",
+      // "comp_board_resolution": "compBoardResUpload",
+      // "partner_reg_cert": "partnerRegCertUpload",
+      // "partner_deed": "partnerDeedUpload",
+      // "trust_reg_cert": "trustRegCertUpload",
+      // "trust_deed": "trustDeedUpload",
+      // "fdi_reg_cert": "fdiRegCertUpload",
+      // "fdi_resolution": "fdiResolutionUpload",
+      // "fdi_proof": "fdiProofUpload",
+      // "vsl_bareboat": "vslBareboatUpload",
+      // "vsl_charterer_proof": "vslChartererProofUpload",
+      // "state_aoa": "stateAoaUpload",
+      // "state_moa": "stateMoaUpload",
+      // "cent_aoa": "centralAoaUpload",
+      // "cent_moa": "centralMoaUpload",
+      // "local_aoa": "localAoaUpload",
+      // "local_moa": "localMoaUpload",
+      // "other_pan": "otherPanUpload",
+      // "other_gst": "otherGstUpload",
+      // Builder documents
+    "company details": "companyDetails",
+    "pan card": "panCardUpload",
+    "gst certificate": "gstCertificate",
+    "factory license": "factoryLicense",
+    "fire certificate": "fireCertificate",
+    "esipf registration": "esipfRegistration",
+    "iso 9001": "iso9001",
+    "iso 14001": "iso14001",
+    "iso 45001": "iso45001",
+    "pollution certificate": "pollutionCertificate",
+    "experience certificate": "experienceCertificate",
+    "address proof": "addressProof",
+  };
+
+  const regularFiles = {};
+  const additionalFiles = [];
+
+  fileStoreMap.forEach(file => {
+    const fieldName = file?.fieldName?.toLowerCase();
+    if (!fieldName) return;
+
+    if (fieldName.includes('additionaldocs')) {
+      additionalFiles.push({
+        fileName: file.fileName,
+        fileStoreId: file.fileStoreId,
+        downLoadFile: file.downLoadFile
+      });
+      return;
+    }
+
+    const matchedKey = Object.keys(mappingConfig).find(key =>
+      fieldName.includes(key)
+    );
+
+    if (matchedKey) {
+      regularFiles[mappingConfig[matchedKey]] = {
+        fileName: file.fileName,
+        fileStoreId: file.fileStoreId,
+        downLoadFile: file.downLoadFile
+      };
+    }
+  });
+
+  return { regularFiles, additionalFiles };
+};
+  const getOwnerCategoryLabel = (categoryCode) => {
+    const ownerType = masterData?.ownerTypes?.find(
+      type => type.valueCode === categoryCode
+    );
+    return ownerType?.valueLabel || categoryCode;
+  };
+ 
+ 
+useEffect(() => {
+  setIsLoading(true);
+  loaderRef.current?.show?.();
+
+  if (applicationInfo) {
+    let processedData = {};
+
+    if (isOwner && applicationInfo.ownerDetails) {
+      const ownerData = applicationInfo.ownerDetails;
+      const { regularFiles, additionalFiles } = mapFilesByFieldName(
+        ownerData.fileStoreMap, 
+        ownerData.supportingDocument, 
+        ownerData.categoryOfOwner
+      );
+      const hasExistingDocs = ownerData.isExistingUser === "Y" ? "Yes" : "No";
+      
+      processedData = {
+        categoryOfOwner: getOwnerCategoryLabel(ownerData.categoryOfOwner),
+         // categoryOfOwner:ownerData.categoryOfOwner,
+        categoryOfOwnerCode: ownerData.categoryOfOwner,
+        ownerCompanyName: ownerData.ownerCompanyName,
+        existingUser: hasExistingDocs,
+        emailId: ownerData.emailId,
+        phoneNumber: ownerData.phoneNumber,
+        panNo: ownerData.panNo,
+        gstNo: ownerData.gstNo,
+        addressLine1: ownerData.addressLine1,
+        addressLine2: ownerData.addressLine2,
+        pin: ownerData.pin,
+        district: ownerData.district,
+        state: ownerData.state,
+        country: ownerData.country,
+        authorisedFname: ownerData.authorisedFname,
+        authorisedLname: ownerData.authorisedLname,
+        authorisedMob: ownerData.authorisedMob,
+        authorisedEmail: ownerData.authorisedEmail,
+        aadharNumber: ownerData.aadharNumber,
+        tradeLicenseNumber: ownerData.tradeLicenseNumber,
+        cinNo: ownerData.cinNo,
+        dinNo: ownerData.dinNo,
+        registrationNumber: applicationInfo.userBasicDetails.registrationNumber,
+        status: applicationInfo.userBasicDetails.isActive ? "Approved" : "Pending Review",
+        fileStoreMap: ownerData.fileStoreMap || [],
+        additionalDocuments: additionalFiles,
+        ...regularFiles,
+      };
+    } else if (isBuilder && applicationInfo.builderDetails) {
+      const builderData = applicationInfo.builderDetails;
+      const { regularFiles, additionalFiles } = mapFilesByFieldName(builderData.fileStoreMap);
+
+      processedData = {
+        builderName: builderData.builderName,
+        emailId: builderData.emailId,
+        phoneNumber: builderData.phone,
+        panNo: builderData.panNo,
+        gstNo: builderData.gstNo,
+        addressLine1: builderData.addressLine1,
+        addressLine2: builderData.addressLine2,
+        pin: builderData.pin,
+        district: builderData.district,
+        state: builderData.state,
+        country: builderData.country,
+        registrationNumber: applicationInfo.userBasicDetails.registrationNumber,
+        status: applicationInfo.userBasicDetails.isActive ? "Approved" : "Pending Review",
+        fileStoreMap: builderData.fileStoreMap || [],
+        additionalDocuments: additionalFiles,
+        ...regularFiles,
+      };
+    }
+
+    setFormData(processedData);
+    setActionsFromAPI(applicationInfo?.processActionMapResponce?.processs[0]?.actions || []);
+    setCompletedSteps(new Set([1]));
+  }
+
+  setTimeout(() => {
+    setIsLoading(false);
+    loaderRef.current?.hide?.();
+  }, 500);
+}, [applicationInfo, isOwner, isBuilder, masterData]);
+
+  const methods = useForm({ defaultValues: { country: "India" } });
+  const { setValue } = methods;
+
+  useEffect(() => {
+    if (!isLoading && Object.keys(formData)?.length > 0) {
+      Object?.keys(formData)?.forEach((key) => {
+        if (formData[key] !== undefined && formData[key] !== null) {
+          setValue(key, formData[key]);
+        }
+      });
+    }
+  }, [isLoading, formData, setValue]);
+
+  const handleActionClick = (action) => {
+    setSelectedAction(action);
+    setShowApprovalModal(true);
+  };
+
+  const workflowApplicationSubmit = async (modalFormData) => {
+    loaderRef?.current?.show();
+
+    try {
+      const URL = `${SERVICE_BASE.IWT_WORKFLOW}${URLS_ENDPOINT.WORK_FLOW_SERVICE.WORKFLOW_ACTION}`;
+
+      const userName =
+        userDetails?.userName ||
+        JSON.parse(getFromLocalStorage("userDetails"))?.userName ||
+        "";
+
+      const payload = {
+        applicationNo: applicationInfo?.userBasicDetails?.registrationNumber,
+        processId: applicationInfo?.processActionMapResponce?.processs?.[0]?.processId,
+        actionId: selectedAction?.actionId,
+        assignerRole: userRole,
+        assignerName: userName,
+        fileId: modalFormData?.document?.url ?? "",
+        remarks: modalFormData?.reason ?? "",
+      };
+
+      const { status, data } = await postData(URL, payload);
+      const { responseStatus } = data || {};
+
+      if (status === 200 && responseStatus?.status === "200") {
+        toast.success(responseStatus?.message || "Action submitted successfully");
+        handleCloseModal();
+
+        setTimeout(() => navigate("/user-registration/view"), 2000);
+      } else {
+        toast.info(responseStatus?.message || "Something went wrong..", {
+          position: "top-right",
+        });
+      }
+    } catch (err) {
+      console.error(err);
+      handleErrorMessage(err?.response?.data);
+    } finally {
+      loaderRef?.current?.hide();
+    }
+  };
+
+  const handleCloseModal = () => {
+    setShowApprovalModal(false);
+    setSelectedAction("");
+  };
+
+  const getFormFieldsConfig = () => {
+    if (isOwner) {
+      return {
+        step1: [
+          {
+            name: "categoryOfOwner",
+            label: t("vesselOwnerRegistration.Category of Owner"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "ownerCompanyName",
+            label: t("vesselOwnerRegistration.Owner/Company Name"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+          name: "existingUser",
+          label: t("vesselOwnerRegistration.Existing User ?"),
+          type: "text",
+          colSize: 6,
+        },
+          {
+            name: "emailId",
+            label: t("vesselOwnerRegistration.Email ID"),
+            type: "email",
+            colSize: 6,
+          },
+          {
+            name: "phoneNumber",
+            label: t("vesselOwnerRegistration.Phone Number"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "panNo",
+            label: t("vesselOwnerRegistration.PAN Number"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "aadharNumber",
+            label: t("vesselOwnerRegistration.aadharNo"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "tradeLicenseNumber",
+            label: t("vesselOwnerRegistration.tradeLicense"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "gstNo",
+            label: t("vesselOwnerRegistration.GST Number"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "cinNo",
+            label: t("vesselOwnerRegistration.CIN Number"),
+            type: "text",
+            colSize: 6,
+            showIf: () => ["COMPANY", "FIRM", "PRIVATE_LTD"].includes(formData.categoryOfOwner),
+          },
+          {
+            name: "dinNo",
+            label: t("vesselOwnerRegistration.DIN Number"),
+            type: "text",
+            colSize: 6,
+            showIf: () => ["COMPANY", "FIRM", "PRIVATE_LTD"].includes(formData.categoryOfOwner),
+          },
+          {
+            name: "addressLine1",
+            label: t("vesselOwnerRegistration.Address Line-1"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "addressLine2",
+            label: t("vesselOwnerRegistration.Address Line-2"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "pin",
+            label: t("vesselOwnerRegistration.PIN"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "district",
+            label: t("vesselOwnerRegistration.District"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "state",
+            label: t("vesselOwnerRegistration.State / UT"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "country",
+            label: t("vesselOwnerRegistration.Country"),
+            type: "text",
+            colSize: 6,
+          },
+        ],
+        step2: [
+          {
+            name: "authorisedFname",
+            label: t("vesselOwnerRegistration.First Name"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "authorisedLname",
+            label: t("vesselOwnerRegistration.Last Name"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "authorisedMob",
+            label: t("vesselOwnerRegistration.Primary Mobile Number"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "authorisedEmail",
+            label: t("vesselOwnerRegistration.Email ID"),
+            type: "email",
+            colSize: 6,
+          },
+          {
+            name: "authorizationLetter",
+            label: t("vesselOwnerRegistration.Letter of Authorization"),
+            type: "file",
+            colSize: 6,
+          },
+        ],
+       step3: [
+  ...getDocumentsForOwner({categoryOfOwner: formData.categoryOfOwnerCode}, null, t).map(doc => ({
+    ...doc,
+    type: "file",
+    disabled: true,
+    inputClassName: "disabled-field",
+  })),
+  ...(formData.existingUser === "Yes" ? [{
+    name: "existingDocuments",
+    label: t("vesselOwnerRegistration.Existing Documents"),
+    type: "file",
+    colSize: 6,
+    disabled: true,
+    inputClassName: "disabled-field",
+  }] : []),
+  {
+    name: "additionalDocuments",
+    label: t("vesselOwnerRegistration.Additional_Documents"),
+    type: "additional_docs",
+    colSize: 12,
+  },
+],
+      };
+    } else {
+      return {
+        step1: [
+          {
+            name: "builderName",
+            label: t("builderRegistration.builderName"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "emailId",
+            label: t("builderRegistration.Email ID"),
+            type: "email",
+            colSize: 6,
+          },
+          {
+            name: "phoneNumber",
+            label: t("builderRegistration.Phone Number"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "panNo",
+            label: t("builderRegistration.PAN Number"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "gstNo",
+            label: t("builderRegistration.GST Number"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "addressLine1",
+            label: t("builderRegistration.Address Line-1"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "addressLine2",
+            label: t("builderRegistration.Address Line-2"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "pin",
+            label: t("builderRegistration.PIN"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "district",
+            label: t("builderRegistration.District"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "state",
+            label: t("builderRegistration.State / UT"),
+            type: "text",
+            colSize: 6,
+          },
+          {
+            name: "country",
+            label: t("builderRegistration.Country"),
+            type: "text",
+            colSize: 6,
+          },
+        ],
+        step2: [
+          {
+            name: "companyDetails",
+            label: t("builderRegistration.Company Details"),
+            type: "file",
+            colSize: 6,
+          },
+          {
+            name: "gstCertificate",
+            label: t("builderRegistration.GST Certificate"),
+            type: "file",
+            colSize: 6,
+          },
+          {
+            name: "panCardUpload",
+            label: t("builderRegistration.PAN Card"),
+            type: "file",
+            colSize: 6,
+          },
+          {
+            name: "factoryLicense",
+            label: t("builderRegistration.Factory License"),
+            type: "file",
+            colSize: 6,
+          },
+          {
+            name: "addressProof",
+            label: t("builderRegistration.Address Proof"),
+            type: "file",
+            colSize: 6,
+          },
+          {
+            name: "fireCertificate",
+            label: t("builderRegistration.Fire Certificate"),
+            type: "file",
+            colSize: 6,
+          },
+          {
+            name: "esipfRegistration",
+            label: t("builderRegistration.ESIPF Registration"),
+            type: "file",
+            colSize: 6,
+          },
+          {
+            name: "iso9001",
+            label: t("builderRegistration.ISO 9001 Certificate"),
+            type: "file",
+            colSize: 6,
+          },
+          {
+            name: "iso14001",
+            label: t("builderRegistration.ISO 14001 Certificate"),
+            type: "file",
+            colSize: 6,
+          },
+          {
+            name: "iso45001",
+            label: t("builderRegistration.ISO 45001 Certificate"),
+            type: "file",
+            colSize: 6,
+          },
+          {
+            name: "pollutionCertificate",
+            label: t("builderRegistration.Pollution Certificate"),
+            type: "file",
+            colSize: 6,
+          },
+          {
+            name: "experienceCertificate",
+            label: t("builderRegistration.Experience Certificate"),
+            type: "file",
+            colSize: 6,
+          },
+          // // Additional documents for builder
+          // {
+          //   name: "additionalDocuments",
+          //   label: t("builderRegistration.Additional Documents"),
+          //   type: "additional_docs",
+          //   colSize: 12,
+          // },
+        ],
+      };
+    }
+  };
+
+  const formFields = getFormFieldsConfig();
+
+  const getDisabledFormFieldsConfig = () => {
+    const config = {};
+    Object.keys(formFields).forEach((stepKey) => {
+      config[stepKey] = formFields[stepKey].map((field) => ({
+        ...field,
+        disabled: true,
+        inputClassName: "disabled-field",
+      }));
+    });
+    return config;
+  };
+
+  const disabledFormFields = getDisabledFormFieldsConfig();
+
+  const getCurrentStepFields = () => {
+    let fields = [];
+    switch (currentStep) {
+      case 1:
+        fields = disabledFormFields.step1;
+        break;
+      case 2:
+        fields = disabledFormFields.step2;
+        break;
+      case 3:
+        fields = disabledFormFields.step3 || [];
+        break;
+      default:
+        fields = [];
+    }
+
+    // Filter fields based on showIf condition
+    return fields.filter((field) => !field.showIf || field.showIf());
+  };
+
+  const handleNext = () => {
     if (currentStep < totalSteps) {
+      setCompletedSteps((prev) => new Set([...prev, currentStep]));
       setCurrentStep(currentStep + 1);
       window.scrollTo(0, 0);
+    }
+  };
+
+  const handlePrevious = () => {
+    setCurrentStep(Math.max(1, currentStep - 1));
+    window.scrollTo(0, 0);
+  };
+
+  const handleBackToList = () => {
+    navigate("/user-registration/view");
+  };
+
+  const getStatusBadge = (status) => {
+    const statusMap = {
+      "Pending Review": "warning",
+      Pending: "warning",
+      Approved: "success",
+      Completed: "success",
+      Rejected: "danger",
+      Processing: "info",
+    };
+    return (
+      <Badge bg={statusMap[status] || "secondary"} className="status-badge">
+        {status}
+      </Badge>
+    );
+  };
+
+  const getStepIcon = (stepNumber) => {
+    if (completedSteps.has(stepNumber)) {
+      return <FaCheckCircle className="text-white" size={12} />;
+    }
+
+    if (isOwner) {
+      const ownerIcons = [FaUser, FaUser, FaFileUpload];
+      return currentStep === stepNumber
+        ? React.createElement(ownerIcons[stepNumber - 1], {
+          className: "text-white",
+          size: 12,
+        })
+        : stepNumber;
     } else {
-      handleSubmit(onSubmit)();
+      const builderIcons = [FaBuilding, FaFileUpload];
+      return currentStep === stepNumber
+        ? React.createElement(builderIcons[stepNumber - 1], {
+          className: "text-white",
+          size: 12,
+        })
+        : stepNumber;
     }
-  } else {
-    const firstError = Object.keys(errors)[0];
-    if (firstError) {
-      const element = document.getElementsByName(firstError)[0];
-      if (element) {
-        element.scrollIntoView({ behavior: "smooth", block: "center" });
-      }
+  };
+
+  const getStepTitles = () => {
+    if (isOwner) {
+      return [
+        t("vesselOwnerRegistration.Vessel Owner Details"),
+        t("vesselOwnerRegistration.Authorized Person's Details"),
+        t("vesselOwnerRegistration.Documents Upload"),
+      ];
+    } else {
+      return [
+        t("builderRegistration.Vessel Builder Details"),
+        t("builderRegistration.Documents Upload"),
+      ];
     }
+  };
+
+  const stepTitles = getStepTitles();
+
+  if (isLoading) {
+    return <NewLoader ref={loaderRef} />;
   }
+
+  return (
+    <>
+      <Container fluid className="py-4 officer-view-container">
+        <Row className="justify-content-center">
+          <Col size={12}>
+            <Card className="shadow-lg border-0 modern-card">
+              <Card.Header className="modern-header">
+                <div className="header-content">
+                  <div className="header-left">
+                    <button
+                      className="back-btn"
+                      style={{ width: "2.4rem" }}
+                      onClick={handleBackToList}
+                    >
+                      <FaArrowAltCircleLeft
+                        style={{ verticalAlign: "baseline" }}
+                        size={16}
+                      />
+                    </button>
+                  </div>
+
+                  <div className="header-center">
+                    <h2 className="app-title">Application Review</h2>
+                    <div className="app-details">
+                      <div className="app-number">
+                        <span className="app-label">ID:</span>
+                        <span className="app-id">
+                          {formData.registrationNumber || "N/A"}
+                        </span>
+                      </div>
+                      <div className="user-type">
+                        <span className="type-badge">
+                          {isOwner ? "Owner" : "Builder"}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                    {/* <div className="header-right">
+                    {getStatusBadge(formData.status)}
+                  </div> */}
+                </div>
+              </Card.Header>
+
+              <Card.Body className="modern-body">
+                <div className="stepper-container">
+                  {Array.from({ length: totalSteps }, (_, i) => i + 1).map(
+                    (step, index) => (
+                      <React.Fragment key={step}>
+                        <div
+                          className={`stepper-step ${currentStep === step ? "active" : ""
+                            } ${completedSteps.has(step) ? "completed" : ""}`}
+                        >
+                          <div className="step-circle">{getStepIcon(step)}</div>
+                          <div className="step-label">
+                            {stepTitles[step - 1]}
+                          </div>
+                        </div>
+
+                        {index < totalSteps - 1 && (
+                          <div className="step-connector"></div>
+                        )}
+                      </React.Fragment>
+                    )
+                  )}
+                </div>
+
+                <FormProvider {...methods}>
+                  <form>
+                    <div className="form-section">
+                      <Row className="g-3">
+                        <DynamicViewFields
+                          fields={getCurrentStepFields()}
+                          setFormData={setFormData}
+                          formData={formData}
+                        />
+                      </Row>
+                    </div>
+
+                    <div className="form-actions">
+                      {currentStep > 1 && (
+                        <Button
+                          variant="outline-secondary"
+                          onClick={handlePrevious}
+                          className="action-btn prev-btn"
+                        >
+                          <FaArrowLeft size={12} className="me-2" /> Previous
+                        </Button>
+                      )}
+
+                      {currentStep < totalSteps ? (
+                        <Button
+                          variant="primary"
+                          onClick={handleNext}
+                          className="action-btn next-btn"
+                          style={
+                            currentStep === 1 ? { marginLeft: "auto" } : {}
+                          }
+                        >
+                          Next <FaArrowRight size={12} className="ms-2" />
+                        </Button>
+                      ) : (
+                        <ActionDropdown
+                          actions={actionsFromAPI}
+                          onActionClick={handleActionClick}
+                          variant="success"
+                          className="action-dropdown"
+                        />
+                      )}
+                    </div>
+                  </form>
+                </FormProvider>
+              </Card.Body>
+            </Card>
+          </Col>
+        </Row>
+
+        <ApprovalModal
+          show={showApprovalModal}
+          handleClose={handleCloseModal}
+          handleSubmitData={workflowApplicationSubmit}
+          selectedAction={selectedAction}
+        />
+      </Container>
+    </>
+  );
 };
+
+export default UserViewPage;
+.officer-view-container {
+  background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
+  min-height: 100vh;
+  padding: 1rem;
+  margin-left: 0;
+  transition: margin-left 0.3s ease;
+}
+
+
+.officer-view-container.sidebar-open {
+  margin-left: 250px;
+}
+
+.officer-view-container.sidebar-closed {
+  margin-left: 60px;
+}
+
+.modern-card {
+  border-radius: 16px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
+  border: none;
+  overflow: hidden;
+}
+
+.modern-header {
+  background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
+  border-bottom: 1px solid #e2e8f0;
+  padding: 0.75rem 1.25rem;
+}
+
+.header-content {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.header-left {
+  flex-shrink: 0;
+}
+
+.back-btn {
+  background: #2466BF;
+  border: none;
+  color: white;
+  padding: 0.4rem;
+  border-radius: 50%;
+  transition: all 0.3s ease;
+  box-shadow: 0 2px 6px rgba(36, 102, 191, 0.3);
+}
+
+.back-btn:hover {
+  transform: translateY(-2px) scale(1.05);
+  box-shadow: 0 6px 20px rgba(36, 102, 191, 0.4);
+  background: #1e5aa8;
+}
+
+.header-center {
+  flex: 1;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.app-title {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 700;
+  background: linear-gradient(to right, #0c5dcf 10%, #2466BF 50%, #0c5dcf 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+.app-details {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  justify-content: center;
+}
+
+.app-number {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: rgba(255, 255, 255, 0.9);
+  padding: 0.3rem 0.75rem;
+  border-radius: 15px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
+}
+
+.app-label {
+  font-size: 0.7rem;
+  color: #64748b;
+  font-weight: 600;
+}
+
+.app-id {
+  background: #2466BF;
+  color: white;
+  padding: 0.25rem 0.75rem;
+  border-radius: 12px;
+  font-weight: 700;
+  font-size: 0.7rem;
+  letter-spacing: 0.3px;
+  box-shadow: 0 1px 4px rgba(36, 102, 191, 0.3);
+}
+
+.user-type {
+  display: flex;
+  justify-content: center;
+}
+
+.type-badge {
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  color: white;
+  padding: 0.25rem 0.75rem;
+  border-radius: 12px;
+  font-weight: 600;
+  font-size: 0.7rem;
+  letter-spacing: 0.3px;
+  box-shadow: 0 1px 4px rgba(16, 185, 129, 0.3);
+}
+
+.header-right {
+  flex-shrink: 0;
+}
+
+.status-badge {
+  font-size: 0.7rem;
+  padding: 0.25rem 0.75rem;
+  border-radius: 12px;
+  font-weight: 600;
+  letter-spacing: 0.025em;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
+}
+
+.modern-body {
+  padding: 1.5rem;
+  background: #ffffff;
+}
+
+.stepper-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 2rem;
+  position: relative;
+  flex-wrap: wrap;
+}
+
+.stepper-step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  position: relative;
+  z-index: 2;
+}
+
+.step-connector {
+  flex: 1;
+  height: 2px;
+  background: linear-gradient(90deg, #e2e8f0 0%, #cbd5e1 100%);
+  margin: 0 1rem;
+  border-radius: 1px;
+  position: relative;
+}
+
+.stepper-step.completed ~ .step-connector::before,
+.stepper-step.active ~ .step-connector::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  background: linear-gradient(90deg, #10b981 0%, #059669 100%);
+  border-radius: 2px;
+  width: 100%;
+  transition: width 0.5s ease;
+}
+
+.step-circle {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 0.75rem;
+  margin-bottom: 0.5rem;
+  transition: all 0.3s ease;
+  background: #e2e8f0;
+  color: #64748b;
+  border: 1px solid #e2e8f0;
+}
+
+.stepper-step.active .step-circle {
+  background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+  color: white;
+  border-color: #3b82f6;
+  box-shadow: 0 3px 10px rgba(59, 130, 246, 0.3);
+  transform: scale(1.02);
+}
+
+.stepper-step.completed .step-circle {
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  color: white;
+  border-color: #10b981;
+  box-shadow: 0 3px 10px rgba(16, 185, 129, 0.3);
+}
+
+.step-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #64748b;
+  text-align: center;
+  letter-spacing: 0.025em;
+  max-width: 120px;
+  line-height: 1.2;
+}
+
+.stepper-step.active .step-label {
+  color: #3b82f6;
+  font-weight: 700;
+}
+
+.stepper-step.completed .step-label {
+  color: #10b981;
+  font-weight: 700;
+}
+
+.form-section {
+  background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 1.25rem;
+  margin-bottom: 1.5rem;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.05);
+}
+
+.section-title {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+  padding-bottom: 1rem;
+  border-bottom: 2px solid #e2e8f0;
+}
+
+.section-icon {
+  color: #3b82f6;
+  font-size: 1.5rem;
+}
+
+.section-title h4 {
+  color: #1f2937;
+  margin: 0;
+  font-weight: 700;
+}
+
+
+.text-field {
+  margin-bottom: 1rem;
+  position: relative;
+}
+
+.text-field .form-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #374151;
+  margin-bottom: 0.4rem;
+  display: block;
+  position: relative;
+}
+
+.text-field .form-control,
+.form-input {
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  /* padding: 0.5rem 0.75rem; */
+  font-size: 0.85rem;
+  transition: all 0.3s ease;
+  background: #ffffff;
+  color: #111827;
+  font-weight: 500;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  width: 100%;
+  height: 38px;
+}
+
+.text-field .form-control:focus,
+.form-input:focus {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+  outline: none;
+  background: #ffffff;
+  transform: translateY(-1px);
+}
+
+.text-field .form-control:hover:not(:disabled),
+.form-input:hover:not(:disabled) {
+  border-color: #9ca3af;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.text-field .form-control:disabled,
+.form-input:disabled,
+.disabled-field {
+  background: linear-gradient(135deg, #f9fafb 0%, #f3f4f6 100%) !important;
+  border: 1px solid #e5e7eb !important;
+  border-radius: 6px !important;
+  color: #6b7280 !important;
+  font-weight: 500;
+  font-size: 0.85rem;
+  padding: 0.5rem 0.75rem !important;
+  cursor: not-allowed;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.05) !important;
+  width: 100%;
+  height: 38px;
+}
+
+.text-field .form-control::placeholder,
+.form-input::placeholder {
+  color: #9ca3af;
+  font-weight: 400;
+  font-style: italic;
+}
+
+
+.text-field .input-group {
+  position: relative;
+}
+
+.text-field .input-group-text {
+  background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+  border: 2px solid #d1d5db;
+  border-right: none;
+  color: #6b7280;
+  font-weight: 600;
+}
+
+.text-field .form-control:focus + .input-group-text,
+.text-field .input-group:focus-within .input-group-text {
+  border-color: #3b82f6;
+  background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
+  color: #3b82f6;
+}
+
+
+.no-data-field {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.5rem 0.75rem;
+  background: #fef3f2;
+  border: 1px solid #fecaca;
+  border-radius: 6px;
+  color: #dc2626;
+  font-size: 0.8rem;
+  font-weight: 500;
+  height: 38px;
+}
+
+.no-data-icon {
+  color: #dc2626;
+  flex-shrink: 0;
+}
+
+
+.file-field {
+  margin-bottom: 1rem;
+  position: relative;
+}
+
+.field-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #374151;
+  margin-bottom: 0.4rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.field-icon {
+  color: #2466BF;
+  flex-shrink: 0;
+}
+
+.file-display {
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 0.75rem;
+  background: #ffffff;
+  transition: all 0.3s ease;
+  min-height: 50px;
+  display: flex;
+  align-items: center;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  position: relative;
+}
+
+.file-display:hover {
+  border-color: #2466BF;
+  box-shadow: 0 4px 12px rgba(36, 102, 191, 0.15);
+  transform: translateY(-1px);
+}
+
+.no-file {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: #dc2626;
+  font-size: 0.8rem;
+  font-weight: 500;
+  width: 100%;
+  justify-content: center;
+  background: #fef3f2;
+  padding: 0.75rem;
+  border-radius: 6px;
+  border: 1px dashed #fecaca;
+}
+
+.no-file .no-data-icon {
+  color: #dc2626;
+}
+
+.file-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.5rem;
+  width: 100%;
+}
+
+.file-info {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex: 1;
+  min-width: 0;
+}
+
+.file-icon {
+  color: #2466BF;
+  flex-shrink: 0;
+  padding: 0.4rem;
+  background: rgba(36, 102, 191, 0.1);
+  border-radius: 6px;
+  font-size: 16px;
+}
+
+.file-name {
+  font-weight: 600;
+  color: #111827;
+  font-size: 0.85rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.file-btn {
+  padding: 0.4rem 0.75rem;
+  border-radius: 6px;
+  border-width: 1px;
+  transition: all 0.3s ease;
+  min-width: 36px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+.view-btn {
+  border-color: #2466BF;
+  color: #2466BF;
+  background: rgba(36, 102, 191, 0.05);
+}
+
+.view-btn:hover {
+  background: #2466BF;
+  border-color: #2466BF;
+  color: white;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(36, 102, 191, 0.3);
+}
+
+.download-btn {
+  border-color: #10b981;
+  color: #10b981;
+  background: rgba(16, 185, 129, 0.05);
+}
+
+.download-btn:hover {
+  background: #10b981;
+  border-color: #10b981;
+  color: white;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+}
+
+/* Form Actions */
+.form-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 3rem;
+  padding-top: 2rem;
+  border-top: 2px solid #f1f5f9;
+}
+
+.form-actions .next-btn[style*="margin-left: auto"] {
+  margin-left: auto !important;
+}
+
+.action-btn {
+  padding: 0.75rem 2rem;
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 0.9rem;
+  letter-spacing: 0.025em;
+  transition: all 0.3s ease;
+  border-width: 2px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.prev-btn {
+  border-color: #6b7280;
+  color: #6b7280;
+  background: white;
+}
+
+.prev-btn:hover:not(:disabled) {
+  background: #6b7280;
+  border-color: #6b7280;
+  color: white;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(107, 114, 128, 0.3);
+}
+
+.next-btn {
+  background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+  border-color: #3b82f6;
+  color: white;
+  box-shadow: 0 3px 10px rgba(59, 130, 246, 0.3);
+}
+
+.next-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
+}
+
+.action-dropdown {
+  padding: 0.75rem 2rem;
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+@media (max-width: 768px) {
+  .officer-view-container {
+    padding: 0.5rem;
+    margin-left: 0 !important;
+  }
+  
+  .modern-header {
+    padding: 0.5rem;
+  }
+  
+  .header-content {
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+  
+  .app-title {
+    font-size: 1rem;
+  }
+  
+  .app-details {
+    flex-direction: column;
+    gap: 0.3rem;
+  }
+  
+  .modern-body {
+    padding: 0.75rem;
+  }
+  
+  .stepper-container {
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.5rem;
+    margin-bottom: 1.5rem;
+  }
+  
+  .stepper-step {
+    flex: 1;
+    min-width: 0;
+    max-width: 120px;
+  }
+  
+  .step-connector {
+    display: none;
+  }
+  
+  .step-circle {
+    width: 28px;
+    height: 28px;
+    font-size: 0.7rem;
+    margin-bottom: 0.3rem;
+  }
+  
+  .step-label {
+    font-size: 0.65rem;
+    max-width: none;
+    line-height: 1.1;
+  }
+  
+  .form-actions {
+    flex-direction: column;
+    gap: 0.75rem;
+    margin-top: 2rem;
+    padding-top: 1.5rem;
+  }
+  
+  .form-actions .next-btn[style*="margin-left: auto"] {
+    margin-left: 0 !important;
+    width: 100%;
+  }
+  
+  .action-btn {
+    width: 100%;
+    justify-content: center;
+    padding: 0.6rem 1.5rem;
+    font-size: 0.85rem;
+  }
+  
+  .file-item {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+  }
+  
+  .file-actions {
+    align-self: stretch;
+    justify-content: flex-end;
+  }
+  
+  .form-section {
+    padding: 0.75rem;
+    margin-bottom: 1rem;
+  }
+  
+  .section-title {
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 0.5rem;
+  }
+  
+  .text-field,
+  .file-field {
+    margin-bottom: 0.75rem;
+  }
+  
+  .text-field .form-label,
+  .field-label {
+    font-size: 0.75rem;
+    margin-bottom: 0.3rem;
+  }
+  
+  .text-field .form-control,
+  .form-input {
+    height: 36px;
+    font-size: 0.8rem;
+  }
+  
+  .no-data-field {
+    height: 36px;
+    font-size: 0.75rem;
+  }
+  
+  .file-display {
+    min-height: 45px;
+    padding: 0.5rem;
+  }
+  
+  .file-name {
+    font-size: 0.8rem;
+  }
+  
+  .file-btn {
+    height: 28px;
+    min-width: 32px;
+    padding: 0.3rem 0.5rem;
+  }
+}
+
+@media (max-width: 576px) {
+  .officer-view-container {
+    padding: 0.25rem;
+  }
+  
+  .modern-header {
+    padding: 0.4rem;
+  }
+  
+  .app-title {
+    font-size: 0.9rem;
+  }
+  
+  .app-label,
+  .app-id,
+  .type-badge,
+  .status-badge {
+    font-size: 0.65rem;
+  }
+  
+  .modern-body {
+    padding: 0.5rem;
+  }
+  
+  .stepper-container {
+    gap: 0.25rem;
+  }
+  
+  .step-circle {
+    width: 24px;
+    height: 24px;
+    font-size: 0.65rem;
+  }
+  
+  .step-label {
+    font-size: 0.6rem;
+  }
+  
+  .form-section {
+    padding: 0.5rem;
+  }
+  
+  .text-field .form-label,
+  .field-label {
+    font-size: 0.7rem;
+  }
+  
+  .text-field .form-control,
+  .form-input {
+    height: 34px;
+    font-size: 0.75rem;
+  }
+  
+  .file-name {
+    max-width: 120px;
+    font-size: 0.75rem;
+  }
+  
+  .file-display {
+    min-height: 40px;
+  }
+  
+  .action-btn {
+    padding: 0.5rem 1rem;
+    font-size: 0.8rem;
+  }
+}
+
+
+/* Additional Documents Section */
+.additional-docs-section {
+  background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 1.25rem;
+  margin-top: 1rem;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.05);
+}
+
+.additional-docs-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.additional-docs-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 1rem;
+}
+
+.additional-doc-card {
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 0.75rem;
+  transition: all 0.3s ease;
+}
+
+.additional-doc-card:hover {
+  border-color: #2466BF;
+  box-shadow: 0 4px 12px rgba(36, 102, 191, 0.15);
+  transform: translateY(-1px);
+}
+
+@media (max-width: 768px) {
+  .additional-docs-grid {
+    grid-template-columns: 1fr;
+  }
+}
