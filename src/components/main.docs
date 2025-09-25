@@ -1,1176 +1,1720 @@
-import React, { useState, useEffect, useRef } from "react";
-import { useForm, useFieldArray } from "react-hook-form";
-import { Row, Col, Button, Card } from "react-bootstrap";
-import InputText from "../../../../common/InputText.tsx";
-import InputFile from "../../../../common/InputFile.tsx";
-import Collapsible from "../../../../common/Collapsible.js";
+import React, { useState, useEffect, useRef, use } from "react";
+import { Box, Typography, Stack } from "@mui/material";
+import { useSearchParams, useLocation, useNavigate } from "react-router-dom";
+import Stepper from "../../../../common/Stepper.jsx";
+import { useForm } from "react-hook-form";
+import ActionDropdown from "../../../../common/ActionDropdown";
+import ApprovalModal from "../../../../common/ApprovalModal";
 import { useTranslation } from "react-i18next";
-import {
-  FaShip,
-  FaCog,
-  FaFileUpload,
-  FaPlus,
-  FaTrash,
-  FaClipboardList,
-  FaDownload,
-  FaTimesCircle,
-} from "react-icons/fa";
-import { BsFileEarmarkPdf } from "react-icons/bs";
-import { useMasterData } from "../../../../context/MasterDataContext.js";
 import { toast } from "react-toastify";
-import { getFromLocalStorage } from "../../../../../utils/localStorageUtils.js";
-import { BASE_IP, URLS_ENDPOINT } from "../../../../../utils/urlsConstants.ts";
-import axios from "axios";
-import { postFORMdata } from "../../../../../services/http.service.ts";
+import { postData } from "../../../../../services/http.service.ts";
+import {
+  SERVICE_BASE,
+  URLS_ENDPOINT,
+  BASE_IP,
+} from "../../../../../utils/urlsConstants.ts";
+import VesselBasicDetailsView from "./VesselBasicDetailsView.js";
+import ReportsDashboard from "./reports/reportsDashboard.js";
+import { Button } from "react-bootstrap";
+import { BsArrowLeft } from "react-icons/bs";
+import RegistrationApplicationForm from "./RegistrationApplicationForm.jsx";
 import NewLoader from "../../../../common/NewLoader.js";
-import MultiFile from "../../../../common/MultiFile.js";
+import InvoiceModal from "../../../../common/InvoiceModal.js";
+import { getFromLocalStorage } from "../../../../../utils/localStorageUtils.js";
+import {
+  APPLICATION_TYPES,
+  OFFICER_ROLES,
+  USER_ROLES,
+} from "../../../../../utils/constants.ts";
+import { handleErrorMessage } from "../../../../../utils/errorMessageHandler.js";
+import CurvingMarkingNote from "../../new-vessel/common/CurvingMarkingNote.js";
+import CurvingMarkingNoteL5 from "../../new-vessel/common/CurvingMarkingNoteL5.js";
 
-const RequestApplication = ({
-  formMethods,
+const VesselReportsAndDocs = ({
+  applicationNo,
   viewMode = false,
-  editMode = false,
-  registrationData,
-  initialData
+  tabMode = false,
 }) => {
-  const { t } = useTranslation();
-  const { masterData } = useMasterData();
+  // let { t } = useTranslation();
+  // let { id } = useParams();
+  const [searchParams] = useSearchParams();
+  let id = searchParams?.get("applicationNo");
+  let location = useLocation();
+  let navigate = useNavigate();
+  let isEditMode = !!id && location.pathname.includes("/edit");
+  let isViewMode = (!!id && location.pathname.includes("/view")) || viewMode;
+  const { rowData, pageName } = location?.state || {};
+  const [actionsFromAPI, setActionsFromAPI] = useState([]);
+
+  if (!id && applicationNo) {
+    id = applicationNo;
+  }
+
+  const stepperRef = useRef();
+  const registrationFormRef = useRef();
+
+  const methods = useForm({ mode: "onTouched" });
+  const { trigger, getValues, setValue } = methods;
+  // const [isLoading, setIsLoading] = useState(false);
+  const [showApprovalModal, setShowApprovalModal] = useState(false);
+  const [selectedAction, setSelectedAction] = useState("");
+  const [registrationData, setRegistrationData] = useState(null);
+  const [steps, setSteps] = useState([]);
+  const [disableSubmit, setDisableSubmit] = useState(false);
+  const [initialStep, setInitialStep] = useState(0);
   const loaderRef = useRef();
+  const [showInvoiceModal, setShowInvoiceModal] = useState(false);
+  const [paymentData, setPaymentData] = useState(null);
+  const [fullPaymentData, setFullPaymentData] = useState({});
+  const [showCmnStepper, setShowCmnStepper] = useState(false);
+  const [paymentInfoList, setPaymentInfoList] = useState([]);
+  const [historyDetails, setHistoryDetails] = useState([]);
+  const [isFormSubmitted, setIsFormSubmitted] = useState(false);
 
-  const [otherTechnicalDocumentFiles, setOtherTechnicalDocumentFiles] = useState([{ id: 1 }]);
-  const [fileStates, setFileStates] = useState({
-    certificateOfRegistration: null,
-    alterationDrawings: null,
-    existingApprovedDrawings: null,
-    updatedStabilityBooklet: null,
-    existingTonnageBooklet: null,
-    updatedTonnageBooklet: null,
-    existingStabilityBooklet: null,
-    newInsuranceCertificate: null,
-    lastSurveyCertificate: null,
-    workOrder: null,
-    insuranceCertificate: null,
-  });
-
-  const internalFormMethods = useForm({
-    mode: "onTouched",
-  });
-
-  const methods = formMethods || internalFormMethods;
-  const {
-    register,
-    watch,
-    setValue,
-    clearErrors,
-    formState: { errors },
-    unregister,
-  } = methods;
-
-  const { fields, append, remove } = useFieldArray({
-    control: methods.control,
-    name: "alterationDetails.alterations",
-  });
+  const userRole = getFromLocalStorage("userRole") || "";
+  const userDetails = getFromLocalStorage("userDetails")
+    ? JSON.parse(getFromLocalStorage("userDetails"))
+    : "";
+  const isOfficerLogin = OFFICER_ROLES.includes(userRole) || false;
+  if (isOfficerLogin) {
+    isViewMode = true;
+  }
 
   useEffect(() => {
-    if (fields.length === 0 && !initialData?.AlterationDetails) {
-      append({
-        description: "",
-        reason: "",
-        proposedDate: "",
+    window.scrollTo(0, 0);
+  }, []);
+
+  const fetchPaymentDetails = async () => {
+    try {
+      const payload = {
+        category: "REGISTRATION",
+        paymentProcess: "APPLICATIONCHARGE",
+        application_no: id ?? "",
+      };
+
+      loaderRef.current?.show();
+      const apiUrl = `${SERVICE_BASE.IWT_REGISTRATION}${URLS_ENDPOINT.VESSEL_SERVICE.PAYMENT_GENERATE}`;
+      const { status, data } = await postData(apiUrl, payload);
+      if (
+        status !== 200 ||
+        data?.responseStatus?.status !== "FeeSlab found successfully"
+      ) {
+        console.warn(
+          "Payment details not found or API response status mismatch."
+        );
+        return;
+      }
+
+      const apiData = data?.data ?? {};
+
+      const invoiceBreakupInfo = (apiData?.feesDetailsl ?? []).map(
+        (fee, index) => ({
+          id: fee?.id ?? index.toString(),
+          label: fee?.category_description ?? fee?.category_name ?? "N/A",
+          amount: fee?.totalCalucation ?? fee?.old_data ?? 0,
+          categoryHeader: fee?.catHeaderName ?? "",
+        })
+      );
+
+      const summary = {
+        subTotal: apiData.totalAmount ?? 0,
+        cgst: apiData.cgst ?? 0,
+        sgst: apiData.sgst ?? 0,
+        igst: apiData.igst ?? 0,
+        totalPayable: apiData.totalAmountAtergst ?? 0,
+      };
+      console.log("Payment Data:", invoiceBreakupInfo, summary);
+      setPaymentData({ invoiceBreakupInfo, summary });
+      setFullPaymentData(data ?? {});
+      loaderRef.current?.hide();
+    } catch (error) {
+      loaderRef.current?.hide();
+      console.error("Error fetching payment details:", error?.message || error);
+    }
+  };
+
+  const handleGetInvoice = async () => {
+    await fetchPaymentDetails();
+    setShowInvoiceModal(true);
+  };
+
+  const handleProceedToPay = () => {
+    setShowInvoiceModal(false);
+    if (paymentData && id) {
+      navigate(`/payment?applicationNo=${id}`, {
+        state: {
+          paymentData,
+          applicationNumber: id,
+          fullPaymentData,
+        },
       });
     }
-  }, [fields.length, append, initialData]);
+  };
 
-  // Auto-populate vessel data from registration
   useEffect(() => {
-    if (!registrationData) return;
+    if (id) {
+      const fetchRegistrationDetails = async () => {
+        try {
+          const payload = { applicationNumbers: [id ?? ""] };
+          const apiUrl = `${SERVICE_BASE.IWT_REGISTRATION}${URLS_ENDPOINT.USER_SERVICE.REGISTRATION_SEARCH_BY_ID}`;
+          const { status, data } = await postData(apiUrl, payload);
 
-    const mapping = {
-      // Basic Vessel Info
-      "basicVesselInfo.officialNo": registrationData.vessel?.registrationNo,
-      "basicVesselInfo.portOfRegistry": registrationData.vessel?.portOfRegistry,
-      "basicVesselInfo.nameOfVessel": registrationData.vessel?.vesselName,
-      "basicVesselInfo.nameOfOwner": registrationData.owner?.name,
-      "basicVesselInfo.addressOfOwner": registrationData.owner?.address,
-      "basicVesselInfo.ownerTelephone": registrationData.owner?.mobile,
-      "basicVesselInfo.typeOfVessel": registrationData.vessel?.type,
-      "basicVesselInfo.categoryOfVessel": registrationData.vessel?.category,
-      "basicVesselInfo.dateOfRegistry": registrationData.vessel?.dateOfRegistry,
-      "basicVesselInfo.length": registrationData.vessel?.length,
-      "basicVesselInfo.breadth": registrationData.vessel?.breadth,
-      "basicVesselInfo.depth": registrationData.vessel?.depth,
-      "basicVesselInfo.draft": registrationData.vessel?.draft,
-      "basicVesselInfo.grossTonnage": registrationData.vessel?.grt,
-      "basicVesselInfo.netTonnage": registrationData.vessel?.nrt,
-      "basicVesselInfo.placeOfLastSurvey": registrationData.vessel?.placeOfLastSurvey,
-      "basicVesselInfo.dateOfLastSurvey": registrationData.vessel?.dateOfLastSurvey,
-      "basicVesselInfo.yearOfBuild": registrationData.vessel?.yearOfBuild,
-      "basicVesselInfo.nameOfBuilder": registrationData.builder?.name,
-      "basicVesselInfo.addressOfBuilder": registrationData.builder?.address,
-      "basicVesselInfo.builderMobile": registrationData.builder?.mobile,
-      "basicVesselInfo.builderEmail": registrationData.builder?.email,
-      "basicVesselInfo.tradeLicense": registrationData.builder?.tradeLicense,
-      "basicVesselInfo.gst": registrationData.builder?.gst,
+          const resData = data?.data?.[0] ?? {};
+          // const statusMessage = res?.responseStatus?.status;
 
-      // Hull Particulars
-      "hullParticulars.hullMaterial": registrationData.hull?.material,
-      "hullParticulars.hullPlattingMaterial": registrationData.hull?.plattingMaterial,
-      "hullParticulars.hullPlattingThickness": registrationData.hull?.plattingThickness,
-      "hullParticulars.noOfBulkheads": registrationData.hull?.noOfBulkheads,
-      "hullParticulars.bulkheadPlacement": registrationData.hull?.bulkheadPlacement,
-      "hullParticulars.bulkheadThickness": registrationData.hull?.bulkheadThickness,
-      "hullParticulars.frameMaterial": registrationData.hull?.frameMaterial,
-      "hullParticulars.frameThickness": registrationData.hull?.frameThickness,
-      "hullParticulars.floorMaterial": registrationData.hull?.floorMaterial,
-      "hullParticulars.floorThickness": registrationData.hull?.floorThickness,
+          if (status !== 200) {
+            toast.error("Unable to fetch registration details.");
+            return;
+          }
 
-      // Engine Details
-      "detailsOfPropulsion.typeOfEngine": registrationData.engine?.type,
-      "detailsOfPropulsion.engineMake": registrationData.engine?.make,
-      "detailsOfPropulsion.engineMakerAddress": registrationData.engine?.makerAddress,
-      "detailsOfPropulsion.modelNo": registrationData.engine?.modelNo,
-      "detailsOfPropulsion.numberOfEngine": registrationData.engine?.numberOfEngine,
-      "detailsOfPropulsion.yearOfMake": registrationData.engine?.yearOfMake,
-      "detailsOfPropulsion.horsepower": registrationData.engine?.horsepower,
-      "detailsOfPropulsion.speedRPM": registrationData.engine?.speed,
-      "detailsOfPropulsion.strokeEngine": registrationData.engine?.stroke,
-      "detailsOfPropulsion.numberOfSetFitted": registrationData.engine?.numberOfSetFitted,
-      "detailsOfPropulsion.setSrNo": registrationData.engine?.setSrNo,
-      "detailsOfPropulsion.engineCylinderDiameter": registrationData.engine?.cylinderDiameter,
-      "detailsOfPropulsion.propellerType": registrationData.engine?.propellerType,
-      "detailsOfPropulsion.gearType": registrationData.engine?.gearType,
-      "detailsOfPropulsion.noOfGear": registrationData.engine?.noOfGear,
-      "detailsOfPropulsion.vesselSpeed": registrationData.engine?.vesselSpeed,
-      "detailsOfPropulsion.revolutionMints": registrationData.engine?.revolutionMints,
-      "detailsOfPropulsion.cylindersPerSetRotary": registrationData.engine?.cylindersPerSetRotary,
-      "detailsOfPropulsion.cylindersPerSetReciprocating": registrationData.engine?.cylindersPerSetReciprocating,
-      "detailsOfPropulsion.noOfShaft": registrationData.engine?.noOfShaft,
-      "detailsOfPropulsion.lengthOfEngineRoom": registrationData.engine?.lengthOfEngineRoom,
-    };
+          setRegistrationData(resData);
 
-    Object.entries(mapping).forEach(([key, value]) => {
-      if (value != null) setValue(key, value);
-    });
-  }, [registrationData, setValue]);
-
-  const handleFileChange = async (e, documentType) => {
-    if (viewMode) return;
-    const file = e?.target?.files[0];
-    if (!file) return;
-
-    const maxSize = 10 * 1024 * 1024;
-    if (file.size > maxSize) {
-      toast.error("File size must be less than or equal to 10 MB.");
-      e.target.value = null;
-      return;
-    }
-
-    loaderRef.current?.show();
-
-    try {
-      const formData = new FormData();
-      formData.append("file", file);
-
-      const uploadUrl = BASE_IP + URLS_ENDPOINT.FILE_STORE_SERVICE.UPLOAD_FILE;
-      const response = await postFORMdata(uploadUrl, formData);
-
-      const fileStoreId = response?.data?.files[0]?.fileStoreId;
-
-      if (fileStoreId) {
-        const fileExtension = file.name.substring(file.name.lastIndexOf("."));
-
-        const getStandardizedFileName = (docType, extension) => {
-          const baseNames = {
-            certificateOfRegistration: "Certificate of Registration",
-            alterationDrawings: "Alteration Drawings",
-            existingApprovedDrawings: "Existing Approved Drawings",
-            updatedStabilityBooklet: "Updated Stability Booklet",
-            existingTonnageBooklet: "Existing Tonnage Booklet",
-            updatedTonnageBooklet: "Updated Tonnage Booklet",
-            existingStabilityBooklet: "Existing Stability Booklet",
-            newInsuranceCertificate: "New Insurance Certificate",
-            lastSurveyCertificate: "Last Survey Certificate",
-            workOrder: "Work Order",
-            insuranceCertificate: "Insurance Certificate",
+          const batchSetValues = (valuesObj) => {
+            Object.entries(valuesObj).forEach(([key, value]) => {
+              setValue(key, value ?? "");
+            });
           };
-          return `${baseNames[docType] || docType}${extension}`;
-        };
 
-        const standardizedName = getStandardizedFileName(documentType, fileExtension);
+          const {
+            basicDetails = {},
+            vesselDetails = {},
+            engineDetails = {},
+            processActionMapResponce = [],
+          } = resData;
 
-        const displayFile = new File([file], standardizedName, {
-          type: file.type,
+          const owner = basicDetails?.ownerDetails ?? {};
+          batchSetValues({
+            ownerName: owner?.ownerCompanyName ?? "",
+            ownerAddress: `${owner?.addressLine1 ?? ""}, ${owner?.addressLine2 ?? ""
+              }`,
+            mobile: owner?.phoneNumber ?? "",
+            email: owner?.emailId ?? "",
+            pan: owner?.panNo ?? "",
+            gst: owner?.gstNo ?? "",
+            aadhar: owner?.aadharNumber ?? "",
+            tradeLicence: owner?.tradeLicenseNumber ?? "",
+          });
+
+          batchSetValues({
+            grt: vesselDetails?.grossTonnage ?? "",
+            workOrderValue: vesselDetails?.workOrderValue ?? "",
+            vesselType: vesselDetails?.typeOfVessel ?? "",
+            category: vesselDetails?.categoryOfVessel ?? "",
+            zone: vesselDetails?.zone ?? "",
+            purchaseType: vesselDetails?.purchaseType ?? "",
+            supervisionAuthority: vesselDetails?.supervisionAuthority ?? "",
+            classificationSociety:
+              vesselDetails?.nameOfClassificationSociety ?? "",
+            nameOfMaster: vesselDetails?.nameOfMaster ?? "",
+            certificateNo: vesselDetails?.certficateNumber ?? "",
+            nameOfRegistry: vesselDetails?.nameOfRegistry ?? "",
+            registrationNo: vesselDetails?.registrationNumber ?? "",
+            vesselName: vesselDetails?.vesselName ?? "",
+            kindOfVessel: vesselDetails?.kindOfVessel ?? "",
+            categoryOfVessel: vesselDetails?.categoryOfVessel ?? "",
+            mortgage: vesselDetails?.mortgage ?? "",
+            placeOfBuild: vesselDetails?.placeOfBuild ?? "",
+            detailsOfInsurance: vesselDetails?.insuranceDetails ?? "",
+            vesselyearOfBuild: vesselDetails?.yearOfBuild?.toString() ?? "",
+            protectionAndIndemnityClubNo: vesselDetails?.pniClubNo ?? "",
+            protectionAndIndemnityClubName: vesselDetails?.pniClubName ?? "",
+            insuranceValidUpto: vesselDetails?.insuranceValidDate
+              ? new Date(vesselDetails.insuranceValidDate) // convert string → Date
+              : "",
+          });
+
+          const builder = basicDetails?.builderDetails ?? {};
+          batchSetValues({
+            constructedBy: basicDetails?.constructedBy ?? "2",
+            builderName: builder?.builderName,
+            builderAddress: `${builder?.addressLine1 ?? ""}, ${builder.addressLine2 ?? ""
+              }`,
+            builderEmail: builder?.emailId ?? "",
+            builderMobile: builder?.phone ?? "",
+            builderGST: builder?.gstNo ?? "",
+            builderTradeLicence: builder?.tradeLicenseNumber ?? "",
+            builderAuth: basicDetails?.builderAuthorization ?? "",
+          });
+
+          batchSetValues({
+            yearOfBuild: engineDetails?.yearOfBuild ?? "",
+            typeOfEngine: engineDetails?.engineType ?? "",
+            engineMake: engineDetails?.engineMake ?? "",
+            engineMakerAddress: engineDetails?.makerAddress ?? "",
+            enginepin: engineDetails?.pin ?? "",
+            enginephoneNumber: engineDetails?.mobile ?? "",
+            engineemail: engineDetails?.email ?? "",
+            horsepower: engineDetails?.horsepower?.toString() ?? "",
+            speed: engineDetails?.speed?.toString() ?? "",
+            yearOfMake: engineDetails?.yearOfMake ?? "",
+          });
+
+          batchSetValues({
+            occupation: basicDetails?.occupation,
+            originalPlaceOfBusiness: basicDetails?.originalPlaceBusiness,
+          });
+          if (isOfficerLogin) {
+            let actionsItems =
+              processActionMapResponce?.length > 0
+                ? processActionMapResponce[0]?.processs?.[0]?.actions || []
+                : [];
+
+            // Filter out Forward action if Generate CMN exists
+            const hasGenerateCMN = actionsItems.some(
+              (item) => item.actionName === "Generate CMN"
+            );
+            if (hasGenerateCMN) {
+              actionsItems = actionsItems.filter(
+                (item) => item.actionName !== "Forward"
+              );
+            }
+
+            if (
+              actionsItems?.length > 0 &&
+              resData?.appointmentSlots?.length > 0
+            ) {
+              actionsItems = actionsItems?.filter(
+                (item) => item.actionName !== "Generate CMN"
+              );
+            }
+
+            setActionsFromAPI(actionsItems);
+          }
+          // if (isOfficerLogin) {
+          //   let actionsItems =
+          //     processActionMapResponce?.length > 0
+          //       ? processActionMapResponce[0]?.processs?.[0]?.actions || []
+          //       : [];
+
+          //   if (
+          //     actionsItems?.length > 0 &&
+          //     resData?.appointmentSlots?.length > 0
+          //   ) {
+          //     actionsItems = actionsItems?.filter(
+          //       (item) => item.actionName !== "Generate CMN"
+          //     );
+          //   }
+
+          //   setActionsFromAPI(actionsItems);
+          // }
+        } catch (err) {
+          console.error("Failed to fetch registration details:", err);
+          toast.error("Failed to fetch registration details.");
+        }
+      };
+
+      const fetchAllInvoiceDetails = async () => {
+        // loaderRef.current?.show();
+        console.log("Fetching all invoice details for application:", id);
+        try {
+          const payload = { applicationNo: id ?? "" };
+          const apiUrl = `${SERVICE_BASE.IWT_REGISTRATION}${URLS_ENDPOINT.VESSEL_SERVICE.GET_PAYMENT_DETAILS}`;
+          const { status, data } = await postData(apiUrl, payload);
+
+          if (data?.data?.transaction) {
+            const formattedData = data?.data?.transaction?.map((item) => ({
+              ...item,
+              paymentType: item?.fee?.billtype || "--",
+            }));
+
+            setPaymentInfoList(formattedData);
+          }
+          // loaderRef.current?.hide();
+        } catch (err) {
+          // loaderRef.current?.hide();
+          console.error("Failed to fetch fetchAllInvoiceDetails:", err);
+        }
+      };
+
+      const fetchAppHistoryDetails = async () => {
+        console.log("Fetching all invoice details for application:", id);
+        try {
+          const payload = { applicationNo: id ?? "" };
+          const apiUrl = `${SERVICE_BASE.IWT_WORKFLOW}${URLS_ENDPOINT.WORK_FLOW_SERVICE.HISTORY_DETAILS}`;
+          const { status, data } = await postData(apiUrl, payload);
+
+          console.log("History Details API response:", data, status);
+          if (status === 200 && Array.isArray(data?.data)) {
+            const formattedData = data?.data?.map((item) => ({
+              ...item,
+              timestamp: item?.timestamp || "N/A",
+            }));
+            setHistoryDetails(formattedData);
+          }
+        } catch (err) {
+          console.error("Failed to fetchAppHistoryDetails : ", err);
+        }
+      };
+
+      const fetchData = async () => {
+        loaderRef.current?.show();
+        try {
+          await Promise.all([
+            fetchRegistrationDetails(),
+            fetchAllInvoiceDetails(),
+            fetchAppHistoryDetails(),
+          ]);
+        } finally {
+          loaderRef.current?.hide();
+        }
+      };
+
+      fetchData();
+    }
+  }, [id]);
+
+  const handleSubmitAppointments = async (appointmentSlots) => {
+    try {
+      loaderRef.current?.show();
+
+      const payload = {
+        ...createRegistrationPayload(methods.getValues(), {}, appointmentSlots),
+      };
+
+      const apiUrl =
+        SERVICE_BASE.IWT_REGISTRATION + URLS_ENDPOINT.VESSEL_SERVICE.CREATE;
+      const response = await postData(apiUrl, payload);
+
+      if (response?.status === 200 && response?.data?.responseStatus) {
+        toast.success(
+          response?.data?.responseStatus?.message ||
+          "Appointment slots submitted successfully!"
+        );
+        setActionsFromAPI((actions) => {
+          const newActionsItems = actions?.filter(
+            (item) => item.actionName !== "Generate CMN"
+          );
+          return newActionsItems;
         });
-
-        setFileStates((prev) => ({
-          ...prev,
-          [documentType]: {
-            name: standardizedName,
-            fileStoreId,
-            originalName: file.name,
-            displayFile: displayFile,
-          },
-        }));
-
-        setValue(`enclosure.${documentType}`, displayFile);
-        setValue(`enclosure.${documentType}FileStoreId`, fileStoreId);
-        setValue(`enclosure.${documentType}OriginalName`, file.name);
-        clearErrors(`enclosure.${documentType}`);
-        toast.success("File uploaded successfully!");
+      } else {
+        toast.error(
+          response?.data?.responseStatus?.message ||
+          "Failed to submit appointment slots"
+        );
       }
-    } catch (err) {
-      console.error("File upload failed:", err);
-      toast.error("File upload failed. Please try again.");
-      setFileStates((prev) => ({ ...prev, [documentType]: null }));
-      setValue(`enclosure.${documentType}`, null);
-      setValue(`enclosure.${documentType}FileStoreId`, null);
-      setValue(`enclosure.${documentType}OriginalName`, null);
-      e.target.value = null;
+    } catch (error) {
+      console.error("Appointment submission error:", error);
+      toast.error("Failed to submit appointment slots. Please try again.");
     } finally {
       loaderRef.current?.hide();
     }
   };
 
-  const handleFileDownload = async (fileStoreId, fileName, originalName) => {
-    try {
-      if (!fileStoreId) return;
-      const url = `${BASE_IP}/filestore/v1/files/id?fileStoreId=${fileStoreId}`;
+  useEffect(() => {
+    if (!registrationData) return;
 
-      const accessToken = getFromLocalStorage("access_token");
-      const tokenDetails = getFromLocalStorage("tokenDetails");
-      const sessionState = tokenDetails
-        ? JSON.parse(tokenDetails)?.session_state
-        : "";
+    const createStep = (
+      label,
+      component,
+      validate = null,
+      noValidation = true
+    ) => ({
+      label,
+      component,
+      getFormData: () => methods?.getValues(),
+      validate,
+      goToNextStepNoValidtion: noValidation,
+      // new added flag----> by A.S
+      showCloseButton: pageName === "uploadReports",
+      showSubmitWithInvoice: pageName === "vesselRegistration",
+    });
 
-      const response = await axios({
-        method: "GET",
-        url: url,
-        responseType: "blob",
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          "X-Request-ID": sessionState,
-          Accept: "application/octet-stream",
-        },
-      });
+    loaderRef?.current?.show();
+    if (isOfficerLogin || (USER_ROLES.VESSEL_OWNER && isViewMode)) {
+      const stepsList = [];
+      const hasBasicDetails =
+        registrationData?.basicDetails && registrationData?.vesselDetails;
+      if (hasBasicDetails) {
+        stepsList.push(
+          createStep(
+            "Basic Details",
+            <VesselBasicDetailsView
+              formMethods={methods}
+              isPreview
+              formData={getValues()}
+              registrationData={registrationData}
+              ref={loaderRef}
+              BASE_IP={BASE_IP}
+              paymentTableData={paymentInfoList || []}
+              historyDetails={historyDetails || []}
+            />
+          )
+        );
+      }
 
-      if (response.data) {
-        let filename = fileName || "document";
-        const contentDisposition = response.headers["content-disposition"];
-        if (contentDisposition) {
-          const filenameMatch = contentDisposition.match(
-            /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/
+      const reportKeys = [
+        "materialTestReports",
+        "radiographyReports",
+        "inspectionReports",
+        "otherReports",
+      ];
+
+      const hasReports = reportKeys.some(
+        (key) => registrationData?.reports?.[key]?.length > 0
+      );
+
+      if (hasReports) {
+        stepsList.push(
+          createStep(
+            "Reports & Documents",
+            <ReportsDashboard
+              formMethods={methods}
+              viewMode={isViewMode}
+              isUploadOnly
+              applicationNumber={registrationData?.applicationNumber ?? ""}
+              additionalData={registrationData ?? {}}
+              pageName={pageName ?? ""}
+              ref={loaderRef}
+            />
+          )
+        );
+      }
+
+      const hasEngineDetails =
+        registrationData?.engineDetails &&
+        registrationData.engineDetails !== null &&
+        Object.keys(registrationData.engineDetails).length > 0;
+      const hasEnclosers =
+        registrationData?.enclosers && registrationData.enclosers.length > 0;
+
+      if (hasEngineDetails || hasEnclosers) {
+        if (!hasReports && stepsList.length === 1) {
+          stepsList.push(
+            createStep(
+              "Reports & Documents",
+              <ReportsDashboard
+                formMethods={methods}
+                viewMode={isViewMode}
+                isUploadOnly
+                applicationNumber={registrationData?.applicationNumber}
+                additionalData={registrationData}
+                pageName={pageName}
+                ref={loaderRef}
+              />
+            )
           );
-          if (filenameMatch && filenameMatch[1]) {
-            filename = filenameMatch[1].replace(/['"]/g, "");
-          }
         }
 
-        const blob = new Blob([response.data], {
-          type: response.headers["content-type"] || "application/octet-stream",
-        });
-        const blobUrl = window.URL.createObjectURL(blob);
+        stepsList.push(
+          createStep(
+            "Application for Registration",
+            <RegistrationApplicationForm
+              ref={registrationFormRef}
+              registrationData={registrationData}
+              isViewMode={isViewMode}
+              isFormSubmitted={isFormSubmitted}
+            />,
+            async () => {
+              if (registrationFormRef.current?.validateForm) {
+                return await registrationFormRef.current.validateForm();
+              }
+              return true;
+            },
+            false
+          )
+        );
+      }
+      // //  Curving & Marking Note step for L3 and L4 officers
+      // if (
+      //   userRole === USER_ROLES.OFFICER_L3 ||
+      //   userRole === USER_ROLES.OFFICER_L4
+      // ) {
+      //   stepsList.push(
+      //     createStep(
+      //       "Curving & Marking Note",
+      //       <CurvingMarkingNote registrationData={registrationData} />
+      //     )
+      //   );
+      // }
 
-        const link = document.createElement("a");
-        link.href = blobUrl;
-        link.setAttribute("download", filename);
-        document.body.appendChild(link);
-        link.click();
+      // //  Director Review step for L5 officers
+      // if (userRole === USER_ROLES.OFFICER_L5) {
+      //   stepsList.push(
+      //     createStep(
+      //       "Director Review",
+      //       <CurvingMarkingNoteL5 registrationData={registrationData} />
+      //     )
+      //   );
+      // }
 
+      if (
+        registrationData?.basicDetails?.isCmnGenerated ||
+        showCmnStepper ||
+        (registrationData?.appointmentSlots &&
+          registrationData.appointmentSlots.length > 0)
+      ) {
+        if (userRole === USER_ROLES.OFFICER_L5) {
+          stepsList.push(
+            createStep(
+              "Director Review",
+              <CurvingMarkingNoteL5
+                registrationData={registrationData}
+                onSubmitAppointments={handleSubmitAppointments}
+              />
+            )
+          );
+        } else if (
+          //  else if (isOfficerLogin) {
+          userRole === USER_ROLES.OFFICER_L3 ||
+          userRole === USER_ROLES.OFFICER_L4 ||
+          USER_ROLES.VESSEL_OWNER
+        ) {
+          stepsList.push(
+            createStep(
+              "Curving & Marking Note",
+              <CurvingMarkingNote
+                registrationData={registrationData}
+                onSubmitAppointments={handleSubmitAppointments}
+              />
+            )
+          );
+        }
+      }
+
+      loaderRef?.current?.hide();
+      setSteps(stepsList);
+    } else {
+      const stepsList = [
+        createStep(
+          "Basic Details",
+          <VesselBasicDetailsView
+            formMethods={methods}
+            isPreview
+            formData={getValues()}
+            registrationData={registrationData}
+            ref={loaderRef}
+            BASE_IP={BASE_IP}
+            paymentTableData={paymentInfoList || []}
+            historyDetails={historyDetails || []}
+          />
+        ),
+      ];
+
+      const reportsDashboardStep = createStep(
+        "Reports & Documents",
+        <ReportsDashboard
+          formMethods={methods}
+          viewMode={isViewMode}
+          isUploadOnly
+          applicationNumber={rowData?.applicationNumber}
+          additionalData={rowData}
+          pageName={pageName}
+          ref={loaderRef}
+          registrationData={registrationData}
+        />
+      );
+
+      if (pageName === "uploadReports" && !isViewMode) {
+        stepsList.push(reportsDashboardStep);
+      }
+
+      if (pageName === "vesselRegistration") {
+        if (!isViewMode) {
+          stepsList.push(reportsDashboardStep);
+        }
+        stepsList.push(
+          createStep(
+            "Application for Registration",
+            <RegistrationApplicationForm
+              ref={registrationFormRef}
+              registrationData={registrationData}
+              isFormSubmitted={isFormSubmitted}
+            />,
+            async () => {
+              if (registrationFormRef.current?.validateForm) {
+                return await registrationFormRef.current.validateForm();
+              }
+              return true;
+            },
+            false
+          )
+        );
+      }
+
+      loaderRef?.current?.hide();
+
+      setSteps(stepsList);
+    }
+  }, [registrationData, isViewMode, isOfficerLogin, userRole, showCmnStepper]);
+
+  // const handleActionClick = (action) => {
+  //   if (action?.actionName === "Generate CMN") {
+  //     setShowCmnStepper(true);
+  //     toast.success(
+  //       "CMN Generated successfully. Please proceed with the next step."
+  //     );
+  //     return;
+  //   }
+
+  //   setSelectedAction(action);
+  //   setShowApprovalModal(true);
+  // };
+
+  const handleActionClick = (action) => {
+    if (action?.actionName === "Generate CMN") {
+      setShowCmnStepper(true);
+
+      const originalActions =
+        registrationData?.processActionMapResponce?.[0]?.processs?.[0]
+          ?.actions || [];
+
+      // Filter out "Generate CMN" and keep all other actions including "Forward"
+      const updatedActions = originalActions.filter(
+        (item) => item.actionName !== "Generate CMN"
+      );
+
+      setActionsFromAPI(updatedActions);
+
+      toast.success(
+        "CMN Generated successfully. Please proceed with the next step."
+      );
+      return;
+    }
+
+    setSelectedAction(action);
+    setShowApprovalModal(true);
+  };
+  const workflowApplicationSubmit = async (modalFormData) => {
+    try {
+      const URL =
+        SERVICE_BASE.IWT_WORKFLOW +
+        URLS_ENDPOINT.WORK_FLOW_SERVICE.WORKFLOW_ACTION;
+
+      loaderRef?.current?.show();
+
+      const payload = {
+        applicationNo: registrationData?.applicationNumber,
+        processId:
+          registrationData?.processActionMapResponce?.[0]?.processs?.[0]
+            ?.processId,
+        actionId: selectedAction?.actionId,
+        assignerRole: userRole,
+        assignerName:
+          userDetails?.userName ||
+          JSON.parse(getFromLocalStorage("userDetails"))?.userName ||
+          "",
+        fileId: modalFormData?.document?.url || "",
+        remarks: modalFormData?.reason,
+      };
+
+      const response = await postData(URL, payload);
+      if (
+        response &&
+        response?.status === 200 &&
+        response?.data?.responseStatus?.status === "200"
+      ) {
+        toast.success(
+          response?.data?.responseStatus?.message ||
+          "Action submitted successfully"
+        );
+        handleCloseModal();
+        loaderRef?.current?.hide();
         setTimeout(() => {
-          document.body.removeChild(link);
-          window.URL.revokeObjectURL(blobUrl);
-        }, 100);
+          navigate("/dashboard");
+        }, 1000);
+      } else {
+        loaderRef?.current?.hide();
+        toast.info(
+          response?.data?.responseStatus?.message || "Something went wrong..",
+          { position: "top-right" }
+        );
+      }
+    } catch (err) {
+      console.log(err);
+      loaderRef?.current?.hide();
+      handleErrorMessage(err?.response?.data);
+    }
+  };
+
+  const handleCloseModal = () => {
+    setShowApprovalModal(false);
+    setSelectedAction("");
+  };
+
+  const handleFormSubmit = async (stepInfo) => {
+    console.log("Current Step Info from Stepper:", stepInfo);
+  };
+
+  const handleFinalSubmit = () => {
+    const allFormData = methods.getValues();
+    toast.success("Form submitted successfully!");
+  };
+
+  const createRegistrationPayload = (
+    formData,
+    registrationFormData,
+    appointmentSlots = []
+  ) => {
+    const basePayload = {
+      id: registrationData?.id || "",
+      applicationNumber: id || "",
+      applicationType: APPLICATION_TYPES.NEW_VESSEL_REGISTRATION,
+      basicDetails: {
+        id: registrationData?.basicDetails?.id || "",
+        applicationNumber: id || "",
+        status: registrationData?.basicDetails?.status || "",
+        constructedBy:
+          registrationData?.basicDetails?.constructedBy ||
+          registrationFormData?.builderName ||
+          "",
+        ownerDetails: {
+          id: registrationData?.basicDetails?.ownerDetails?.id || "",
+          ownerName:
+            registrationFormData?.ownerName ||
+            registrationData?.basicDetails?.ownerDetails?.ownerCompanyName ||
+            "",
+          ownerType:
+            registrationFormData?.ownerType ||
+            registrationData?.basicDetails?.ownerDetails?.categoryOfOwner ||
+            "",
+          email:
+            registrationFormData?.builderEmail ||
+            registrationData?.basicDetails?.ownerDetails?.emailId ||
+            "",
+          address:
+            registrationFormData?.address ||
+            registrationData?.basicDetails?.ownerDetails?.addressLine1 ||
+            "",
+        },
+        builderDetails: {
+          id: registrationData?.basicDetails?.builderDetails?.id || "",
+          builderName:
+            registrationFormData?.builderName ||
+            registrationData?.basicDetails?.builderDetails?.builderName ||
+            "",
+          registrationNumber:
+            registrationData?.basicDetails?.builderDetails
+              ?.registrationNumber || "",
+          address:
+            registrationFormData?.builderAddress ||
+            registrationData?.basicDetails?.builderDetails?.addressLine1 ||
+            "",
+          contactPerson:
+            registrationData?.basicDetails?.builderDetails?.contactPerson || "",
+          contactNumber:
+            registrationFormData?.builderphoneNumber ||
+            registrationData?.basicDetails?.builderDetails?.phone ||
+            "",
+        },
+        builderAuthorization:
+          registrationData?.basicDetails?.builderAuthorization || "",
+        authorizationLetter: registrationData?.basicDetails?.authorizationLetter
+          ? {
+            id: registrationData.basicDetails.authorizationLetter.id || "",
+            fileStoreId:
+              registrationData.basicDetails.authorizationLetter.fileStoreId ||
+              "",
+            documentName:
+              registrationData.basicDetails.authorizationLetter
+                .documentName || "Authorization_Letter.pdf",
+            documentType:
+              registrationData.basicDetails.authorizationLetter
+                .documentType || "AUTHORIZATION_LETTER",
+            documentSource:
+              registrationData.basicDetails.authorizationLetter
+                .documentSource || "AUTHORIZATION_LETTER",
+            descriptions:
+              registrationData.basicDetails.authorizationLetter.description ||
+              "builder authorised letter",
+          }
+          : {
+            id: "",
+            fileStoreId: "",
+            documentName: "Authorization_Letter.pdf",
+            documentType: "AUTHORIZATION_LETTER",
+            documentSource: "AUTHORIZATION_LETTER",
+            descriptions: "builder authorised letter",
+          },
+        occupation:
+          registrationFormData?.occupation ||
+          registrationData?.basicDetails?.occupation ||
+          "",
+        originalPlaceBusiness:
+          registrationFormData?.originalPlaceOfBusiness ||
+          registrationData?.basicDetails?.originalPlaceBusiness ||
+          "",
+        isDrawingFee: registrationData?.basicDetails?.isDrawingFee || false,
+        isSupervisionFee:
+          registrationData?.basicDetails?.isSupervisionFee || false,
+        isApplicationRegistrationFee:
+          registrationData?.basicDetails?.isApplicationRegistrationFee || false,
+        isProvisionaCertificate:
+          registrationData?.basicDetails?.isProvisionaCertificate || false,
+        isEditable:
+          registrationData?.basicDetails?.isEditable !== undefined
+            ? registrationData.basicDetails.isEditable
+            : true,
+      },
+      vesselDetails: {
+        id: registrationData?.vesselDetails?.id || "",
+        typeOfVessel:
+          registrationFormData?.typeOfVessel ||
+          registrationData?.vesselDetails?.typeOfVessel ||
+          "",
+        categoryOfVessel:
+          registrationFormData?.categoryOfVessel ||
+          registrationData?.vesselDetails?.categoryOfVessel ||
+          "",
+        zone:
+          registrationFormData?.zone ||
+          registrationData?.vesselDetails?.zone ||
+          "",
+        grossTonnage:
+          parseInt(formData?.grt) ||
+          registrationData?.vesselDetails?.grossTonnage ||
+          0,
+        workOrderValue:
+          formData?.workOrderValue ||
+          registrationData?.vesselDetails?.workOrderValue ||
+          "",
+        purchaseType:
+          formData?.purchaseType ||
+          registrationData?.vesselDetails?.purchaseType ||
+          "",
+        supervisionAuthority:
+          formData?.supervisionAuthority ||
+          registrationData?.vesselDetails?.supervisionAuthority ||
+          "",
+        nameOfMaster:
+          registrationFormData?.nameOfMaster ||
+          registrationData?.vesselDetails?.nameOfMaster ||
+          "",
+        certficateNumber:
+          registrationFormData?.certificateNo ||
+          registrationData?.vesselDetails?.certficateNumber ||
+          "",
+        nameOfRegistry:
+          registrationFormData?.nameOfRegistry ||
+          registrationData?.vesselDetails?.nameOfRegistry ||
+          "",
+        registrationNumber:
+          registrationFormData?.registrationNo ||
+          registrationData?.vesselDetails?.registrationNumber ||
+          "",
+        vesselName:
+          registrationFormData?.vesselName ||
+          registrationData?.vesselDetails?.vesselName ||
+          "",
+        kindOfVessel:
+          registrationFormData?.kindOfVessel ||
+          registrationData?.vesselDetails?.kindOfVessel ||
+          "",
+        mortgage:
+          registrationFormData?.mortgage ||
+          registrationData?.vesselDetails?.mortgage ||
+          "",
+        placeOfBuild:
+          registrationFormData?.placeOfBuild ||
+          registrationData?.vesselDetails?.placeOfBuild ||
+          "",
+        insuranceDetails:
+          registrationFormData?.detailsOfInsurance ||
+          registrationData?.vesselDetails?.insuranceDetails ||
+          "",
+        yearOfBuild:
+          parseInt(registrationFormData?.vesselyearOfBuild) ||
+          registrationData?.vesselDetails?.yearOfBuild ||
+          null,
+        pniClubNo:
+          registrationFormData?.protectionAndIndemnityClubNo ||
+          registrationData?.vesselDetails?.pniClubNo ||
+          "",
+        pniClubName:
+          registrationFormData?.protectionAndIndemnityClubName ||
+          registrationData?.vesselDetails?.pniClubName ||
+          "",
+        applicationNo:
+          id || registrationData?.vesselDetails?.applicationNo || "",
+        nameOfClassificationSociety:
+          formData?.classificationSociety ||
+          registrationData?.vesselDetails?.nameOfClassificationSociety ||
+          "",
+        iwtVesselBasicDetailsTFk:
+          registrationData?.basicDetails?.id ||
+          registrationData?.vesselDetails?.iwtVesselBasicDetailsTFk ||
+          "",
+        insuranceValidDate:
+          registrationFormData?.insuranceValidUpto ||
+          registrationData?.vesselDetails?.insuranceValidDate ||
+          "",
+        declarationWorkOrderDate:
+          registrationFormData?.workOrderDate ||
+          registrationData?.vesselDetails?.declarationWorkOrderDate || //new added
+          "",
+      },
+      documents: extractDocuments(formData, registrationData),
+      engineDetails: registrationData?.engineDetails
+        ? {
+          id: registrationData.engineDetails.id || "",
+          yearOfBuild:
+            registrationFormData?.yearOfBuild ||
+            registrationData.engineDetails.yearOfBuild ||
+            "",
+          engineType:
+            registrationFormData?.typeOfEngine ||
+            registrationData.engineDetails.engineType ||
+            "",
+          engineMake:
+            registrationFormData?.engineMake ||
+            registrationData.engineDetails.engineMake ||
+            "",
+          makerAddress:
+            registrationFormData?.engineMakerAddress ||
+            registrationData.engineDetails.makerAddress ||
+            "",
+          pin:
+            registrationFormData?.enginepin ||
+            registrationData.engineDetails.pin ||
+            "",
+          mobile:
+            registrationFormData?.enginephoneNumber ||
+            registrationData.engineDetails.mobile ||
+            "",
+          email:
+            registrationFormData?.engineemail ||
+            registrationData.engineDetails.email ||
+            "",
+          horsepower:
+            parseFloat(registrationFormData?.horsepower) ||
+            registrationData.engineDetails.horsepower ||
+            0,
+          speed:
+            parseFloat(registrationFormData?.speed) ||
+            registrationData.engineDetails.speed ||
+            0,
+          yearOfMake:
+            registrationFormData?.yearOfMake ||
+            registrationData.engineDetails.yearOfMake ||
+            "",
+          iwtApplRegistrationTFk:
+            registrationData?.basicDetails?.id ||
+            registrationData.engineDetails.iwtApplRegistrationTFk ||
+            "",
+        }
+        : {
+          id: "",
+          yearOfBuild: registrationFormData?.yearOfBuild || "",
+          engineType: registrationFormData?.typeOfEngine || "",
+          engineMake: registrationFormData?.engineMake || "",
+          makerAddress: registrationFormData?.engineMakerAddress || "",
+          pin: registrationFormData?.enginepin || "",
+          mobile: registrationFormData?.enginephoneNumber || "",
+          email: registrationFormData?.engineemail || "",
+          horsepower: parseFloat(registrationFormData?.horsepower) || 0,
+          speed: parseFloat(registrationFormData?.speed) || 0,
+          yearOfMake: registrationFormData?.yearOfMake || "",
+          iwtApplRegistrationTFk: registrationData?.basicDetails?.id || "",
+        },
+      enclosers: extractEnclosers(registrationFormData, registrationData),
+    };
+
+    if (appointmentSlots.length > 0) {
+      basePayload.appointmentSlots = appointmentSlots;
+    }
+
+    return basePayload;
+  };
+
+  const extractDocuments = (formData, registrationData) => {
+    const documents = [];
+
+    if (
+      registrationData?.documents &&
+      Array.isArray(registrationData.documents)
+    ) {
+      registrationData.documents.forEach((doc) => {
+        documents.push({
+          id: doc.id || "",
+          fileStoreId: doc.fileStoreId || "",
+          documentName: doc.documentName || "",
+          documentType: doc.documentType || "",
+          documentSource: doc.documentSource || "",
+          description: doc.description || "",
+        });
+      });
+    }
+
+    const documentTypes = [
+      {
+        key: "WORK_ORDER",
+        name: "Work Order.pdf",
+        description: "Work Order document",
+      },
+      { key: "DRAWINGS", name: "Drawing.pdf", description: "Drawing document" },
+      {
+        key: "TONNAGE_BOOKLETS",
+        name: "Tonnage Booklet.pdf",
+        description: "Tonnage document",
+      },
+      {
+        key: "STABILITY_BOOKLETS",
+        name: "Stability Booklet.pdf",
+        description: "Stability document",
+      },
+    ];
+
+    documentTypes.forEach(({ key, name, description }) => {
+      const fileStoreId = formData?.[`${key}_fileStoreId`];
+      if (fileStoreId) {
+        documents.push({
+          id: "",
+          fileStoreId,
+          documentName: name,
+          documentType: key,
+          documentSource: key,
+          description,
+        });
+      }
+    });
+
+    return documents;
+  };
+
+  const extractEnclosers = (formData, registrationData) => {
+    const enclosers = [];
+
+    if (
+      registrationData?.enclosers &&
+      Array.isArray(registrationData.enclosers)
+    ) {
+      registrationData.enclosers.forEach((encloser) => {
+        enclosers.push({
+          id: encloser.id || "",
+          fileStoreId: encloser.fileStoreId || "",
+          documentName: encloser.documentName || "",
+          documentType: encloser.documentType || "",
+          documentSource: encloser.documentSource || "",
+          description: encloser.description || "",
+        });
+      });
+    }
+
+    const encloserTypes = [
+      {
+        key: "thirdPartyInsurance",
+        type: "THIRD_PARTY_INSURANCE",
+        name: "Third Party Insurance",
+      },
+      {
+        key: "builderCertificate",
+        type: "BUILDERS_CERTIFICATE",
+        name: "Builder Certificate",
+      },
+      {
+        key: "instrumentOfSale",
+        type: "INSTRUMENT_OF_SALE",
+        name: "Instrument of Sale",
+      },
+      {
+        key: "mortgageDetails",
+        type: "MORTGAGE_DETAILS",
+        name: "Mortgage Details",
+      },
+      {
+        key: "pniInsurance",
+        type: "PREOTECTION_AND_INDEMNITY_INSURANCE_NO",
+        name: "Protection and Indemnity Insurance",
+      },
+      {
+        key: "declarationOfOwnership",
+        type: "DECLARATION_OF_OWNERSHIP",
+        name: "Declaration of Ownership",
+      },
+      { key: "challan", type: "CHALLAN", name: "Challan" },
+    ];
+
+    encloserTypes.forEach(({ key, type, name }) => {
+      const fileStoreId = formData?.[`${key}FileStoreId`];
+      if (fileStoreId) {
+        //update
+        const fileState = registrationFormRef?.current?.fileStates?.[key];
+        const actualFileName = fileState?.name || `${name}.pdf`;
+
+        enclosers.push({
+          id: "",
+          fileStoreId,
+          documentName: actualFileName,
+          documentType: type,
+          documentSource: type,
+          description: `${name} document`,
+        });
+      }
+    });
+
+    return enclosers;
+  };
+
+  const handleSubmit = async () => {
+    try {
+      loaderRef.current?.show();
+
+      const formData = methods?.getValues();
+      let registrationFormData = {};
+      if (registrationFormRef?.current?.getFormData) {
+        registrationFormData = registrationFormRef?.current?.getFormData();
+        //update
+        registrationFormData.fileStates =
+          registrationFormRef?.current?.fileStates;
+      }
+
+      const payload = createRegistrationPayload(formData, registrationFormData);
+
+      const apiUrl =
+        SERVICE_BASE.IWT_REGISTRATION + URLS_ENDPOINT.VESSEL_SERVICE.CREATE;
+      const response = await postData(apiUrl, payload);
+      console.log("response---vessel", response);
+
+      if (response?.status === 200 && response?.data?.responseStatus) {
+        // if (response?.status === 200 && response?.data?.responseStatus?.status === "Data Created Successfully") {
+        toast.success(
+          response?.data?.responseStatus?.message ||
+          "Registration submitted successfully!"
+        );
+        setDisableSubmit(true);
+        setInitialStep(steps.length - 1);
+        setIsFormSubmitted(true);
+        // setTimeout(() => {
+        // navigate("/dashboard");
+        // }, 1500);
+      } else {
+        toast.error(
+          response?.data?.responseStatus?.message ||
+          "Submission failed. Please try again."
+        );
       }
     } catch (error) {
-      console.error("Error downloading file:", error);
-      toast.error("Failed to download file. Please try again.");
+      console.error("Submission error:", error);
+      toast.error("Failed to submit form. Please try again.");
+    } finally {
+      // setIsLoading(false);
+      loaderRef.current?.hide();
     }
   };
 
-  useEffect(() => {
-    const enclosureData = watch("enclosure");
-    if (enclosureData) {
-      const newFileStates = {};
-
-      Object.keys(fileStates).forEach(docType => {
-        const fileStoreId = enclosureData[`${docType}FileStoreId`];
-        const fileName = enclosureData[`${docType}OriginalName`] || enclosureData[docType]?.name;
-
-        if (fileStoreId && fileName) {
-          newFileStates[docType] = {
-            name: fileName,
-            fileStoreId: fileStoreId,
-            originalName: fileName
-          };
-        }
-      });
-
-      if (Object.keys(newFileStates).length > 0) {
-        setFileStates(prev => ({ ...prev, ...newFileStates }));
-      }
-    }
-  }, [registrationData]);
-
-  const renderFileField = (docType, label) => {
-    if (viewMode) {
-      return (
-        <>
-          <label className="form-label">{t(label)}</label>
-          {fileStates[docType] ? (
-            <div className="d-flex align-items-center p-2 border rounded" style={{ backgroundColor: "#f8f9fa" }}>
-              <span className="me-2">{fileStates[docType].name}</span>
-              <button
-                type="button"
-                className="btn btn-sm btn-primary rounded-circle d-flex align-items-center justify-content-center"
-                onClick={() =>
-                  handleFileDownload(
-                    fileStates[docType].fileStoreId,
-                    fileStates[docType].name,
-                    fileStates[docType].originalName
-                  )
-                }
-                title="Download file"
-                style={{ width: "24px", height: "24px", padding: "0" }}
-              >
-                <FaDownload size={10} />
-              </button>
-            </div>
-          ) : (
-            <div className="p-2 border rounded text-muted" style={{ backgroundColor: "#f8f9fa" }}>
-              No file uploaded
-            </div>
-          )}
-        </>
-      );
-    }
-
-    return (
-      <>
-        <div className="position-relative">
-          <InputFile
-            name={`enclosure.${docType}`}
-            label={t(label)}
-            id={docType}
-            style={{ width: "100%" }}
-            register={register(`enclosure.${docType}`, {
-              required: !fileStates[docType] && t(`${label} is required`),
-            })}
-            errors={errors}
-            clearErrors={clearErrors}
-            onChange={(e) => handleFileChange(e, docType)}
-            watch={watch}
-            defaultValue={
-              fileStates[docType]?.displayFile || watch(`enclosure.${docType}`)
-            }
-            key={`${docType}-${fileStates[docType] ? "uploaded" : "empty"}`}
-          />
-
-          {fileStates[docType] && (
-            <FaTimesCircle
-              className="text-danger position-absolute"
-              style={{
-                top: "50%",
-                right: "10px",
-                transform: "translateY(-50%)",
-                cursor: "pointer",
-                zIndex: 10,
-              }}
-              size={18}
-              title="Remove file"
-              onClick={() => {
-                setFileStates((prev) => ({
-                  ...prev,
-                  [docType]: null,
-                }));
-                setValue(`enclosure.${docType}`, null);
-                setValue(`enclosure.${docType}FileStoreId`, null);
-                setValue(`enclosure.${docType}OriginalName`, null);
-                clearErrors(`enclosure.${docType}`);
-
-                const fileInput = document.getElementById(docType);
-                if (fileInput) {
-                  fileInput.value = "";
-                  const event = new Event("change", { bubbles: true });
-                  fileInput.dispatchEvent(event);
-                }
-              }}
-            />
-          )}
-        </div>
-
-        {fileStates[docType] && (
-          <div
-            className="d-flex align-items-center mt-2"
-            style={{ maxWidth: "100%" }}
-          >
-            <small className="text-success me-2 flex-grow-1 text-truncate">
-              ✓ {fileStates[docType].name}
-            </small>
-            <button
-              type="button"
-              className="btn btn-sm btn-primary rounded-circle d-flex align-items-center justify-content-center flex-shrink-0"
-              onClick={() =>
-                handleFileDownload(
-                  fileStates[docType].fileStoreId,
-                  fileStates[docType].name,
-                  fileStates[docType].originalName
-                )
-              }
-              title="Download file"
-              style={{ width: "24px", height: "24px", padding: "0" }}
-            >
-              <FaDownload size={10} />
-            </button>
-          </div>
-        )}
-      </>
-    );
-  };
+  const actionDropdown =
+    isViewMode && isOfficerLogin && actionsFromAPI.length > 0 ? (
+      <ActionDropdown
+        actions={actionsFromAPI}
+        onActionClick={handleActionClick}
+        variant="contained"
+        sx={{
+          backgroundColor: "#2E57A7",
+          fontWeight: "bold",
+          borderRadius: "0.5rem",
+          minWidth: "8rem",
+          fontSize: "0.9rem",
+          color: "#fff",
+          "&:hover": {
+            backgroundColor: "#1f4ea0",
+          },
+        }}
+      />
+    ) : null;
 
   return (
-    <>
+    <Box
+      sx={{
+        padding: "1rem 0.5rem 0 0.5rem",
+        backgroundColor: "#f5f6fa",
+        minHeight: "100vh",
+      }}
+    >
       <NewLoader ref={loaderRef} />
-      <form autoComplete="off">
-        {/* Basic Vessel Information */}
-        <Collapsible
-          title={
-            <>
-              <FaShip className="me-2" style={{ color: "#2466BF" }} />
-              <span>{t("Basic Vessel Information")}</span>
-            </>
-          }
-          openStat={true}
-        >
-          <Row className="gy-3" style={{ padding: "1rem" }}>
-            <Col md={4}>
-              <InputText
-                label={t("Official No. of the Vessel")}
-                name="basicVesselInfo.officialNo"
-                register={register("basicVesselInfo.officialNo")}
-                errors={errors}
-                disabled={true}
-                style={{ backgroundColor: "#f8f9fa" }}
-              />
-            </Col>
-            <Col md={4}>
-              <InputText
-                label={t("Port of Registry of Vessel")}
-                name="basicVesselInfo.portOfRegistry"
-                register={register("basicVesselInfo.portOfRegistry")}
-                errors={errors}
-                disabled={true}
-                style={{ backgroundColor: "#f8f9fa" }}
-              />
-            </Col>
-            <Col md={4}>
-              <InputText
-                label={t("Name of Vessel")}
-                name="basicVesselInfo.nameOfVessel"
-                register={register("basicVesselInfo.nameOfVessel")}
-                errors={errors}
-                disabled={true}
-                style={{ backgroundColor: "#f8f9fa" }}
-              />
-            </Col>
-            <Col md={4}>
-              <InputText
-                label={t("Name of Owner")}
-                name="basicVesselInfo.nameOfOwner"
-                register={register("basicVesselInfo.nameOfOwner")}
-                errors={errors}
-                disabled={true}
-                style={{ backgroundColor: "#f8f9fa" }}
-              />
-            </Col>
-            <Col md={4}>
-              <InputText
-                label={t("Address of Owner")}
-                name="basicVesselInfo.addressOfOwner"
-                register={register("basicVesselInfo.addressOfOwner")}
-                errors={errors}
-                disabled={true}
-                style={{ backgroundColor: "#f8f9fa" }}
-              />
-            </Col>
-            <Col md={4}>
-              <InputText
-                label={t("Owner's Telephone No.")}
-                name="basicVesselInfo.ownerTelephone"
-                register={register("basicVesselInfo.ownerTelephone")}
-                errors={errors}
-                disabled={true}
-                style={{ backgroundColor: "#f8f9fa" }}
-              />
-            </Col>
-            <Col md={4}>
-              <InputText
-                label={t("Type of Vessel")}
-                name="basicVesselInfo.typeOfVessel"
-                register={register("basicVesselInfo.typeOfVessel")}
-                errors={errors}
-                disabled={true}
-                style={{ backgroundColor: "#f8f9fa" }}
-              />
-            </Col>
-            <Col md={4}>
-              <InputText
-                label={t("Category of Vessel")}
-                name="basicVesselInfo.categoryOfVessel"
-                register={register("basicVesselInfo.categoryOfVessel")}
-                errors={errors}
-                disabled={true}
-                style={{ backgroundColor: "#f8f9fa" }}
-              />
-            </Col>
-            <Col md={4}>
-              <InputText
-                label={t("Date of Registry")}
-                name="basicVesselInfo.dateOfRegistry"
-                type="date"
-                register={register("basicVesselInfo.dateOfRegistry")}
-                errors={errors}
-                disabled={true}
-                style={{ backgroundColor: "#f8f9fa" }}
-              />
-            </Col>
-            <Col md={4}>
-              <InputText
-                label={t("Length (Meter)")}
-                name="basicVesselInfo.length"
-                register={register("basicVesselInfo.length")}
-                errors={errors}
-                disabled={true}
-                style={{ backgroundColor: "#f8f9fa" }}
-              />
-            </Col>
-            <Col md={4}>
-              <InputText
-                label={t("Breadth (Meter)")}
-                name="basicVesselInfo.breadth"
-                register={register("basicVesselInfo.breadth")}
-                errors={errors}
-                disabled={true}
-                style={{ backgroundColor: "#f8f9fa" }}
-              />
-            </Col>
-            <Col md={4}>
-              <InputText
-                label={t("Depth (Meter)")}
-                name="basicVesselInfo.depth"
-                register={register("basicVesselInfo.depth")}
-                errors={errors}
-                disabled={true}
-                style={{ backgroundColor: "#f8f9fa" }}
-              />
-            </Col>
-            <Col md={4}>
-              <InputText
-                label={t("Draft")}
-                name="basicVesselInfo.draft"
-                register={register("basicVesselInfo.draft")}
-                errors={errors}
-                disabled={true}
-                style={{ backgroundColor: "#f8f9fa" }}
-              />
-            </Col>
-            <Col md={4}>
-              <InputText
-                label={t("Gross Tonnage")}
-                name="basicVesselInfo.grossTonnage"
-                register={register("basicVesselInfo.grossTonnage")}
-                errors={errors}
-                disabled={true}
-                style={{ backgroundColor: "#f8f9fa" }}
-              />
-            </Col>
-            <Col md={4}>
-              <InputText
-                label={t("Net Tonnage")}
-                name="basicVesselInfo.netTonnage"
-                register={register("basicVesselInfo.netTonnage")}
-                errors={errors}
-                disabled={true}
-                style={{ backgroundColor: "#f8f9fa" }}
-              />
-            </Col>
-            <Col md={4}>
-              <InputText
-                label={t("Place of Last Survey")}
-                name="basicVesselInfo.placeOfLastSurvey"
-                register={register("basicVesselInfo.placeOfLastSurvey")}
-                errors={errors}
-                disabled={true}
-                style={{ backgroundColor: "#f8f9fa" }}
-              />
-            </Col>
-            <Col md={4}>
-              <InputText
-                label={t("Date of Last Survey")}
-                name="basicVesselInfo.dateOfLastSurvey"
-                type="date"
-                register={register("basicVesselInfo.dateOfLastSurvey")}
-                errors={errors}
-                disabled={true}
-                style={{ backgroundColor: "#f8f9fa" }}
-              />
-            </Col>
-            <Col md={4}>
-              <InputText
-                label={t("Year of Build")}
-                name="basicVesselInfo.yearOfBuild"
-                register={register("basicVesselInfo.yearOfBuild")}
-                errors={errors}
-                disabled={true}
-                style={{ backgroundColor: "#f8f9fa" }}
-              />
-            </Col>
-            <Col md={4}>
-              <InputText
-                label={t("Name of Builder")}
-                name="basicVesselInfo.nameOfBuilder"
-                register={register("basicVesselInfo.nameOfBuilder")}
-                errors={errors}
-                disabled={true}
-                style={{ backgroundColor: "#f8f9fa" }}
-              />
-            </Col>
-            <Col md={4}>
-              <InputText
-                label={t("Address of Builder")}
-                name="basicVesselInfo.addressOfBuilder"
-                register={register("basicVesselInfo.addressOfBuilder")}
-                errors={errors}
-                disabled={true}
-                style={{ backgroundColor: "#f8f9fa" }}
-              />
-            </Col>
-            <Col md={4}>
-              <InputText
-                label={t("Builder's Mobile No.")}
-                name="basicVesselInfo.builderMobile"
-                register={register("basicVesselInfo.builderMobile")}
-                errors={errors}
-                disabled={true}
-                style={{ backgroundColor: "#f8f9fa" }}
-              />
-            </Col>
-            <Col md={4}>
-              <InputText
-                label={t("Builder's Email Id")}
-                name="basicVesselInfo.builderEmail"
-                register={register("basicVesselInfo.builderEmail")}
-                errors={errors}
-                disabled={true}
-                style={{ backgroundColor: "#f8f9fa" }}
-              />
-            </Col>
-            <Col md={4}>
-              <InputText
-                label={t("Trade License")}
-                name="basicVesselInfo.tradeLicense"
-                register={register("basicVesselInfo.tradeLicense")}
-                errors={errors}
-                disabled={true}
-                style={{ backgroundColor: "#f8f9fa" }}
-              />
-            </Col>
-            <Col md={4}>
-              <InputText
-                label={t("GST")}
-                name="basicVesselInfo.gst"
-                register={register("basicVesselInfo.gst")}
-                errors={errors}
-                disabled={true}
-                style={{ backgroundColor: "#f8f9fa" }}
-              />
-            </Col>
-          </Row>
-        </Collapsible>
-
-        {/* Hull Particulars */}
-        <Collapsible
-          title={
-            <>
-              <FaShip className="me-2" style={{ color: "#2466BF" }} />
-              <span>{t("Hull Particulars")}</span>
-            </>
-          }
-          openStat={true}
-        >
-          <Row className="gy-3" style={{ padding: "1rem" }}>
-            <Col md={4}>
-              <InputText
-                label={t("Hull Material")}
-                name="hullParticulars.hullMaterial"
-                register={register("hullParticulars.hullMaterial")}
-                errors={errors}
-                disabled={true}
-                style={{ backgroundColor: "#f8f9fa" }}
-              />
-            </Col>
-            <Col md={4}>
-              <InputText
-                label={t("Hull Platting Material")}
-                name="hullParticulars.hullPlattingMaterial"
-                register={register("hullParticulars.hullPlattingMaterial")}
-                errors={errors}
-                disabled={true}
-                style={{ backgroundColor: "#f8f9fa" }}
-              />
-            </Col>
-            <Col md={4}>
-              <InputText
-                label={t("Hull Platting Thickness")}
-                name="hullParticulars.hullPlattingThickness"
-                register={register("hullParticulars.hullPlattingThickness")}
-                errors={errors}
-                disabled={true}
-                style={{ backgroundColor: "#f8f9fa" }}
-              />
-            </Col>
-            <Col md={4}>
-              <InputText
-                label={t("No. of Bulkheads")}
-                name="hullParticulars.noOfBulkheads"
-                register={register("hullParticulars.noOfBulkheads")}
-                errors={errors}
-                disabled={true}
-                style={{ backgroundColor: "#f8f9fa" }}
-              />
-            </Col>
-            <Col md={4}>
-              <InputText
-                label={t("Bulkhead Placement")}
-                name="hullParticulars.bulkheadPlacement"
-                register={register("hullParticulars.bulkheadPlacement")}
-                errors={errors}
-                disabled={true}
-                style={{ backgroundColor: "#f8f9fa" }}
-              />
-            </Col>
-            <Col md={4}>
-              <InputText
-                label={t("Bulkhead Thickness")}
-                name="hullParticulars.bulkheadThickness"
-                register={register("hullParticulars.bulkheadThickness")}
-                errors={errors}
-                disabled={true}
-                style={{ backgroundColor: "#f8f9fa" }}
-              />
-            </Col>
-            <Col md={4}>
-              <InputText
-                label={t("Frame Material")}
-                name="hullParticulars.frameMaterial"
-                register={register("hullParticulars.frameMaterial")}
-                errors={errors}
-                disabled={true}
-                style={{ backgroundColor: "#f8f9fa" }}
-              />
-            </Col>
-            <Col md={4}>
-              <InputText
-                label={t("Frame Thickness (mm)")}
-                name="hullParticulars.frameThickness"
-                register={register("hullParticulars.frameThickness")}
-                errors={errors}
-                disabled={true}
-                style={{ backgroundColor: "#f8f9fa" }}
-              />
-            </Col>
-            <Col md={4}>
-              <InputText
-                label={t("Floor Material")}
-                name="hullParticulars.floorMaterial"
-                register={register("hullParticulars.floorMaterial")}
-                errors={errors}
-                disabled={true}
-                style={{ backgroundColor: "#f8f9fa" }}
-              />
-            </Col>
-            <Col md={4}>
-              <InputText
-                label={t("Floor Thickness (mm)")}
-                name="hullParticulars.floorThickness"
-                register={register("hullParticulars.floorThickness")}
-                errors={errors}
-                disabled={true}
-                style={{ backgroundColor: "#f8f9fa" }}
-              />
-            </Col>
-          </Row>
-        </Collapsible>
-
-        {/* Details of Propulsion of Engine */}
-        <Collapsible
-          title={
-            <>
-              <FaCog className="me-2" style={{ color: "#2466BF" }} />
-              <span>{t("Details of Propulsion of Engine")}</span>
-            </>
-          }
-          openStat={true}
-        >
-          <Row className="gy-3" style={{ padding: "1rem" }}>
-            <Col md={4}>
-              <InputText
-                label={t("Type of Engine")}
-                name="detailsOfPropulsion.typeOfEngine"
-                register={register("detailsOfPropulsion.typeOfEngine")}
-                errors={errors}
-                disabled={true}
-                style={{ backgroundColor: "#f8f9fa" }}
-              />
-            </Col>
-            <Col md={4}>
-              <InputText
-                label={t("Engine Make")}
-                name="detailsOfPropulsion.engineMake"
-                register={register("detailsOfPropulsion.engineMake")}
-                errors={errors}
-                disabled={true}
-                style={{ backgroundColor: "#f8f9fa" }}
-              />
-            </Col>
-            <Col md={4}>
-              <InputText
-                label={t("Engine Maker Address")}
-                name="detailsOfPropulsion.engineMakerAddress"
-                register={register("detailsOfPropulsion.engineMakerAddress")}
-                errors={errors}
-                disabled={true}
-                style={{ backgroundColor: "#f8f9fa" }}
-              />
-            </Col>
-            <Col md={4}>
-              <InputText
-                label={t("Model No.")}
-                name="detailsOfPropulsion.modelNo"
-                register={register("detailsOfPropulsion.modelNo")}
-                errors={errors}
-                disabled={true}
-                style={{ backgroundColor: "#f8f9fa" }}
-              />
-            </Col>
-            <Col md={4}>
-              <InputText
-                label={t("Number of Engine")}
-                name="detailsOfPropulsion.numberOfEngine"
-                register={register("detailsOfPropulsion.numberOfEngine")}
-                errors={errors}
-                disabled={true}
-                style={{ backgroundColor: "#f8f9fa" }}
-              />
-            </Col>
-            <Col md={4}>
-              <InputText
-                label={t("Year of Make")}
-                name="detailsOfPropulsion.yearOfMake"
-                register={register("detailsOfPropulsion.yearOfMake")}
-                errors={errors}
-                disabled={true}
-                style={{ backgroundColor: "#f8f9fa" }}
-              />
-            </Col>
-            <Col md={4}>
-              <InputText
-                label={t("Horsepower")}
-                name="detailsOfPropulsion.horsepower"
-                register={register("detailsOfPropulsion.horsepower")}
-                errors={errors}
-                disabled={true}
-                style={{ backgroundColor: "#f8f9fa" }}
-              />
-            </Col>
-            <Col md={4}>
-              <InputText
-                label={t("Speed/RPM")}
-                name="detailsOfPropulsion.speedRPM"
-                register={register("detailsOfPropulsion.speedRPM")}
-                errors={errors}
-                disabled={true}
-                style={{ backgroundColor: "#f8f9fa" }}
-              />
-            </Col>
-            <Col md={4}>
-              <InputText
-                label={t("Stroke (Engine)")}
-                name="detailsOfPropulsion.strokeEngine"
-                register={register("detailsOfPropulsion.strokeEngine")}
-                errors={errors}
-                disabled={true}
-                style={{ backgroundColor: "#f8f9fa" }}
-              />
-            </Col>
-            <Col md={4}>
-              <InputText
-                label={t("Number of Set Fitted")}
-                name="detailsOfPropulsion.numberOfSetFitted"
-                register={register("detailsOfPropulsion.numberOfSetFitted")}
-                errors={errors}
-                disabled={true}
-                style={{ backgroundColor: "#f8f9fa" }}
-              />
-            </Col>
-            <Col md={4}>
-              <InputText
-                label={t("Set Sr. No.")}
-                name="detailsOfPropulsion.setSrNo"
-                register={register("detailsOfPropulsion.setSrNo")}
-                errors={errors}
-                disabled={true}
-                style={{ backgroundColor: "#f8f9fa" }}
-              />
-            </Col>
-            <Col md={4}>
-              <InputText
-                label={t("Engine Cylinder Diameter")}
-                name="detailsOfPropulsion.engineCylinderDiameter"
-                register={register("detailsOfPropulsion.engineCylinderDiameter")}
-                errors={errors}
-                disabled={true}
-                style={{ backgroundColor: "#f8f9fa" }}
-              />
-            </Col>
-            <Col md={4}>
-              <InputText
-                label={t("Propeller Type")}
-                name="detailsOfPropulsion.propellerType"
-                register={register("detailsOfPropulsion.propellerType")}
-                errors={errors}
-                disabled={true}
-                style={{ backgroundColor: "#f8f9fa" }}
-              />
-            </Col>
-            <Col md={4}>
-              <InputText
-                label={t("Gear Type")}
-                name="detailsOfPropulsion.gearType"
-                register={register("detailsOfPropulsion.gearType")}
-                errors={errors}
-                disabled={true}
-                style={{ backgroundColor: "#f8f9fa" }}
-              />
-            </Col>
-            <Col md={4}>
-              <InputText
-                label={t("No. of Gear")}
-                name="detailsOfPropulsion.noOfGear"
-                register={register("detailsOfPropulsion.noOfGear")}
-                errors={errors}
-                disabled={true}
-                style={{ backgroundColor: "#f8f9fa" }}
-              />
-            </Col>
-            <Col md={4}>
-              <InputText
-                label={t("Vessel Speed")}
-                name="detailsOfPropulsion.vesselSpeed"
-                register={register("detailsOfPropulsion.vesselSpeed")}
-                errors={errors}
-                disabled={true}
-                style={{ backgroundColor: "#f8f9fa" }}
-              />
-            </Col>
-            <Col md={4}>
-              <InputText
-                label={t("Revolution/mints")}
-                name="detailsOfPropulsion.revolutionMints"
-                register={register("detailsOfPropulsion.revolutionMints")}
-                errors={errors}
-                disabled={true}
-                style={{ backgroundColor: "#f8f9fa" }}
-              />
-            </Col>
-            <Col md={4}>
-              <InputText
-                label={t("No. of cylinders per set for Rotary Engine")}
-                name="detailsOfPropulsion.cylindersPerSetRotary"
-                register={register("detailsOfPropulsion.cylindersPerSetRotary")}
-                errors={errors}
-                disabled={true}
-                style={{ backgroundColor: "#f8f9fa" }}
-              />
-            </Col>
-            <Col md={4}>
-              <InputText
-                label={t("No. of cylinders per set for Reciprocating Engine")}
-                name="detailsOfPropulsion.cylindersPerSetReciprocating"
-                register={register("detailsOfPropulsion.cylindersPerSetReciprocating")}
-                errors={errors}
-                disabled={true}
-                style={{ backgroundColor: "#f8f9fa" }}
-              />
-            </Col>
-            <Col md={4}>
-              <InputText
-                label={t("No. of Shaft")}
-                name="detailsOfPropulsion.noOfShaft"
-                register={register("detailsOfPropulsion.noOfShaft")}
-                errors={errors}
-                disabled={true}
-                style={{ backgroundColor: "#f8f9fa" }}
-              />
-            </Col>
-            <Col md={4}>
-              <InputText
-                label={t("Length of the Engine Room")}
-                name="detailsOfPropulsion.lengthOfEngineRoom"
-                register={register("detailsOfPropulsion.lengthOfEngineRoom")}
-                errors={errors}
-                disabled={true}
-                style={{ backgroundColor: "#f8f9fa" }}
-              />
-            </Col>
-          </Row>
-        </Collapsible>
-
-        {/* Alteration Details */}
-        <Collapsible
-          title={
-            <>
-              <FaClipboardList className="me-2" style={{ color: "#2466BF" }} />
-              <span>{t("Alterations Details")}</span>
-            </>
-          }
-          openStat={true}
-        >
-          <Card className="form-section-card">
-            <Card.Body>
-              {fields.map((field, index) => (
-                <Row key={field.id} className="gy-3 mb-3 p-3 border rounded">
-                  <Col xs={12}>
-                    <div className="d-flex justify-content-between align-items-center mb-2">
-                      <h6 className="mb-0">Alteration {index + 1}</h6>
-                      {fields.length > 1 && !viewMode && (
-                        <Button
-                          variant="outline-danger"
-                          size="sm"
-                          onClick={() => remove(index)}
-                        >
-                          <FaTrash />
-                        </Button>
-                      )}
-                    </div>
-                  </Col>
-                  <Col md={6}>
-                    <InputText
-                      label={t("Description of Alteration")}
-                      name={`alterationDetails.alterations.${index}.description`}
-                      register={register(`alterationDetails.alterations.${index}.description`)}
-                      errors={errors}
-                      placeholder={t("Enter description of alteration")}
-                      disabled={viewMode}
-                    />
-                  </Col>
-                  <Col md={6}>
-                    <InputText
-                      label={t("Reason for Alteration")}
-                      name={`alterationDetails.alterations.${index}.reason`}
-                      register={register(`alterationDetails.alterations.${index}.reason`)}
-                      errors={errors}
-                      placeholder={t("Enter reason for alteration")}
-                      disabled={viewMode}
-                    />
-                  </Col>
-                  <Col md={6}>
-                    <InputText
-                      label={t("Proposed Date")}
-                      name={`alterationDetails.alterations.${index}.proposedDate`}
-                      type="date"
-                      register={register(`alterationDetails.alterations.${index}.proposedDate`)}
-                      errors={errors}
-                      disabled={viewMode}
-                    />
-                  </Col>
-                </Row>
-              ))}
-              {!viewMode && (
-                <Button
-                  variant="outline-primary"
-                  onClick={() => append({ description: "", reason: "", proposedDate: "" })}
-                  className="mt-2"
+      <>
+        {!tabMode && (
+          <div className="d-flex flex-column flex-md-row justify-content-between align-items-start align-items-md-center mb-4 gap-3">
+            <div
+              className="d-flex align-items-center flex-grow-1"
+              style={{ gap: "16px" }}
+            >
+              <Button
+                variant="outline-primary"
+                onClick={() => navigate("/dashboard")}
+                className="d-flex align-items-center justify-content-center shadow-sm"
+                style={{
+                  borderRadius: "50%",
+                  width: "40px",
+                  height: "40px",
+                  border: "2px solid #2E57A7",
+                  color: "#2E57A7",
+                  backgroundColor: "#fff",
+                  transition: "all 0.3s ease",
+                  padding: "0",
+                }}
+                onMouseEnter={(e) => {
+                  e.target.style.backgroundColor = "#2E57A7";
+                  e.target.style.color = "#fff";
+                  e.target.style.transform = "translateY(-2px)";
+                  e.target.style.boxShadow =
+                    "0 4px 12px rgba(46, 87, 167, 0.3)";
+                }}
+                onMouseLeave={(e) => {
+                  e.target.style.backgroundColor = "#fff";
+                  e.target.style.color = "#2E57A7";
+                  e.target.style.transform = "translateY(0)";
+                  e.target.style.boxShadow = "0 2px 4px rgba(0,0,0,0.1)";
+                }}
+              >
+                <BsArrowLeft size={16} />
+              </Button>
+              <Stack spacing={0.5} className="flex-grow-1">
+                <Typography
+                  sx={{
+                    fontWeight: 550,
+                    color: "#2E57A7",
+                    fontSize: { xs: "1rem", sm: "1.1rem", md: "1.2rem" },
+                    lineHeight: 1.2,
+                  }}
                 >
-                  <FaPlus className="me-2" />
-                  Add
-                </Button>
-              )}
-            </Card.Body>
-          </Card>
-        </Collapsible>
-
-        {/* Enclosure */}
-        <Collapsible
-          title={
-            <div className="d-flex align-items-center">
-              <FaFileUpload className="me-2" style={{ color: "#2466BF" }} />
-              <span style={{ color: "#2466BF" }}>{t("ENCLOSURE")}</span>
+                  Vessel Application Details - ({id})
+                </Typography>
+                <Typography
+                  sx={{
+                    color: "#026931ff",
+                    fontSize: { xs: "0.95rem", sm: "0.85rem" },
+                    fontWeight: "bold",
+                    lineHeight: 1.3,
+                  }}
+                >
+                  {pageName === "uploadReports"
+                    ? "Upload neccessary Reports & Documents"
+                    : pageName === "vesselRegistration"
+                      ? "Please fill up the Vessel Registration form.."
+                      : ""}
+                </Typography>
+              </Stack>
             </div>
-          }
-          defaultOpen={true}
-        >
-          <Card className="form-section-card">
-            <Card.Body>
-              <Row className="g-3">
-                <Col xs={12} lg={6}>
-                  {renderFileField("certificateOfRegistration", "Certificate of Registration")}
-                </Col>
-                <Col xs={12} lg={6}>
-                  {renderFileField("alterationDrawings", "Alteration Drawings")}
-                </Col>
-                <Col xs={12} lg={6}>
-                  {renderFileField("existingApprovedDrawings", "Existing Approved Drawings")}
-                </Col>
-                <Col xs={12} lg={6}>
-                  {renderFileField("updatedStabilityBooklet", "Updated Stability Booklet")}
-                </Col>
-                <Col xs={12} lg={6}>
-                  {renderFileField("existingTonnageBooklet", "Existing Tonnage Booklet")}
-                </Col>
-                <Col xs={12} lg={6}>
-                  {renderFileField("updatedTonnageBooklet", "Updated Tonnage Booklet")}
-                </Col>
-                <Col xs={12} lg={6}>
-                  {renderFileField("existingStabilityBooklet", "Existing Stability Booklet")}
-                </Col>
-                <Col xs={12} lg={6}>
-                  {renderFileField("newInsuranceCertificate", "New Insurance Certificate")}
-                </Col>
-                <Col xs={12} lg={6}>
-                  {renderFileField("lastSurveyCertificate", "Last Survey Certificate")}
-                </Col>
-                <Col xs={12} lg={6}>
-                  {renderFileField("workOrder", "Work Order")}
-                </Col>
-                <Col xs={12} lg={6}>
-                  {renderFileField("insuranceCertificate", "Insurance Certificate")}
-                </Col>
-                <Col xs={12}>
-                  <MultiFile
-                    title={t("Other Technical Document")}
-                    files={otherTechnicalDocumentFiles}
-                    setFiles={setOtherTechnicalDocumentFiles}
-                    type="OTHER_TECHNICAL_DOCUMENT"
-                    icon={<BsFileEarmarkPdf className="text-primary" size={12} />}
-                    watch={watch}
-                    viewMode={viewMode}
-                    editMode={editMode}
-                    clearErrors={clearErrors}
-                    register={register}
-                    errors={errors}
-                    setError={methods.setError}
-                    setValue={setValue}
-                    unregister={unregister}
-                    ref={loaderRef}
-                    isRegistrationMode={false}
-                  />
-                </Col>
-              </Row>
-            </Card.Body>
-          </Card>
-        </Collapsible>
-      </form>
-    </>
+          </div>
+        )}
+
+        {steps?.length > 0 && (
+          <Stepper
+            ref={stepperRef}
+            steps={steps}
+            viewMode={isViewMode}
+            actionComponent={actionDropdown}
+            onSyncData={handleFormSubmit}
+            onSave={handleFinalSubmit}
+            onSubmit={handleSubmit}
+            disableSubmit={disableSubmit}
+            initialStep={initialStep}
+            registrationData={registrationData}
+            omitSubmitButton={
+              pageName === "uploadReports" ||
+              (isOfficerLogin &&
+                actionsFromAPI?.length === 0 &&
+                steps?.length === 1) ||
+              (isOfficerLogin && actionsFromAPI?.length < 1) ||
+              (userRole === USER_ROLES.VESSEL_OWNER && showCmnStepper)
+            }
+            pageName={pageName}
+            // omitSubmitButton={pageName === "uploadReports" || (isOfficerLogin && actionsFromAPI?.length === 0 && steps?.length === 1) }
+            onGetInvoice={handleGetInvoice}
+          />
+        )}
+        {isOfficerLogin && isViewMode && (
+          <ApprovalModal
+            show={showApprovalModal}
+            handleClose={handleCloseModal}
+            handleSubmitData={workflowApplicationSubmit}
+            selectedAction={selectedAction}
+          />
+        )}
+        <InvoiceModal
+          show={showInvoiceModal}
+          onHide={() => setShowInvoiceModal(false)}
+          paymentData={paymentData}
+          onProceedToPay={handleProceedToPay}
+          applicationNumber={id}
+        />
+      </>
+    </Box>
   );
 };
 
-export default RequestApplication;
+export default VesselReportsAndDocs;
+
+
+import React, { useState } from "react";
+import { Container, Row, Col, Card } from "react-bootstrap";
+import { Button } from "react-bootstrap";
+import { BsCalendarCheck } from "react-icons/bs";
+import { useForm } from "react-hook-form";
+import { useTranslation } from "react-i18next";
+import InputText from "../../../../common/InputText.tsx";
+import AppointmentModal from "../../../../common/AppointmentModal";
+import OfficerAppointmentModal from "./OfficerAppointmentModal.js";
+import { getFromLocalStorage } from "../../../../../utils/localStorageUtils.js";
+import { USER_ROLES } from "../../../../../utils/constants.ts";
+
+const CurvingMarkingNote = ({ registrationData, onSubmitAppointments }) => {
+  const { t } = useTranslation();
+  const [showModal, setShowModal] = useState(false);
+  const [isAppointmentBooked, setIsAppointmentBooked] = useState(false);
+  
+  const hasBookedAppointment = registrationData?.appointmentSlots?.some(slot => slot.isBooked);
+  
+  const [displayAppointment, setDisplayAppointment] = useState(
+    registrationData?.appointmentSlots?.length > 0 && !hasBookedAppointment ? false : !hasBookedAppointment
+  );
+// const [displayAppointment, setDisplayAppointment] = useState(registrationData?.appointmentSlots?.length > 0 ? false : true);
+  console.log("registrationData ", registrationData);
+  const userRole = getFromLocalStorage("userRole") || "";
+  const isOfficer = userRole === USER_ROLES.OFFICER_L3 || userRole === USER_ROLES.OFFICER_L4;
+
+  const {
+    register,
+    formState: { errors },
+    setValue,
+    watch,
+    clearErrors,
+  } = useForm({
+    mode: "onChange",
+    defaultValues: {
+      vesselName: registrationData?.vesselDetails?.vesselName || "",
+      officialNo: registrationData?.vesselDetails?.registrationNumber || "Auto Generated",
+      portOfRegistry: registrationData?.vesselDetails?.nameOfRegistry || "",
+      yearOfRegistry: registrationData?.vesselDetails?.yearOfBuild || "",
+    },
+  });
+
+  const handleConfirm = async (appointments) => {
+    setShowModal(false);
+    setIsAppointmentBooked(true);
+    try {
+      const formattedAppointments = appointments.map((apt) => ({
+        date: apt.date.toLocaleDateString("en-GB"),
+        timeSlot: apt.time,
+        appointmentStatus: "",
+        isBooked: false,
+        bookedBy: null,
+      }));
+       console.log("Awaiting confirmation...");
+      await onSubmitAppointments(formattedAppointments);
+        console.log("Confirmation successful");
+      setDisplayAppointment(false);
+    } catch (error) {
+      console.error("Error submitting appointments:", error);
+    }
+  };
+  console.log("displayAppointment inside", displayAppointment);
+      console.log("userRole === USER_ROLES.VESSEL_OWNER", userRole === USER_ROLES.VESSEL_OWNER);
+
+  console.log("displayAppointment || userRole === USER_ROLES.VESSEL_OWNER", displayAppointment || userRole === USER_ROLES.VESSEL_OWNER);
+
+  return (
+    <Container fluid className="p-0">
+      <Card className="mb-1">
+        <Card.Body>
+          <div className="d-flex justify-content-between align-items-center mb-4">
+            <div>
+              <h6 style={{ color: "#2466BF", marginBottom: "0.5rem" }}>
+                {t("Curving & Marking Note")}
+              </h6>
+              <p style={{ color: "#64748b", fontSize: "0.9rem", margin: 0 }}>
+                {t("Vessel Registration Details")}
+              </p>
+            </div>
+             {/* {(displayAppointment || userRole === USER_ROLES.VESSEL_OWNER) && (  */}
+            {(displayAppointment || userRole === USER_ROLES.VESSEL_OWNER) && !hasBookedAppointment && !isAppointmentBooked && (
+              <Button
+                variant="primary"
+                onClick={() => setShowModal(true)}
+                className="d-flex align-items-center gap-2"
+                style={{
+                  backgroundColor: "#2E57A7",
+                  borderColor: "#2E57A7",
+                  fontWeight: 600,
+                  padding: "10px 24px",
+                  borderRadius: "8px",
+                  fontSize: "0.9rem",
+                  boxShadow: "0 4px 12px rgba(46, 87, 167, 0.2)",
+                  transition: "all 0.3s ease",
+                }}
+              >
+                <BsCalendarCheck size={16} />
+                {isOfficer ? "Propose Appointments" : "Schedule Appointment"}
+              </Button>
+            )}
+          </div>
+
+          <hr style={{ borderColor: "#e2e8f0", margin: "1rem 0" }} />
+
+          <form className="employee-form">
+            <Card className="form-section-card">
+              <Card.Body>
+                <Row className="g-3">
+                  <Col md={6}>
+                    <InputText
+                      name="vesselName"
+                      label={t("Name of the Vessel")}
+                      placeholder={t("Enter vessel name")}
+                      required={true}
+                      register={{
+                        ...register("vesselName", {
+                          required: t("Vessel Name is required"),
+                        }),
+                      }}
+                      errors={errors}
+                      clearErrors={clearErrors}
+                      disabled={true}
+                    />
+                  </Col>
+
+                  <Col md={6}>
+                    <InputText
+                      name="officialNo"
+                      label={t("Official No.")}
+                      placeholder={t("Enter official number")}
+                      required={true}
+                      register={{
+                        ...register("officialNo", {
+                          required: t("Official No. is required"),
+                        }),
+                      }}
+                      errors={errors}
+                      clearErrors={clearErrors}
+                      disabled={true}
+                    />
+                  </Col>
+
+                  <Col md={6}>
+                    <InputText
+                      name="portOfRegistry"
+                      label={t("Port of Registry")}
+                      placeholder={t("Enter port of registry")}
+                      required={true}
+                      register={{
+                        ...register("portOfRegistry", {
+                          required: t("Port of Registry is required"),
+                        }),
+                      }}
+                      errors={errors}
+                      clearErrors={clearErrors}
+                      disabled={true}
+                    />
+                  </Col>
+
+                  <Col md={6}>
+                    <InputText
+                      name="yearOfRegistry"
+                      label={t("Year of Registry")}
+                      placeholder={t("Enter year of registry")}
+                      required={true}
+                      register={{
+                        ...register("yearOfRegistry", {
+                          required: t("Year of Registry is required"),
+                          pattern: {
+                            value: /^[0-9]{4}$/,
+                            message: t("Enter a valid year (YYYY)"),
+                          },
+                        }),
+                      }}
+                      errors={errors}
+                      clearErrors={clearErrors}
+                      disabled={true}
+                    />
+                  </Col>
+                </Row>
+              </Card.Body>
+            </Card>
+          </form>
+        </Card.Body>
+      </Card>
+
+      {isOfficer ? (
+        <OfficerAppointmentModal
+          show={showModal}
+          handleClose={() => setShowModal(false)}
+          handleConfirm={handleConfirm}
+        />
+      ) : (
+        <AppointmentModal
+          show={showModal}
+          handleClose={() => setShowModal(false)}
+          handleConfirm={handleConfirm}
+          registrationData={registrationData}
+        />
+      )}
+    </Container>
+  );
+};
+
+export default CurvingMarkingNote;
+import React, { useEffect } from "react";
+import { createRoot } from "react-dom/client";
+import {
+  FaCheckCircle,
+  FaTimesCircle,
+  FaExclamationTriangle,
+  FaInfoCircle,
+} from "react-icons/fa";
+
+const rootMap = new Map();
+
+const icons = {
+  success: <FaCheckCircle size={18} style={{ marginRight: "8px" }} />,
+  error: <FaTimesCircle size={18} style={{ marginRight: "8px" }} />,
+  warning: <FaExclamationTriangle size={18} style={{ marginRight: "8px" }} />,
+  info: <FaInfoCircle size={18} style={{ marginRight: "8px" }} />,
+};
+
+const ToastMessage = ({ message, type, onClose, duration = 4000 }) => {
+  useEffect(() => {
+    const timer = setTimeout(onClose, duration);
+    return () => clearTimeout(timer);
+  }, [onClose, duration]);
+
+  return (
+    <div
+      className={`toast-message ${type}`}
+      role="alert"
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: "12px",
+        marginBottom: "12px",
+        minWidth: "280px",
+        maxWidth: "95vw",
+        padding: "14px 18px",
+        borderRadius: "10px",
+        boxShadow: "0 4px 10px rgba(0,0,0,0.15)",
+        fontSize: "14px",
+        color: "#fff",
+        animation: "slideIn 0.4s ease, fadeOut 0.5s ease forwards",
+        animationDelay: `${duration - 500}ms`,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", flex: 1 }}>
+        {icons[type]}
+        <span>{message}</span>
+      </div>
+      <button
+        type="button"
+        onClick={onClose}
+        style={{
+          background: "transparent",
+          border: "none",
+          color: "#fff",
+          fontSize: "16px",
+          cursor: "pointer",
+        }}
+      >
+        ✖
+      </button>
+
+      <style>
+        {`
+          @keyframes slideIn {
+            from {
+              transform: translateX(120%);
+              opacity: 0;
+            }
+            to {
+              transform: translateX(0);
+              opacity: 1;
+            }
+          }
+          @keyframes fadeOut {
+            to {
+              opacity: 0;
+              transform: translateX(120%);
+            }
+          }
+
+          .toast-message.success {
+            background: linear-gradient(45deg, #28a745, #218838);
+          }
+          .toast-message.error {
+            background: linear-gradient(45deg, #dc3545, #c82333);
+          }
+          .toast-message.warning {
+            background: linear-gradient(45deg, #ffc107, #e0a800);
+            color: #333;
+          }
+          .toast-message.info {
+            background: linear-gradient(45deg, #17a2b8, #117a8b);
+          }
+
+          /* Responsive */
+          @media (max-width: 576px) {
+            .toast-message {
+              min-width: 90vw !important;
+              border-radius: 8px;
+              font-size: 13px;
+            }
+          }
+        `}
+      </style>
+    </div>
+  );
+};
+
+export const toastShow = {
+  notify: (message, options = {}) => {
+    const targetId = options.targetId || "toast-container";
+    const type =
+      options.type === "error"
+        ? "error"
+        : options.type === "success"
+        ? "success"
+        : options.type === "info"
+        ? "info"
+        : "warning";
+
+    const container = document.getElementById(targetId);
+    if (!container) {
+      console.error(`Toast container with id '${targetId}' not found`);
+      return;
+    }
+
+    const toastId = Date.now().toString();
+    const toastDiv = document.createElement("div");
+    container.appendChild(toastDiv);
+
+    const root = createRoot(toastDiv);
+    rootMap.set(toastId, { root, element: toastDiv });
+
+    const handleClose = () => {
+      const toastData = rootMap.get(toastId);
+      if (toastData) {
+        toastData.root.unmount();
+        container.removeChild(toastData.element);
+        rootMap.delete(toastId);
+      }
+    };
+
+    root.render(
+      <ToastMessage message={message} type={type} onClose={handleClose} />
+    );
+  },
+
+  remove: (id) => {
+    const targetId = id || "toast-container";
+    const container = document.getElementById(targetId);
+    if (container) {
+      container.innerHTML = "";
+    }
+    rootMap.clear();
+  },
+};
+
+export const CustomToastContainer = ({ id = "toast-container" }) => {
+  return (
+    <div
+      id={id}
+      style={{
+        position: "fixed",
+        top: "20px",
+        right: "20px",
+        zIndex: 9999,
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "flex-end",
+        maxWidth: "100%",
+        padding: "0 10px",
+      }}
+    />
+  );
+};
