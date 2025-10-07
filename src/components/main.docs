@@ -1,339 +1,16 @@
-import React, { useState, useEffect, useRef } from "react";
-import { Box, Typography, Stack } from "@mui/material";
-import { useParams, useLocation, useNavigate, useSearchParams } from "react-router-dom";
-import Stepper from "../../../../common/Stepper.jsx";
-import VesselSurveyForm from "./TransferOfRegistryForm.js";
-import { useForm } from "react-hook-form";
-import { useTranslation } from "react-i18next";
-import { toast } from "react-toastify";
-import { Button } from "react-bootstrap";
-import { BsArrowLeft } from "react-icons/bs";
-import { postData } from "../../../../../services/http.service.ts";
-import { Tooltip } from "react-tooltip";
-import {
-  SERVICE_BASE,
-  URLS_ENDPOINT,
-} from "../../../../../utils/urlsConstants.ts";
-import VesselEquipmentForm from "./TransferEquipmentForm.js";
-import { initialEquipementData } from "./constants/VesselEquipementConstant.js";
-import { vesselSurveyInitialValues } from "./constants/VesselServeyConstant.js";
-import Invoicing from "../../../../common/Invoicing.js";
-import { getFromLocalStorage } from "../../../../../utils/localStorageUtils.js";
-import { APPLICATION_TYPES, OFFICER_ROLES, USER_ROLES } from "../../../../../utils/constants.ts";
-import NewLoader from "../../../../common/NewLoader.js";
-import { handleErrorMessage } from "../../../../../utils/errorMessageHandler.js";
-import ProvisionModal from "../../../../common/ProvisionModal.js";
-import { useMasterData } from "../../../../context/MasterDataContext.js";
-import ActionDropdown from "../../../../common/ActionDropdown.js";
-import ApprovalModal from "../../../../common/ApprovalModal.js";
-
-const TransferOfRegistryApplication = ({
-  applicationNo,
-  viewMode = false,
-  tabMode = false,
-}) => {
-  let { t } = useTranslation();
-  let location = useLocation();
-  let navigate = useNavigate();
-  const surveyFormRef = useRef();
-  const ownerDetails = getFromLocalStorage("ownerDetails")
-    ? JSON.parse(getFromLocalStorage("ownerDetails"))
-    : "";
-  const { masterData } = useMasterData();
-  const [showApprovalModal, setShowApprovalModal] = useState(false);
-  const [selectedAction, setSelectedAction] = useState("");
-
-  const [searchParams] = useSearchParams();
-  const id = searchParams.get("applicationNo");
-
-  let isEditMode = !!id && location.pathname.includes("/edit/");
-  let isViewMode = (!!id && location.pathname.includes("/view/")) || viewMode;
-
-  if (!id && applicationNo) {
-    id = applicationNo;
-  }
-
-  let stepperRef = useRef();
-
-  const methods = useForm({
-    defaultValues: {
-      ...vesselSurveyInitialValues,
-      ...initialEquipementData,
-    },
-    mode: "onTouched",
-  });
-  const {
-    trigger,
-    getValues,
-    setError,
-    setValue,
-    reset,
-    formState: { errors },
-  } = methods;
-  const [actionsFromAPI, setActionsFromAPI] = useState([]);
-  const [registrationData, setRegistrationData] = useState(null);
-  const [initialRegistryData, setInitialRegistryData] = useState(null);
-
-  const userRole = getFromLocalStorage("userRole") || "";
-  const userDetails = getFromLocalStorage("userDetails")
-    ? JSON.parse(getFromLocalStorage("userDetails"))
-    : "";
-
-  const isOfficerLogin = OFFICER_ROLES.includes(userRole) || false;
-
-  const [paymentData, setPaymentData] = useState({
-    invoiceBreakupInfo: [
-      {
-        id: 1,
-        label: "Payment",
-        categoryHeader: "Pay now",
-        amount: 500,
-      },
-    ], summary: {
-      subTotal: 500,
-      cgst: 0,
-      sgst: 0,
-      igst: 0,
-      totalPayable: 500,
-    }
-  });
-  const [fullPaymentData, setFullPaymentData] = useState({});
-  const [showOfficerActions, setShowOfficerActions] = useState(false);
-  const [vesselData, setVesselData] = useState({});
-
-  if (isOfficerLogin) {
-    isViewMode = true;
-  }
-  const loaderRef = useRef();
-
-  const [isLoading, setIsLoading] = useState(false);
-  const [openCertificateModal, setOpenCertificateModal] = useState(false);
-  const [modalType, setModalType] = useState("");
-
-  const [provisionalCertData, setProvisionalCertData] = useState("");
-  const [generatedCertificates, setGeneratedCertificates] = useState({
-    survey: false,
-    registration: false,
-  });
-
-  useEffect(() => {
-    const vesselData = location.state?.vesselData;
-    if (vesselData) {
-      setVesselData(vesselData);
-    }
-  }, [location.state]);
-
-  useEffect(() => {
-    const ownerDetails = getFromLocalStorage("ownerDetails")
-      ? JSON.parse(getFromLocalStorage("ownerDetails"))
-      : null;
-
-    if (ownerDetails) {
-      setValue("basicDetails.ownerDetails.nameOfOwner", ownerDetails.ownerCompanyName || "");
-
-      const address = [ownerDetails.addressLine1, ownerDetails.addressLine2]
-        .filter(Boolean)
-        .join(", ");
-      setValue("basicDetails.ownerDetails.addressLine1", address);
-
-      setValue("basicDetails.ownerDetails.phoneNumber", ownerDetails.phoneNumber || "");
-    }
-  }, [setValue]);
-
-  const getEquipmentIdFromKey = (equipmentKey) => {
-    const equipmentKeyMap = {
-      "Fire Fighting Items": "EquipmentFireFightingItems",
-      Equipments: "Equipments",
-      "Navigational Equipments": "EquipmentNavigationalEquipments",
-      "Life-Saving Equipment": "EquipmentLifeSavingEquipment",
-      "Machinery/Electrical": "EquipmentMachineryElectrical",
-      "Accommodation/Safety": "EquipmentAccommodationSafety",
-    };
-
-    const equipmentName = Object.keys(equipmentKeyMap).find(
-      (name) => equipmentKeyMap[name] === equipmentKey
-    );
-
-    if (equipmentName) {
-      const equipment = masterData?.equipmentCategories?.find(
-        (eq) => eq.equipmentName === equipmentName
-      );
-      return equipment?.id;
-    }
-
-    return null;
-  };
-
-  const validateSurveyForm = async () => {
-    return true;
-  };
-
-  const validateEquipmentForm = async () => {
-    if (isViewMode) return true;
-    return true;
-  };
-
-  const buildEquipmentPayload = (formData, existingSurveyData) => {
-    const transformEquipmentData = (equipmentData) => {
-      const hasExistingEquipment = existingSurveyData?.SurveyEquipments &&
-        Object.values(existingSurveyData.SurveyEquipments).some(arr => Array.isArray(arr) && arr.length > 0);
-
-      if (hasExistingEquipment) {
-        const transformed = {};
-
-        if (existingSurveyData?.SurveyEquipments) {
-          Object.keys(existingSurveyData.SurveyEquipments).forEach(key => {
-            transformed[key] = existingSurveyData.SurveyEquipments[key] || [];
-          });
-        }
-
-        if (equipmentData) {
-          Object.keys(equipmentData).forEach(equipmentId => {
-            const equipmentCategories = equipmentData[equipmentId];
-            Object.keys(equipmentCategories).forEach(categoryCode => {
-              const categoryData = equipmentCategories[categoryCode];
-              const equipment = masterData?.equipmentCategories?.find(eq => eq.id == equipmentId);
-              const equipmentName = equipment?.equipmentName;
-
-              if (equipmentName) {
-                const equipmentKeyMap = {
-                  "Fire Fighting Items": "EquipmentFireFightingItems",
-                  "Equipments": "Equipments",
-                  "Navigational Equipments": "EquipmentNavigationalEquipments",
-                  "Life-Saving Equipment": "EquipmentLifeSavingEquipment",
-                  "Machinery/Electrical": "EquipmentMachineryElectrical",
-                  "Accommodation/Safety": "EquipmentAccommodationSafety"
-                };
-
-                const apiKey = equipmentKeyMap[equipmentName];
-                if (apiKey && transformed[apiKey]) {
-                  transformed[apiKey] = transformed[apiKey].map(existingItem => {
-                    if (existingItem.categoryCode === categoryCode) {
-                      return {
-                        ...existingItem,
-                        number: parseInt(categoryData.number) || existingItem.number || "",
-                        type: categoryData.type || existingItem.type || "",
-                        location: categoryData.location || existingItem.location || "",
-                        condition: categoryData.condition || existingItem.condition || "",
-                        capacity: categoryData.capacity || existingItem.capacity || "",
-                        remarks: categoryData.remarks || existingItem.remarks || ""
-                      };
-                    }
-                    return existingItem;
-                  });
-                }
-              }
-            });
-          });
-        }
-        return transformed;
-      } else {
-        const transformed = {};
-
-        if (equipmentData) {
-          Object.keys(equipmentData).forEach(equipmentId => {
-            const equipmentCategories = equipmentData[equipmentId];
-            Object.keys(equipmentCategories).forEach(categoryCode => {
-              const categoryData = equipmentCategories[categoryCode];
-              const equipment = masterData?.equipmentCategories?.find(eq => eq.id == equipmentId);
-              const equipmentName = equipment?.equipmentName;
-
-              if (equipmentName) {
-                const equipmentKeyMap = {
-                  "Fire Fighting Items": "EquipmentFireFightingItems",
-                  "Equipments": "Equipments",
-                  "Navigational Equipments": "EquipmentNavigationalEquipments",
-                  "Life-Saving Equipment": "EquipmentLifeSavingEquipment",
-                  "Machinery/Electrical": "EquipmentMachineryElectrical",
-                  "Accommodation/Safety": "EquipmentAccommodationSafety"
-                };
-
-                const apiKey = equipmentKeyMap[equipmentName];
-                if (apiKey) {
-                  if (!transformed[apiKey]) {
-                    transformed[apiKey] = [];
-                  }
-
-                  transformed[apiKey].push({
-                    id: "",
-                    source: apiKey,
-                    surveyId: existingSurveyData?.surveyId || "",
-                    categoryCode: categoryCode,
-                    number: parseInt(categoryData.number) || "",
-                    type: categoryData.type || "",
-                    location: categoryData.location || "",
-                    condition: categoryData.condition || "",
-                    capacity: categoryData.capacity || "",
-                    remarks: categoryData.remarks || "",
-                    status: "ACTIVE",
-                    basicDetailsFk: "",
-                    auditDetails: null
-                  });
-                }
-              }
-            });
-          });
-        }
-        return transformed;
-      }
-    };
-
-    const transformDeckSpaces = (deckSpaces) => {
-      if (!deckSpaces || !Array.isArray(deckSpaces)) {
-        return existingSurveyData?.passengerDistributionMaxLoad || [];
-      }
-
-      return deckSpaces?.map((deck, index) => {
-        const existingDeck = existingSurveyData?.passengerDistributionMaxLoad?.[index] || {};
-
-        return {
-          id: existingDeck?.id || "",
-          iwtVesRegBasicDetailsTFk: existingDeck?.iwtVesRegBasicDetailsTFk ||
-            existingSurveyData?.BasicVesselInformation?.iwtVesRegBasicDetailsTFk || "",
-          surveyId: existingDeck?.surveyId || existingSurveyData?.surveyId || "",
-          deckName: deck.deckType || existingDeck.deckName || "",
-          spaceType: deck.deckType || existingDeck.spaceType || "",
-          maxPassengers: parseInt(deck.maxPassengers) || existingDeck.maxPassengers || null,
-          sizeSqm: parseFloat(deck?.size) || existingDeck.sizeSqm || null,
-          function: deck.function || existingDeck.function || "",
-          source: existingDeck.source || "Manual Entry",
-          condition: existingDeck.condition || "Good",
-          remarks: deck.remarks || existingDeck.remarks || ""
-        };
-      });
-    };
-
-    const transformFreeboardData = (freeboard) => {
-      if (!freeboard) return existingSurveyData?.vesselFreeboardData || null;
-
-      const existing = existingSurveyData?.vesselFreeboardData || {};
-      return {
-        id: existing.id || "",
-        minimumFreeboard: parseFloat(freeboard.minFreeboard) || existing.minimumFreeboard || null,
-        numberOfPassengers: parseInt(freeboard.numPassengers) || existing.numberOfPassengers || null,
-        cargoTonnes: parseFloat(freeboard.cargo) || existing.cargoTonnes || 0
-      };
-    };
-
-    const equipmentData = transformEquipmentData(formData.equipment);
-
-    return {
-      ...existingSurveyData,
-      SurveyEquipments: Object.keys(equipmentData).length > 0 ? equipmentData : existingSurveyData?.SurveyEquipments || {},
-      passengerDistributionMaxLoad: transformDeckSpaces(formData.deckSpaces),
-      vesselFreeboardData: transformFreeboardData(formData.freeboard)
-    };
-  };
-
-  const submitSetp1 = async (formValues) => {
-    try {
-      loaderRef?.current?.show();
-
-      const ownerDetails = getFromLocalStorage("ownerDetails")
-        ? JSON.parse(getFromLocalStorage("ownerDetails"))
+const submitTransferData = async (formValues, stepIndex, stepInfo = null) => {
+  try {
+    loaderRef.current?.show();
+    
+    let payload, apiUrl;
+    
+    if (stepIndex === 0) {
+      // Step 1: Initial Transfer Registration
+      const ownerDetails = getFromLocalStorage("ownerDetails") 
+        ? JSON.parse(getFromLocalStorage("ownerDetails")) 
         : null;
 
-      const payload = {
+      payload = {
         registrationRequest: {
           id: "",
           applicationNumber: "",
@@ -342,46 +19,21 @@ const TransferOfRegistryApplication = ({
             id: "",
             applicationNumber: "",
             status: "",
-            ownerDetails: {
-              id: ownerDetails?.id || ""
-            },
-            builderDetails: {
-              id: ""
-            },
+            ownerDetails: { id: ownerDetails?.id || "" },
+            builderDetails: { id: "" },
           },
           vesselDetails: {
             id: "",
             typeOfVessel: formValues?.vesselDetails?.typeOfVessel || "",
             categoryOfVessel: formValues?.vesselDetails?.categoryOfVessel || "",
-            zone: "",
             grossTonnage: parseFloat(formValues?.vesselDetails?.grossTonnage) || 0,
-            workOrderValue: "",
-            purchaseType: "",
-            supervisionAuthority: "",
-            nameOfMaster: "",
-            certficateNumber: "",
-            nameOfRegistry: "",
             registrationNumber: formValues?.basicVesselInfo?.officialNo || "",
             vesselName: formValues?.vesselDetails?.vesselName || "",
-            kindOfVessel: "",
-            mortgage: "",
-            placeOfBuild: "",
-            insuranceDetails: "",
             yearOfBuild: parseInt(formValues?.vesselDetails?.yearOfBuild) || 0,
-            pniClubNo: "",
-            pniClubName: "",
-            applicationNo: "",
-            nameOfClassificationSociety: "",
-            iwtVesselBasicDetailsTFk: "",
-            insuranceValidDate: "",
             portOfRegistry: formValues?.vesselDetails?.previousPort || "",
-            surveyId: null,
             lengthOfVessel: parseFloat(formValues?.vesselDetails?.lengthOfVessel) || 0,
             breadthOfVessel: parseFloat(formValues?.vesselDetails?.breadthOfVessel) || 0,
             depthOfVessel: parseFloat(formValues?.vesselDetails?.depthOfVessel) || 0,
-            hullMaterial: null,
-            noOfBulkheads: null,
-            declarationWorkOrderDate: null,
             previousPort: formValues?.vesselDetails?.portOfRegistry || "",
             reasonOfChange: formValues?.basicVesselInfo?.reasonForTransfer || ""
           },
@@ -390,38 +42,9 @@ const TransferOfRegistryApplication = ({
             yearOfBuild: formValues?.vesselDetails?.yearOfBuild || "",
             engineType: formValues?.engineDetails?.engineType || "",
             engineMake: formValues?.engineDetails?.engineMake || "",
-            makerAddress: formValues?.engineDetails?.makerAddress || "",
-            pin: "",
-            mobile: "",
-            email: "",
             horsepower: parseFloat(formValues?.engineDetails?.horsepower) || 0.00,
             speed: parseFloat(formValues?.engineDetails?.speed) || 0.00,
-            yearOfMake: formValues?.engineDetails?.yearOfMake || "",
-            applRegistrationTFk: "",
-            modelNo: formValues?.engineDetails?.modelNo || null,
-            noOfSet: parseInt(formValues?.engineDetails?.noOfSet) || null,
-            numberOfEngine: parseInt(formValues?.engineDetails?.numberOfEngine) || 0,
-            serialNo: formValues?.engineDetails?.serialNo || null,
-            propellerType: formValues?.engineDetails?.propellerType || null,
-            gearType: formValues?.engineDetails?.gearType || null,
-            noOfGear: parseInt(formValues?.engineDetails?.noOfGear) || null,
-            vesselSpeed: formValues?.engineDetails?.vesselSpeed || null,
-            rpm: parseInt(formValues?.engineDetails?.rpm) || null,
-            engineCylinder: parseFloat(formValues?.engineDetails?.engineCylinder) || null,
-            stroke: parseFloat(formValues?.engineDetails?.stroke) || null,
-            internalCombustionEngineNo: null,
-            description: null,
-            noOfCylindersPerSet: null,
-            nhp: null,
-            ihp: null,
-            propulsionType: null,
-            noOfCylinderPerSetRotaryEngine: parseInt(formValues?.engineDetails?.noOfCylinderPerSetRotaryEngine) || 0,
-            noOfCylinderPerSetReciprocatingEngine: parseInt(formValues?.engineDetails?.noOfCylinderPerSetReciprocatingEngine) || 0,
-            noOfShaft: parseInt(formValues?.engineDetails?.noOfShaft) || 0,
-            lengthOfEngineRoom: parseFloat(formValues?.engineDetails?.lengthOfEngineRoom) || 0.00,
-            boilderDescription: null,
-            boilerNumber: null,
-            loadedPressure: null
+            numberOfEngine: parseInt(formValues?.engineDetails?.numberOfEngine) || 0
           }
         },
         initialSurveyRequest: {
@@ -431,97 +54,37 @@ const TransferOfRegistryApplication = ({
             typeOfSurveyId: "Initial",
             placeYardNo: formValues?.basicVesselInfo?.proposedPortOfRegistry || "",
             netTonnage: parseFloat(formValues?.vesselDetails?.netTonnage) || 0,
-            agentsName: "",
-            agentsAddress: "",
-            agentsTelephone: "",
             placeOfLastSurvey: formValues?.basicVesselInfo?.placeOfLastSurvey || "",
             dateOfLastSurvey: formValues?.basicDetails?.builderDetails?.dateOfLastSurvey || "",
-            dateOfProposedVisitSurveyor: "",
-            iwtVesRegBasicDetailsTFk: "",
             status: "NEW",
             lengthOfVessel: formValues?.vesselDetails?.lengthOfVessel || "",
             breadthOfVessel: formValues?.vesselDetails?.breadthOfVessel || "",
             depthOfVessel: formValues?.vesselDetails?.depthOfVessel || "",
-            draft: formValues?.basicVesselInfo?.draft || "",
-            numberofDecks: null,
-            enableprovisonalsurveycert: false,
-            enableprovisonalregistrationcert: false,
-            totalNoOfDeckCrew: formValues?.crewDetails?.totalDeckCrew || "",
-            totalNoOfEngineCrew: formValues?.crewDetails?.totalEngineCrew || ""
-          },
-          HullParticulars: {
-            id: "",
-            frameMaterial: formValues?.hullParticulars?.frameMaterial || "",
-            frameThickness: formValues?.hullParticulars?.frameThickness || "",
-            floorMaterial: formValues?.hullParticulars?.floorMaterial || "",
-            hullMaterial: formValues?.hullParticulars?.hullMaterial || "",
-            hullPlatingThickness: formValues?.hullParticulars?.hullPlattingThickness || "",
-            keelLayingDate: formValues?.hullParticulars?.keelLayingDate || "",
-            iwtVesBasicSurveyDetTFk: "",
-            status: "NEW",
-            hullPlatingMaterial: formValues?.hullParticulars?.hullPlatingMaterial || "",
-            noOfBulkheads: formValues?.hullParticulars?.numberOfBulkheads || "",
-            bulkheadPlacement: formValues?.hullParticulars?.bulkheadPlacement || "",
-            bulkheadThickness: formValues?.hullParticulars?.bulkheadThickness || "",
-            floorThickness: formValues?.hullParticulars?.floorThickness || "",
-            stern: ""
-          },
-          RadioandNavigationEquipment: {
-            id: "",
-            magneticCompass: parseInt(formValues?.navigationEquipment?.magneticCompass) || null,
-            vhfRadio: parseInt(formValues?.navigationEquipment?.vhfRadio) || null,
-            aisIdentifiSystem: parseInt(formValues?.navigationEquipment?.classBAutoAIS) || null,
-            gps: parseInt(formValues?.navigationEquipment?.gpsNavigator) || null,
-            binocular: parseInt(formValues?.navigationEquipment?.binocular) || null,
-            aldisLamp: parseInt(formValues?.navigationEquipment?.aldisLamp) || null,
-            rudderAngleIndicator: parseInt(formValues?.navigationEquipment?.rudderAngleIndicator) || null,
-            others: parseInt(formValues?.navigationEquipment?.othersNavigation) || null,
-            iwtVesBasicSurveyDetTFk: "",
-            status: "NEW"
-          },
-          PollutionControlDevices: {
-            id: "",
-            bilgeWaterSeperator: parseInt(formValues?.polutionControl?.bilgeWaterSeparator) || null,
-            capacity: formValues?.polutionControl?.bilgeCapacity || "",
-            makeModel: formValues?.polutionControl?.bilgeMakeModel || "",
-            stp: parseInt(formValues?.polutionControl?.sewageTreatmentPlant) || null,
-            stpCapacity: formValues?.polutionControl?.sewageCapacity || "",
-            stpMakeModel: formValues?.polutionControl?.sewageMakeModel || "",
-            owf: parseInt(formValues?.polutionControl?.oilyWaterFilter) || null,
-            owfCapacity: formValues?.polutionControl?.oilyCapacity || "",
-            owfMakeModel: formValues?.polutionControl?.oilyMakeModel || "",
-            egasCleaningSystm: parseInt(formValues?.polutionControl?.exhaustGasCleaning) || null,
-            egasCleaningSystmCapacity: formValues?.polutionControl?.exhaustCapacity || "",
-            egasCleaningSystmMakeModel: formValues?.polutionControl?.exhaustMakeModel || "",
-            other: parseInt(formValues?.polutionControl?.othersPollution) || null,
-            otherCapacity: formValues?.polutionControl?.othersCapacity || "",
-            otherMakeModel: formValues?.polutionControl?.othersMakeModel || "",
-            status: "NEW",
-            iwtVesBasicSurveyDetTFk: ""
-          },
-          CrewDetails: (formValues?.crewDetails?.crewDetails || []).map(crew => ({
-            id: "",
-            crewType: crew.crewType || "",
-            name: crew.name || "",
-            rank: crew.rank || "",
-            cocNo: crew.cocNo || "",
-            validity: crew.validity || "",
-            experience: "",
-            iwtVesBasicSurveyDetTFk: "",
-            status: "NEW",
-            placeOfIssue: crew.placeOfIssue || ""
-          })),
-          equipmentInventoryDetails: null
+            draft: formValues?.basicVesselInfo?.draft || ""
+          }
         },
         enclosers: extractAllEnclosures(formValues)
       };
+      
+      apiUrl = SERVICE_BASE.IWT_REGISTRATION + URLS_ENDPOINT.TRANSFER_OF_REGISTRY.TRANSFER_OF_REGISTRY_CREATE;
+      
+    } else if (stepIndex === 1) {
+      // Step 2: Equipment Update
+      const equipmentPayload = buildEquipmentPayload(formValues, initialRegistryData);
+      
+      payload = {
+        applicationNumber: registrationData?.vessel?.applicationNumber || "",
+        surveyId: initialRegistryData?.surveyId || "",
+        ...equipmentPayload
+      };
+      
+      apiUrl = SERVICE_BASE.IWT_REGISTRATION + URLS_ENDPOINT.TRANSFER_OF_REGISTRY.TRANSFER_EQUIPMENT_UPDATE;
+    }
 
-      const apiUrl = SERVICE_BASE.IWT_REGISTRATION +
-        URLS_ENDPOINT.TRANSFER_OF_REGISTRY.TRANSFER_OF_REGISTRY_CREATE;
+    const response = await postData(apiUrl, payload);
 
-      const response = await postData(apiUrl, payload);
-
-      if (response?.status === 200 || response?.status === 201) {
+    if (response?.status === 200 || response?.status === 201) {
+      if (stepIndex === 0) {
         const responseData = response?.data?.data;
         setRegistrationData({
           vessel: {
@@ -531,254 +94,27 @@ const TransferOfRegistryApplication = ({
         });
         setInitialRegistryData(responseData?.IwtInitialSurveyResponse);
         toast.success("Transfer of Registry application submitted successfully!");
-        stepperRef.current?.goToNextStep();
       } else {
-        toast.error("Failed to submit application");
-      }
-    } catch (err) {
-      console.error("Error:", err);
-      toast.error("Error submitting application");
-    } finally {
-      loaderRef?.current?.hide();
-    }
-  };
-
-  const submitEquipmentData = async (equipmentPayload, stepInfo = null) => {
-    try {
-      loaderRef.current?.show();
-      const apiUrl = SERVICE_BASE.IWT_SURVEY_SERVICE + URLS_ENDPOINT.SURVEY_SERVICE.SURVEY_CREATE;
-
-      const response = await postData(apiUrl, equipmentPayload);
-      if (response?.status === 200 || response?.status === 201) {
         setInitialRegistryData(response?.data || []);
         toast.success("Equipment data submitted successfully!");
-
-        if (stepInfo) {
-          stepperRef.current?.goToNextStep();
-        }
-      } else {
-        toast.error("Failed to submit equipment data.");
       }
-    } catch (err) {
-      handleErrorMessage(err?.response?.data || "Failed to save equipment data.");
-    } finally {
-      loaderRef?.current?.hide();
-    }
-  };
 
-  const extractAllEnclosures = (formValues) => {
-    const enclosures = [];
-
-    const singleFileTypes = [
-      { field: "certificateOfRegistration", type: "REGISTRATION_CERTIFICATE", name: "Certificate of Registration" },
-      { field: "NOCfromOriginalRegistrationAuthority", type: "NOC_FROM_ORIGINAL_REGISTRATION_AUTHORITY", name: "NOC from Original Registration Authority" },
-      { field: "lastSurveyCertificate", type: "SURVEY_COPY_OF_LAST_CERTIFICATE_OF_SURVEY", name: "Last Survey Certificate" },
-      { field: "tonnageBooklet", type: "TONNAGE_BOOKLETS", name: "Tonnage Booklet" },
-      { field: "stabilityBooklet", type: "STABILITY_BOOKLETS", name: "Stability Booklet" },
-      { field: "insuranceCertificate", type: "INSURANCE_CERTIFICATE", name: "Insurance Certificate" },
-      { field: "paymentChallan", type: "PAYMENT_CHALLAN_OR_ACKNOWLEDGEMENT", name: "Payment Challan" }
-    ];
-
-    singleFileTypes.forEach(({ field, type, name }) => {
-      const fileStoreId = formValues.enclosure?.[`${field}FileStoreId`];
-      const fileName = formValues.enclosure?.[field]?.name || formValues.enclosure?.[`${field}OriginalName`];
-
-      if (fileStoreId) {
-        enclosures.push({
-          id: "",
-          documentName: fileName || `${name}.pdf`,
-          documentType: type,
-          fileStoreId,
-          documentSource: "TRANSFER_OF_REGISTRY_ENCLOSURES",
-          description: name,
-          active: true
-        });
+      if (stepInfo) {
+        stepperRef.current?.goToNextStep();
       }
-    });
-
-    return enclosures;
-  };
-
-  const handleFormSubmit = async (stepInfo) => {
-    window.scrollTo({ top: 0, behavior: "smooth" });
-
-    if (stepInfo.index === 0) {
-      const formValues = stepInfo?.getFormData?.() || {};
-      await submitSetp1(formValues);
+    } else {
+      toast.error(stepIndex === 0 ? "Failed to submit application" : "Failed to submit equipment data");
     }
-
-    if (stepInfo.index === 1) {
-      const formValues = stepInfo?.getFormData?.() || {};
-      const equipmentPayload = buildEquipmentPayload(formValues, initialRegistryData);
-      await submitEquipmentData(equipmentPayload, stepInfo);
-    }
-  };
-
-  const handlePayNow = () => {
-    // Payment logic here
-  };
-
-  const handleSave = () => {
-    console.log("=== HANDLE SAVE ===");
-    setIsLoading(true);
-    setTimeout(() => {
-      setIsLoading(false);
-      navigate("/vessel-survey/success", {
-        state: { surveyId: "VS2024001" },
-      });
-    }, 1500);
-  };
-
-  const getSteps = () => {
-    const baseSteps = [
-      {
-        label: t("Vessel Details"),
-        component: (
-          <VesselSurveyForm
-            formMethods={methods}
-            viewMode={isViewMode}
-            editMode={isEditMode}
-            registrationData={registrationData}
-            initialRegistryData={initialRegistryData}
-            vesselData={vesselData}
-          />
-        ),
-        validate: validateSurveyForm,
-        getFormData: () => methods?.getValues(),
-      },
-      {
-        label: t("Equipment & Vessel Information"),
-        component: (
-          <VesselEquipmentForm
-            formMethods={methods}
-            viewMode={isViewMode}
-            editMode={isEditMode}
-            registrationData={registrationData}
-            initialRegistryData={initialRegistryData}
-          />
-        ),
-        validate: validateEquipmentForm,
-        getFormData: () => methods?.getValues(),
-      },
-    ];
-
-    if (!isOfficerLogin && !viewMode && userRole === USER_ROLES.VESSEL_OWNER) {
-      baseSteps.push({
-        label: t("vesselDetails.Invoicing"),
-        component: (
-          <Invoicing
-            supervisionAuthority="CLASSIFICATION SOCIETY"
-            onPayNow={handlePayNow}
-            vesselData={registrationData}
-            paymentData={paymentData}
-          />
-        ),
-        showPayBtn: true,
-        validate: () => true,
-      });
-    }
-    return baseSteps;
-  };
-
-  const steps = getSteps();
-
-  return (
-    <>
-      <NewLoader ref={loaderRef} />
-      <Box
-        sx={{
-          padding: "1rem 0.5rem 0 0.5rem",
-          backgroundColor: "#f5f6fa",
-          minHeight: "100vh",
-        }}
-      >
-        {isLoading ? (
-          <div
-            className="d-flex justify-content-center align-items-center"
-            style={{ height: "80vh" }}
-          >
-            <div className="text-center">
-              <div
-                className="spinner-border text-primary"
-                role="status"
-                style={{ width: "3rem", height: "3rem" }}
-              >
-                <span className="visually-hidden">Loading...</span>
-              </div>
-              <p className="mt-3">Processing your request...</p>
-            </div>
-          </div>
-        ) : (
-          <>
-            {!tabMode && (
-              <div className="d-flex flex-column flex-md-row justify-content-between align-items-start align-items-md-center mb-3 gap-2">
-                <div
-                  className="d-flex align-items-center flex-grow-1"
-                  style={{ gap: "20px" }}
-                >
-                  <Button
-                    variant="outline-primary"
-                    onClick={() => navigate("/dashboard")}
-                    className="d-flex align-items-center justify-content-center shadow-sm"
-                    style={{
-                      borderRadius: "50%",
-                      width: "40px",
-                      height: "40px",
-                      border: "2px solid #2E57A7",
-                      color: "#2E57A7",
-                      backgroundColor: "#fff",
-                      transition: "all 0.3s ease",
-                      padding: "0",
-                    }}
-                  >
-                    <BsArrowLeft size={16} />
-                  </Button>
-                  <Stack spacing={0.5} className="flex-grow-1">
-                    <Typography
-                      sx={{
-                        fontWeight: 550,
-                        color: "#2E57A7",
-                        fontSize: { xs: "1rem", sm: "1.1rem", md: "1.2rem" },
-                        lineHeight: 1.2,
-                      }}
-                    >
-                      {isViewMode
-                        ? t("Transfer Of Registry Details") + ` - ${id}`
-                        : isEditMode
-                          ? t("Edit Transfer Of Registry Application") + ` - ${id}`
-                          : t("Application For Transfer Of Registry") + `  (${id})`}
-                    </Typography>
-                    <Typography
-                      sx={{
-                        color: "#666",
-                        fontSize: { xs: "0.6rem", sm: "0.65rem" },
-                        lineHeight: 1.3,
-                      }}
-                    >
-                      {isViewMode
-                        ? t("(View transfer of registry details)")
-                        : isEditMode
-                          ? t("(Update transfer of registry details)")
-                          : t("(Fill in the transfer of registry details to complete registration)")}
-                    </Typography>
-                  </Stack>
-                </div>
-              </div>
-            )}
-
-            <Stepper
-              ref={stepperRef}
-              steps={steps}
-              onSave={handleSave}
-              viewMode={isViewMode}
-              onSyncData={handleFormSubmit}
-              onPayNow={handlePayNow}
-            />
-          </>
-        )}
-      </Box>
-    </>
-  );
+  } catch (err) {
+    console.error("Error:", err);
+    toast.error(stepIndex === 0 ? "Error submitting application" : "Error submitting equipment data");
+  } finally {
+    loaderRef?.current?.hide();
+  }
 };
 
-export default TransferOfRegistryApplication;
+const handleFormSubmit = async (stepInfo) => {
+  window.scrollTo({ top: 0, behavior: "smooth" });
+  const formValues = stepInfo?.getFormData?.() || {};
+  await submitTransferData(formValues, stepInfo.index, stepInfo);
+};
