@@ -1,8 +1,13 @@
 import React, { useState, useEffect, useRef } from "react";
 import { Box, Typography, Stack } from "@mui/material";
-import { useParams, useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import {
+  useParams,
+  useLocation,
+  useNavigate,
+  useSearchParams,
+} from "react-router-dom";
 import Stepper from "../../../../common/Stepper.jsx";
-import VesselSurveyForm from "./TransferOfRegistryForm.js";
+import VesselSurveyForm from "./VesselSurveyForm.js";
 import { useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 import { toast } from "react-toastify";
@@ -14,12 +19,12 @@ import {
   SERVICE_BASE,
   URLS_ENDPOINT,
 } from "../../../../../utils/urlsConstants.ts";
-import VesselEquipmentForm from "./TransferEquipmentForm.js";
+import VesselEquipmentForm from "./VesselEquipmentForm.js";
 import { initialEquipementData } from "./constants/VesselEquipementConstant.js";
 import { vesselSurveyInitialValues } from "./constants/VesselServeyConstant.js";
 import Invoicing from "../../../../common/Invoicing.js";
 import { getFromLocalStorage } from "../../../../../utils/localStorageUtils.js";
-import { APPLICATION_TYPES, OFFICER_ROLES, USER_ROLES } from "../../../../../utils/constants.ts";
+import { OFFICER_ROLES, USER_ROLES } from "../../../../../utils/constants.ts";
 import NewLoader from "../../../../common/NewLoader.js";
 import { handleErrorMessage } from "../../../../../utils/errorMessageHandler.js";
 import ProvisionModal from "../../../../common/ProvisionModal.js";
@@ -29,7 +34,7 @@ import ApprovalModal from "../../../../common/ApprovalModal.js";
 import BookOfRegistrationForm from "./survey-registrationForms/BookOfRegistrationForm.js";
 import CertificateOfRegistrationForm8 from "./survey-registrationForms/CertificateOfRegistrationForm8.js";
 
-const TransferOfRegistryApplication = ({
+const VesselSurveyRegistration = ({
   applicationNo,
   viewMode = false,
   tabMode = false,
@@ -39,24 +44,33 @@ const TransferOfRegistryApplication = ({
   let location = useLocation();
   let navigate = useNavigate();
   const surveyFormRef = useRef();
-  const ownerDetails = getFromLocalStorage("ownerDetails")
-    ? JSON.parse(getFromLocalStorage("ownerDetails"))
-    : "";
   const { masterData } = useMasterData();
   const [showApprovalModal, setShowApprovalModal] = useState(false);
   const [selectedAction, setSelectedAction] = useState("");
+  const [originalRegistrationData, setOriginalRegistrationData] =
+    useState(null);
+  const [provisionalRegCertData, setProvisionalRegCertData] = useState(null);
 
   const [searchParams] = useSearchParams();
-  const id = searchParams.get("applicationNo");
+  let id = searchParams.get("applicationNo");
 
-  let isEditMode = !!id && location.pathname.includes("/edit/");
-  let isViewMode = (!!id && location.pathname.includes("/view/")) || viewMode;
-  
+  let isEditMode = !!id && location.pathname.includes("/edit");
+  let isViewMode = (!!id && location.pathname.includes("/view")) || viewMode;
+
+  useEffect(() => {
+    if (!id && !applicationNo) {
+      toast.error("No Application number present.");
+      if (location.key !== "default") {
+        navigate(-1);
+      } else {
+        navigate("/dashboard", { replace: true });
+      }
+    }
+  }, [id, navigate, location.key]);
 
   if (!id && applicationNo) {
     id = applicationNo;
   }
-
 
   let stepperRef = useRef();
 
@@ -77,7 +91,7 @@ const TransferOfRegistryApplication = ({
   } = methods;
   const [actionsFromAPI, setActionsFromAPI] = useState([]);
   const [registrationData, setRegistrationData] = useState(null);
-  const [initialRegistryData, setInitialRegistryData] = useState(null);
+  const [intialSurveyData, setIntialSurveyData] = useState(null);
 
   const userRole = getFromLocalStorage("userRole") || "";
   const userDetails = getFromLocalStorage("userDetails")
@@ -86,27 +100,9 @@ const TransferOfRegistryApplication = ({
 
   const isOfficerLogin = OFFICER_ROLES.includes(userRole) || false;
 
-  const [paymentData, setPaymentData] = useState({
-    invoiceBreakupInfo: [
-      {
-        id: 1,
-        label: "Payment",
-        categoryHeader: "Pay now",
-        amount: 500,
-
-      },
-    ], summary: {
-      subTotal: 500,
-      cgst: 0,
-      sgst: 0,
-      igst: 0,
-      totalPayable: 500,
-    }
-  });
+  const [paymentData, setPaymentData] = useState(null);
   const [fullPaymentData, setFullPaymentData] = useState({});
   const [showOfficerActions, setShowOfficerActions] = useState(false);
-  const [vesselData, setVesselData] = useState({});
-
   if (isOfficerLogin) {
     isViewMode = true;
   }
@@ -125,139 +121,141 @@ const TransferOfRegistryApplication = ({
   useEffect(() => {
     if (!id) return;
 
-    // const fetchRegistrationDetails = async () => {
-    //   try {
-    //     loaderRef.current?.show();
-    //     const payload = { applicationNumbers: [id ?? ""] };
-    //     const apiUrl = `${SERVICE_BASE.IWT_REGISTRATION}${URLS_ENDPOINT.USER_SERVICE.REGISTRATION_SEARCH_BY_ID}`;
-    //     const { status, data } = await postData(apiUrl, payload);
+    const fetchRegistrationDetails = async () => {
+      try {
+        loaderRef.current?.show();
+        const payload = { applicationNumbers: [id ?? ""] };
+        const apiUrl = `${SERVICE_BASE.IWT_REGISTRATION}${URLS_ENDPOINT.USER_SERVICE.REGISTRATION_SEARCH_BY_ID}`;
+        const { status, data } = await postData(apiUrl, payload);
 
-    //     if (status !== 200) {
-    //       toast.error("Unable to fetch registration details.");
-    //       return;
-    //     }
+        if (status !== 200) {
+          toast.error("Unable to fetch registration details.");
+          return;
+        }
 
-    //     const resData = data?.data?.[0] ?? {};
-    //     const {
-    //       basicDetails = {},
-    //       vesselDetails = {},
-    //       engineDetails = {},
-    //       processActionMapResponce = [],
-    //     } = resData;
+        const resData = data?.data?.[0] ?? {};
+        const {
+          basicDetails = {},
+          vesselDetails = {},
+          engineDetails = {},
+          processActionMapResponce = [],
+        } = resData;
 
-    //     const owner = basicDetails?.ownerDetails ?? {};
-    //     const builder = basicDetails?.builderDetails ?? {};
+        const owner = basicDetails?.ownerDetails ?? {};
+        const builder = basicDetails?.builderDetails ?? {};
 
-    //     let normalizedData = {
-    //       basicDetails: basicDetails,
-    //       owner: {
-    //         name: owner?.ownerCompanyName ?? "",
-    //         address: `${owner?.addressLine1 ?? ""}, ${owner?.addressLine2 ?? ""
-    //           }`,
-    //         mobile: owner?.phoneNumber ?? "",
-    //         email: owner?.emailId ?? "",
-    //         pan: owner?.panNo ?? "",
-    //         gst: owner?.gstNo ?? "",
-    //         aadhar: owner?.aadharNumber ?? "",
-    //         tradeLicence: owner?.tradeLicenseNumber ?? "",
-    //         ownerIdFk: owner?.ownerIdFk ?? "",
-    //         ownerDetailsId: owner?.ownerDetailsId ?? "",
-    //       },
+        let normalizedData = {
+          basicDetails: basicDetails,
+          owner: {
+            name: owner?.ownerCompanyName ?? "",
+            address: `${owner?.addressLine1 ?? ""}, ${
+              owner?.addressLine2 ?? ""
+            }`,
+            mobile: owner?.phoneNumber ?? "",
+            email: owner?.emailId ?? "",
+            pan: owner?.panNo ?? "",
+            gst: owner?.gstNo ?? "",
+            aadhar: owner?.aadharNumber ?? "",
+            tradeLicence: owner?.tradeLicenseNumber ?? "",
+            ownerIdFk: owner?.ownerIdFk ?? "",
+            ownerDetailsId: owner?.ownerDetailsId ?? "",
+          },
 
-    //       vessel: {
-    //         grt: vesselDetails?.grossTonnage ?? "",
-    //         workOrderValue: vesselDetails?.workOrderValue ?? "",
-    //         type: vesselDetails?.typeOfVessel ?? "",
-    //         category: vesselDetails?.categoryOfVessel ?? "",
-    //         zone: vesselDetails?.zone ?? "",
-    //         purchaseType: vesselDetails?.purchaseType ?? "",
-    //         supervisionAuthority: vesselDetails?.supervisionAuthority ?? "",
-    //         classificationSociety:
-    //           vesselDetails?.nameOfClassificationSociety ?? "",
-    //         nameOfMaster: vesselDetails?.nameOfMaster ?? "",
-    //         certificateNo: vesselDetails?.certficateNumber ?? "",
-    //         registry: vesselDetails?.nameOfRegistry ?? "",
-    //         registrationNo: vesselDetails?.registrationNumber ?? "",
-    //         vesselName: vesselDetails?.vesselName ?? "",
-    //         kindOfVessel: vesselDetails?.kindOfVessel ?? "",
-    //         mortgage: vesselDetails?.mortgage ?? "",
-    //         placeOfBuild: vesselDetails?.placeOfBuild ?? "",
-    //         insurance: vesselDetails?.insuranceDetails ?? "",
-    //         yearOfBuild: vesselDetails?.yearOfBuild?.toString() ?? "",
-    //         pniClubNo: vesselDetails?.pniClubNo ?? "",
-    //         pniClubName: vesselDetails?.pniClubName ?? "",
-    //         insuranceValidUpto: vesselDetails?.insuranceValidDate ?? "",
+          vessel: {
+            grt: vesselDetails?.grossTonnage ?? "",
+            workOrderValue: vesselDetails?.workOrderValue ?? "",
+            type: vesselDetails?.typeOfVessel ?? "",
+            category: vesselDetails?.categoryOfVessel ?? "",
+            zone: vesselDetails?.zone ?? "",
+            purchaseType: vesselDetails?.purchaseType ?? "",
+            supervisionAuthority: vesselDetails?.supervisionAuthority ?? "",
+            classificationSociety:
+              vesselDetails?.nameOfClassificationSociety ?? "",
+            nameOfMaster: vesselDetails?.nameOfMaster ?? "",
+            certificateNo: vesselDetails?.certficateNumber ?? "",
+            registry: vesselDetails?.nameOfRegistry ?? "",
+            registrationNo: vesselDetails?.registrationNumber ?? "",
+            vesselName: vesselDetails?.vesselName ?? "",
+            kindOfVessel: vesselDetails?.kindOfVessel ?? "",
+            mortgage: vesselDetails?.mortgage ?? "",
+            placeOfBuild: vesselDetails?.placeOfBuild ?? "",
+            insurance: vesselDetails?.insuranceDetails ?? "",
+            yearOfBuild: vesselDetails?.yearOfBuild?.toString() ?? "",
+            pniClubNo: vesselDetails?.pniClubNo ?? "",
+            pniClubName: vesselDetails?.pniClubName ?? "",
+            insuranceValidUpto: vesselDetails?.insuranceValidDate ?? "",
 
-    //         iwtVesselBasicDetailsTFk:
-    //           vesselDetails?.iwtVesselBasicDetailsTFk ?? "",
-    //         vesselDetailsId: vesselDetails?.vesselDetailsId ?? "",
-    //         applicationNumber: basicDetails?.applicationNumber ?? "",
-    //       },
+            iwtVesselBasicDetailsTFk:
+              vesselDetails?.iwtVesselBasicDetailsTFk ?? "",
+            vesselDetailsId: vesselDetails?.vesselDetailsId ?? "",
+            applicationNumber: basicDetails?.applicationNumber ?? "",
+          },
 
-    //       builder: {
-    //         constructedBy: basicDetails?.constructedBy ?? "2",
-    //         name: builder?.builderName ?? "",
-    //         address: `${builder?.addressLine1 ?? ""}, ${builder?.addressLine2 ?? ""
-    //           }`,
-    //         email: builder?.emailId ?? "",
-    //         mobile: builder?.phone ?? "",
-    //         gst: builder?.gstNo ?? "",
-    //         tradeLicence: builder?.tradeLicenseNumber ?? "",
-    //         auth: basicDetails?.builderAuthorization ?? "",
-    //         builderIdFk: builder?.builderIdFk ?? "",
-    //         builderDetailsId: builder?.builderDetailsId ?? "",
-    //       },
+          builder: {
+            constructedBy: basicDetails?.constructedBy ?? "2",
+            name: builder?.builderName ?? "",
+            address: `${builder?.addressLine1 ?? ""}, ${
+              builder?.addressLine2 ?? ""
+            }`,
+            email: builder?.emailId ?? "",
+            mobile: builder?.phone ?? "",
+            gst: builder?.gstNo ?? "",
+            tradeLicence: builder?.tradeLicenseNumber ?? "",
+            auth: basicDetails?.builderAuthorization ?? "",
+            builderIdFk: builder?.builderIdFk ?? "",
+            builderDetailsId: builder?.builderDetailsId ?? "",
+          },
 
-    //       engine: {
-    //         yearOfBuild: engineDetails?.yearOfBuild ?? "",
-    //         type: engineDetails?.engineType ?? "",
-    //         make: engineDetails?.engineMake ?? "",
-    //         makerAddress: engineDetails?.makerAddress ?? "",
-    //         pin: engineDetails?.pin ?? "",
-    //         mobile: engineDetails?.mobile ?? "",
-    //         email: engineDetails?.email ?? "",
-    //         horsepower: engineDetails?.horsepower?.toString() ?? "",
-    //         speed: engineDetails?.speed?.toString() ?? "",
-    //         yearOfMake: engineDetails?.yearOfMake ?? "",
+          engine: {
+            yearOfBuild: engineDetails?.yearOfBuild ?? "",
+            type: engineDetails?.engineType ?? "",
+            make: engineDetails?.engineMake ?? "",
+            makerAddress: engineDetails?.makerAddress ?? "",
+            pin: engineDetails?.pin ?? "",
+            mobile: engineDetails?.mobile ?? "",
+            email: engineDetails?.email ?? "",
+            horsepower: engineDetails?.horsepower?.toString() ?? "",
+            speed: engineDetails?.speed?.toString() ?? "",
+            yearOfMake: engineDetails?.yearOfMake ?? "",
 
-    //         engineDetailsId: engineDetails?.engineDetailsId ?? "",
-    //         engineIdFk: engineDetails?.engineIdFk ?? "",
-    //       },
+            engineDetailsId: engineDetails?.engineDetailsId ?? "",
+            engineIdFk: engineDetails?.engineIdFk ?? "",
+          },
 
-    //       other: {
-    //         occupation: basicDetails?.occupation ?? "",
-    //         originalPlaceOfBusiness: basicDetails?.originalPlaceBusiness ?? "",
+          other: {
+            occupation: basicDetails?.occupation ?? "",
+            originalPlaceOfBusiness: basicDetails?.originalPlaceBusiness ?? "",
 
-    //         otherDetailsId: basicDetails?.otherDetailsId ?? "",
-    //       },
+            otherDetailsId: basicDetails?.otherDetailsId ?? "",
+          },
 
-    //       actions: processActionMapResponce || [],
-    //     };
+          actions: processActionMapResponce || [],
+        };
 
-    //     loaderRef.current?.hide();
-    //     if (vesselDetails?.iwtVesselBasicDetailsTFk) {
-    //       getSurveyDetails(vesselDetails?.iwtVesselBasicDetailsTFk);
-    //     }
+        loaderRef.current?.hide();
+        if (vesselDetails?.iwtVesselBasicDetailsTFk) {
+          getSurveyDetails(vesselDetails?.iwtVesselBasicDetailsTFk);
+        }
 
-    //     if (isOfficerLogin) {
-    //       const actionsItems =
-    //         processActionMapResponce?.[0]?.processs?.[0]?.actions ?? [];
-    //       if (actionsItems?.length > 0) {
-    //         setActionsFromAPI(actionsItems);
-    //       }
-    //     }
+        if (isOfficerLogin) {
+          const actionsItems =
+            processActionMapResponce?.[0]?.processs?.[0]?.actions ?? [];
+          if (actionsItems?.length > 0) {
+            setActionsFromAPI(actionsItems);
+          }
+        }
+        setOriginalRegistrationData(resData);
+        setRegistrationData(normalizedData);
+      } catch (err) {
+        loaderRef.current?.hide();
+        console.error("Failed to fetch registration details:", err);
+        toast.error("Failed to fetch registration details.");
+      }
+    };
 
-    //     setRegistrationData(normalizedData);
-    //   } catch (err) {
-    //     loaderRef.current?.hide();
-    //     console.error("Failed to fetch registration details:", err);
-    //     toast.error("Failed to fetch registration details.");
-    //   }
-    // };
-
-    // fetchRegistrationDetails();
+    fetchRegistrationDetails();
   }, [id]);
-  console.log("certificates--reg", registrationData)
+
   const getSurveyDetails = async (vesselId) => {
     try {
       loaderRef.current?.show();
@@ -272,30 +270,39 @@ const TransferOfRegistryApplication = ({
       if (response?.status === 200 || response?.status === 201) {
         const surveyData = response?.data[0] || {};
 
-        setInitialRegistryData(surveyData);
+        setIntialSurveyData(surveyData);
         setGeneratedCertificates({
-          survey: surveyData?.BasicVesselInformation?.enableprovisonalsurveycert || false,
-          registration: surveyData?.BasicVesselInformation?.enableprovisonalregistrationcert || false,
+          survey:
+            surveyData?.BasicVesselInformation?.enableprovisonalsurveycert ||
+            false,
+          registration:
+            surveyData?.BasicVesselInformation
+              ?.enableprovisonalregistrationcert || false,
         });
 
         if (isOfficerLogin) {
           const hasActions =
-            surveyData?.processActionMapResponce?.[0]?.processs?.[0]?.actions?.length > 0;
+            surveyData?.processActionMapResponce?.[0]?.processs?.[0]?.actions
+              ?.length > 0;
           setShowOfficerActions(hasActions);
 
           if (hasActions) {
-            setActionsFromAPI(surveyData.processActionMapResponce[0].processs[0].actions);
+            setActionsFromAPI(
+              surveyData.processActionMapResponce[0].processs[0].actions
+            );
           }
         }
         populateFormWithSurveyData(surveyData);
       } else {
         toast.error(
-          response?.data?.responseStatus?.message || "Failed to fetch survey details."
+          response?.data?.responseStatus?.message ||
+            "Failed to fetch survey details."
         );
       }
     } catch (err) {
       handleErrorMessage(
-        err?.response?.data || "Failed to fetch survey details. Check console for details."
+        err?.response?.data ||
+          "Failed to fetch survey details. Check console for details."
       );
     } finally {
       loaderRef?.current?.hide();
@@ -306,6 +313,7 @@ const TransferOfRegistryApplication = ({
     if (!data) return;
 
     const safe = (val, fallback = "") => val ?? fallback;
+   
 
     const mappings = {
       basicVesselInfo: {
@@ -317,13 +325,15 @@ const TransferOfRegistryApplication = ({
         agentTelephone: "BasicVesselInformation.agentsTelephone",
         placeOfLastSurvey: "BasicVesselInformation.placeOfLastSurvey",
         dateOfLastSurvey: "BasicVesselInformation.dateOfLastSurvey",
-        dateOfProposedVisit: "BasicVesselInformation.dateOfProposedVisitSurveyor",
+        dateOfProposedVisit:
+          "BasicVesselInformation.dateOfProposedVisitSurveyor",
         lengthOfVessel: "BasicVesselInformation.lengthOfVessel",
         breadthOfVessel: "BasicVesselInformation.breadthOfVessel",
         depthOfVessel: "BasicVesselInformation.depthOfVessel",
         draft: "BasicVesselInformation.draft",
         yearOfBuild: "BasicVesselInformation.yearOfBuild",
-        numberOfDecks: "BasicVesselInformation.numberOfDecks",
+        //new updated -->12th sept
+        numberOfDecks: "BasicVesselInformation.numberofDecks",
       },
       hullParticulars: {
         frameMaterial: "HullParticulars.frameMaterial",
@@ -338,7 +348,6 @@ const TransferOfRegistryApplication = ({
         bulkheadThickness: "HullParticulars.bulkheadThickness",
         floorThickness: "HullParticulars.floorThickness",
         stern: "HullParticulars.stern",
-
       },
       navigationEquipment: {
         magneticCompass: "RadioandNavigationEquipment.magneticCompass",
@@ -370,10 +379,10 @@ const TransferOfRegistryApplication = ({
       },
 
       detailsOfPropulsion: {
-        typeOfEngine: "DetailsofPropulsionofEngine.engineType",
+        // typeOfEngine: "DetailsofPropulsionofEngine.engineType",
         engineMake: "DetailsofPropulsionofEngine.engineMake",
-        engineMakerAddress: "DetailsofPropulsionofEngine.makerAddress",
-        horsepower: "DetailsofPropulsionofEngine.horsepower",
+        // engineMakerAddress: "DetailsofPropulsionofEngine.makerAddress",
+        // horsepower: "DetailsofPropulsionofEngine.horsepower",
         speedRPM: "DetailsofPropulsionofEngine.speed",
         yearOfMake: "DetailsofPropulsionofEngine.yearOfMake",
         modelNo: "DetailsofPropulsionofEngine.modelNo",
@@ -399,7 +408,14 @@ const TransferOfRegistryApplication = ({
     Object.entries(mappings).forEach(([formKey, map]) => {
       Object.entries(map)?.forEach(([field, path]) => {
         const value = path?.split(".")?.reduce((acc, k) => acc?.[k], data);
-        setValue(`${formKey}.${field}`, safe(value));
+        const existingValue = getValues(`${formKey}.${field}`);
+        if (
+          existingValue === undefined ||
+          existingValue === null ||
+          existingValue === ""
+        ) {
+          setValue(`${formKey}.${field}`, safe(value));
+        }
       });
     });
 
@@ -417,6 +433,7 @@ const TransferOfRegistryApplication = ({
         validity: safe(crew?.validity),
         experience: safe(crew?.experience),
         status: crew?.status || "ACTIVE",
+        placeOfIssue: crew?.placeOfIssue,
       }))
     );
 
@@ -550,86 +567,137 @@ const TransferOfRegistryApplication = ({
 
     return null;
   };
+const validateSurveyForm = async () => {
+  if (isViewMode) return true;
 
-  const validateSurveyForm = async () => {
-    return true;
-    // console.log("validateSurveyForm Data -> ", methods?.getValues());
-    // if (isViewMode) return true;
+  const requiredFields = [
+    "basicVesselInfo.typeOfSurvey",
+    "basicVesselInfo.placeYardNo",
+    "basicVesselInfo.netTonnage",
+  ];
 
-    // const requiredFields = [
-    //   "basicVesselInfo.typeOfSurvey",
-    //   "basicVesselInfo.placeYardNo",
-    //   "basicVesselInfo.netTonnage",
-    // ];
+  const isValid = await trigger(requiredFields);
 
-    // const isValid = await trigger(requiredFields);
+  // Check crew details
+  const crewDetails = getValues("crewDetails.crewDetails") || [];
+  let hasValidCrew = true;
+  crewDetails.forEach((crew, index) => {
+    if (!crew.crewType) {
+      setError(`crewDetails.crewDetails.${index}.crewType`, {
+        type: "required",
+        message: t("Crew Type is required"),
+      });
+      hasValidCrew = false;
+    }
+    if (!crew.name) {
+      setError(`crewDetails.crewDetails.${index}.name`, {
+        type: "required",
+        message: t("Crew Name is required"),
+      });
+      hasValidCrew = false;
+    }
+  });
 
-    // // Check crew details
-    // const crewDetails = getValues("crewDetails.crewDetails") || [];
-    // let hasValidCrew = true;
-    // crewDetails.forEach((crew, index) => {
-    //   if (!crew.crewType) {
-    //     setError(`crewDetails.crewDetails.${index}.crewType`, {
-    //       type: "required",
-    //       message: t("Crew Type is required"),
-    //     });
-    //     hasValidCrew = false;
-    //   }
-    //   if (!crew.name) {
-    //     setError(`crewDetails.crewDetails.${index}.name`, {
-    //       type: "required",
-    //       message: t("Crew Name is required"),
-    //     });
-    //     hasValidCrew = false;
-    //   }
-    // });
-    // // Check file uploads
-    // const requiredFiles = [
-    //   "enclosure.authorizationFile",
-    //   "enclosure.paymentChallan",
-    //   "enclosure.lastCertificateCopy",
-    //   "enclosure.registrationCertificateCopy",
-    //   "enclosure.builderCertificate",
-    //   "enclosure.testCertificate",
-    // ];
-    // let hasFileErrors = false;
+  // Check only mandatory file uploads
+  const requiredFiles = [
+    "enclosure.authorizationFile",
+    "enclosure.builderCertificate",
+  ];
+  let hasFileErrors = false;
 
-    // if (!isEditMode) {
-    //   requiredFiles.forEach((fieldName) => {
-    //     const fieldValue = getValues(fieldName);
-    //     if (!fieldValue) {
-    //       setError(fieldName, {
-    //         type: "required",
-    //         message: t(`${fieldName} is required`),
-    //       });
-    //       hasFileErrors = true;
-    //     }
-    //   });
+  if (!isEditMode) {
+    requiredFiles.forEach((fieldName) => {
+      const fieldValue = getValues(fieldName);
+      if (!fieldValue) {
+        setError(fieldName, {
+          type: "required",
+          message: t(`${fieldName} is required`),
+        });
+        hasFileErrors = true;
+      }
+    });
 
-    //   await trigger(requiredFiles);
-    // }
+    await trigger(requiredFiles);
+  }
 
-    // return isValid && hasValidCrew && !hasFileErrors;
-  };
+  return isValid && hasValidCrew && !hasFileErrors;
+};
+  // const validateSurveyForm = async () => {
+  //   if (isViewMode) return true;
+
+  //   const requiredFields = [
+  //     "basicVesselInfo.typeOfSurvey",
+  //     "basicVesselInfo.placeYardNo",
+  //     "basicVesselInfo.netTonnage",
+  //   ];
+
+  //   const isValid = await trigger(requiredFields);
+
+  //   // Check crew details
+  //   const crewDetails = getValues("crewDetails.crewDetails") || [];
+  //   let hasValidCrew = true;
+  //   crewDetails.forEach((crew, index) => {
+  //     if (!crew.crewType) {
+  //       setError(`crewDetails.crewDetails.${index}.crewType`, {
+  //         type: "required",
+  //         message: t("Crew Type is required"),
+  //       });
+  //       hasValidCrew = false;
+  //     }
+  //     if (!crew.name) {
+  //       setError(`crewDetails.crewDetails.${index}.name`, {
+  //         type: "required",
+  //         message: t("Crew Name is required"),
+  //       });
+  //       hasValidCrew = false;
+  //     }
+  //   });
+  //   // Check file uploads
+  //   const requiredFiles = [
+  //     "enclosure.authorizationFile",
+  //     "enclosure.paymentChallan",
+  //     "enclosure.lastCertificateCopy",
+  //     "enclosure.registrationCertificateCopy",
+  //     "enclosure.builderCertificate",
+  //     "enclosure.testCertificate",
+  //   ];
+  //   let hasFileErrors = false;
+
+  //   if (!isEditMode) {
+  //     requiredFiles.forEach((fieldName) => {
+  //       const fieldValue = getValues(fieldName);
+  //       if (!fieldValue) {
+  //         setError(fieldName, {
+  //           type: "required",
+  //           message: t(`${fieldName} is required`),
+  //         });
+  //         hasFileErrors = true;
+  //       }
+  //     });
+
+  //     await trigger(requiredFiles);
+  //   }
+
+  //   return isValid && hasValidCrew && !hasFileErrors;
+  // };
 
   const validateEquipmentForm = async () => {
     if (isViewMode) return true;
     return true;
   };
 
+  // const validateBookForm = async () => {
+  //   console.log("validateBookForm -> ", methods?.getValues());
+  //   const requiredFields = [
+  //     "bookOfRegistration.engine.engineNo",
+  //   ];
 
-  const validateBookForm = async () => {
-    console.log("validateBookForm -> ", methods?.getValues());
-    const requiredFields = [
-      "bookOfRegistration.engine.engineNo",
-    ];
-
-    const isValid = await trigger(requiredFields);
-    return isValid;
-  };
+  //   const isValid = await trigger(requiredFields);
+  //   return isValid;
+  // };
 
   const validateCertificateForm = async () => {
-    console.log("validateCertificateForm -> ", methods?.getValues());
+    // console.log("validateCertificateForm -> ", methods?.getValues());
     const requiredFields = [
       "certificateOfRegistration.basicInfo.indianOrForeignBuilt",
     ];
@@ -640,9 +708,9 @@ const TransferOfRegistryApplication = ({
 
   const buildSurveyPayload = (formData, registrationData) => {
     const payload = {
-      surveyId: initialRegistryData?.surveyId || "",
+      surveyId: intialSurveyData?.surveyId || "",
       BasicVesselInformation: {
-        id: initialRegistryData?.BasicVesselInformation?.id || "",
+        id: intialSurveyData?.BasicVesselInformation?.id || "",
         typeOfSurveyId: formData?.basicVesselInfo?.typeOfSurvey || "",
         placeYardNo: formData?.basicVesselInfo?.placeYardNo || "",
         netTonnage: parseFloat(formData?.basicVesselInfo?.netTonnage) || null,
@@ -660,7 +728,9 @@ const TransferOfRegistryApplication = ({
         breadthOfVessel: formData?.basicVesselInfo?.breadthOfVessel || "",
         depthOfVessel: formData?.basicVesselInfo?.depthOfVessel || "",
         draft: formData?.basicVesselInfo?.draft || "",
-        numberOfDecks: parseInt(formData?.basicVesselInfo?.numberOfDecks) || null,
+        //changes on--> 12th sept
+        numberofDecks:
+          parseInt(formData?.basicVesselInfo?.numberOfDecks) || null,
         enableprovisonalsurveycert:
           formData?.provisionalCertificates?.surveyCertificate || false,
         enableprovisonalregistrationcert:
@@ -671,7 +741,7 @@ const TransferOfRegistryApplication = ({
       },
 
       HullParticulars: {
-        id: initialRegistryData?.HullParticulars?.id || "",
+        id: intialSurveyData?.HullParticulars?.id || "",
         frameMaterial: formData?.hullParticulars?.frameMaterial || "",
         frameThickness:
           parseFloat(formData?.hullParticulars?.frameThickness) || "",
@@ -681,7 +751,7 @@ const TransferOfRegistryApplication = ({
           parseFloat(formData?.hullParticulars?.hullPlattingThickness) || "",
         keelLayingDate: formData?.hullParticulars?.keelLayingDate || "",
         iwtVesBasicSurveyDetTFk:
-          initialRegistryData?.HullParticulars?.iwtVesBasicSurveyDetTFk || "",
+          intialSurveyData?.HullParticulars?.iwtVesBasicSurveyDetTFk || "",
         status: "ACTIVE",
         hullPlatingMaterial:
           formData?.hullParticulars?.hullPlatingMaterial || "",
@@ -696,7 +766,7 @@ const TransferOfRegistryApplication = ({
       },
 
       RadioandNavigationEquipment: {
-        id: initialRegistryData?.RadioandNavigationEquipment?.id || "",
+        id: intialSurveyData?.RadioandNavigationEquipment?.id || "",
         magneticCompass:
           parseInt(formData?.navigationEquipment?.magneticCompass) || null,
         vhfRadio: parseInt(formData?.navigationEquipment?.vhfRadio) || null,
@@ -710,13 +780,13 @@ const TransferOfRegistryApplication = ({
         others:
           parseInt(formData?.navigationEquipment?.othersNavigation) || null,
         iwtVesBasicSurveyDetTFk:
-          initialRegistryData?.RadioandNavigationEquipment
+          intialSurveyData?.RadioandNavigationEquipment
             ?.iwtVesBasicSurveyDetTFk || "",
         status: "ACTIVE",
       },
 
       PollutionControlDevices: {
-        id: initialRegistryData?.PollutionControlDevices?.id || "",
+        id: intialSurveyData?.PollutionControlDevices?.id || "",
         bilgeWaterSeperator:
           parseInt(formData?.polutionControl?.bilgeWaterSeparator) || null,
         capacity: formData?.polutionControl?.bilgeCapacity || "",
@@ -738,7 +808,7 @@ const TransferOfRegistryApplication = ({
         otherMakeModel: formData?.polutionControl?.othersMakeModel || "",
         status: "ACTIVE",
         iwtVesBasicSurveyDetTFk:
-          initialRegistryData?.PollutionControlDevices?.iwtVesBasicSurveyDetTFk ||
+          intialSurveyData?.PollutionControlDevices?.iwtVesBasicSurveyDetTFk ||
           "",
       },
 
@@ -747,13 +817,13 @@ const TransferOfRegistryApplication = ({
       Enclosure: extractEnclosures(
         formData?.enclosure,
         registrationData?.applicationNumber ||
-        registrationData?.vessel?.applicationNumber ||
-        "",
-        initialRegistryData?.Enclosure || []
+          registrationData?.vessel?.applicationNumber ||
+          "",
+        intialSurveyData?.Enclosure || []
       ),
 
       DetailsofPropulsionofEngine: {
-        id: initialRegistryData?.DetailsofPropulsionofEngine?.id || "",
+        id: intialSurveyData?.DetailsofPropulsionofEngine?.id || "",
         yearOfBuild: formData?.basicVesselInfo?.yearOfBuild || "",
         engineType: formData?.detailsOfPropulsion?.typeOfEngine || "",
         engineMake: formData?.detailsOfPropulsion?.engineMake || "",
@@ -789,22 +859,22 @@ const TransferOfRegistryApplication = ({
         lengthOfEngineRoom:
           parseFloat(formData?.detailsOfPropulsion?.lengthEngineRoom) || null,
         iwtVesBasicSurveyDetTFk:
-          initialRegistryData?.DetailsofPropulsionofEngine
+          intialSurveyData?.DetailsofPropulsionofEngine
             ?.iwtVesBasicSurveyDetTFk || "",
       },
     };
 
-    if (initialRegistryData?.SurveyEquipments) {
-      payload.SurveyEquipments = initialRegistryData.SurveyEquipments;
+    if (intialSurveyData?.SurveyEquipments) {
+      payload.SurveyEquipments = intialSurveyData.SurveyEquipments;
     }
 
-    if (initialRegistryData?.passengerDistributionMaxLoad) {
+    if (intialSurveyData?.passengerDistributionMaxLoad) {
       payload.passengerDistributionMaxLoad =
-        initialRegistryData.passengerDistributionMaxLoad;
+        intialSurveyData.passengerDistributionMaxLoad;
     }
 
-    if (initialRegistryData?.vesselFreeboardData) {
-      payload.vesselFreeboardData = initialRegistryData.vesselFreeboardData;
+    if (intialSurveyData?.vesselFreeboardData) {
+      payload.vesselFreeboardData = intialSurveyData.vesselFreeboardData;
     }
 
     return payload;
@@ -872,8 +942,8 @@ const TransferOfRegistryApplication = ({
     if (!crewDetails || crewDetails?.length === 0) return [];
 
     const initialMap = (
-      Array.isArray(initialRegistryData?.CrewDetails)
-        ? initialRegistryData?.CrewDetails
+      Array.isArray(intialSurveyData?.CrewDetails)
+        ? intialSurveyData?.CrewDetails
         : []
     )?.reduce((acc, item) => {
       if (!item) return acc;
@@ -889,7 +959,7 @@ const TransferOfRegistryApplication = ({
       // const initial = initialMap[key] ?? {};
       const matchKey = crew.name?.toLowerCase() || `crew_${index}`;
       const initial =
-        initialMap[matchKey] || initialRegistryData?.CrewDetails?.[index] || {};
+        initialMap[matchKey] || intialSurveyData?.CrewDetails?.[index] || {};
 
       return {
         id: initial?.id || "",
@@ -901,6 +971,7 @@ const TransferOfRegistryApplication = ({
         experience: crew.experience ?? null,
         iwtVesBasicSurveyDetTFk: initial?.iwtVesBasicSurveyDetTFk || "",
         status: crew.status ?? "ACTIVE",
+        placeOfIssue: crew?.placeOfIssue,
       };
     });
   };
@@ -1154,627 +1225,101 @@ const TransferOfRegistryApplication = ({
       vesselFreeboardData: transformFreeboardData(formData.freeboard),
     };
   };
-// const submitSetp1 = async (formValues) => {
-//   try {
-//     loaderRef?.current?.show();
-    
-    
-//     const ownerDetails = getFromLocalStorage("ownerDetails") 
-//       ? JSON.parse(getFromLocalStorage("ownerDetails")) 
-//       : null;
 
-//     const payload = {
-//       registrationRequest: {
-//         id: "",
-//         applicationNumber: "",
-//         applicationType: "TRANSFER_OF_REGISTRY",
-//         basicDetails: {
-//           id: "",
-//           applicationNumber: "",
-//           status: "",
-//           ownerDetails: {
-//             id: ownerDetails?.id || ""
-//           },
-//           builderDetails: {
-//             // builderName: formValues?.basicDetails?.builderDetails?.builderName || "",
-//             // addressLine1: formValues?.basicDetails?.builderDetails?.addressLine1 || ""
-//             id:""
-//           },
-//           // builderAuthorization: "Y",
-//           // authorizationLetter:{}
-//           // dateOfRegistration: formValues?.basicDetails?.dateOfRegistration || "",
-//           // dateOfLastSurvey: formValues?.basicDetails?.builderDetails?.dateOfLastSurvey || ""
-//         },
-//         vesselDetails: {
-//           id: "",
-//           typeOfVessel: formValues?.vesselDetails?.typeOfVessel || "",
-//           categoryOfVessel: formValues?.vesselDetails?.categoryOfVessel || "",
-//           zone: "",
-//           grossTonnage: parseFloat(formValues?.vesselDetails?.grossTonnage) || 0,
-//           workOrderValue: "",
-//           purchaseType: "",
-//           supervisionAuthority: "",
-//           nameOfMaster: "",
-//           certficateNumber: "",
-//           nameOfRegistry: "",
-//           registrationNumber: formValues?.basicVesselInfo?.officialNo || "", //need to show from params
-//           vesselName: formValues?.vesselDetails?.vesselName || "",
-//           kindOfVessel: "",
-//           mortgage: "",
-//           placeOfBuild: "",
-//           insuranceDetails: "",
-//           yearOfBuild: parseInt(formValues?.vesselDetails?.yearOfBuild) || 0,
-//           pniClubNo: "",
-//           pniClubName: "",
-//           applicationNo: "",
-//           nameOfClassificationSociety: "",
-//           iwtVesselBasicDetailsTFk: "",
-//           insuranceValidDate: "",
-//           portOfRegistry: formValues?.vesselDetails?.previousPort || "",
-//           surveyId: null,
-//           lengthOfVessel: parseFloat(formValues?.vesselDetails?.lengthOfVessel) || 0,
-//           breadthOfVessel: parseFloat(formValues?.vesselDetails?.breadthOfVessel) || 0,
-//           depthOfVessel: parseFloat(formValues?.vesselDetails?.depthOfVessel) || 0,
-//           hullMaterial: null,
-//           noOfBulkheads: null,
-//           declarationWorkOrderDate: null,
-//           previousPort: formValues?.vesselDetails?.portOfRegistry || "",
-//           reasonOfChange: formValues?.basicVesselInfo?.reasonForTransfer || ""
-//         },
-//         engineDetails: {
-//           id: "",
-//           yearOfBuild: formValues?.vesselDetails?.yearOfBuild || "",
-//           engineType: formValues?.engineDetails?.engineType || "",
-//           engineMake: formValues?.engineDetails?.engineMake || "",
-//           makerAddress: formValues?.engineDetails?.makerAddress || "",
-//           pin: "",
-//           mobile: "",
-//           email: "",
-//           horsepower: parseFloat(formValues?.engineDetails?.horsepower) || 0.00,
-//           speed: parseFloat(formValues?.engineDetails?.speed) || 0.00,
-//           yearOfMake: formValues?.engineDetails?.yearOfMake || "",
-//           applRegistrationTFk: "",
-//           modelNo: formValues?.engineDetails?.modelNo || null,
-//           noOfSet: parseInt(formValues?.engineDetails?.noOfSet) || null,
-//           numberOfEngine: parseInt(formValues?.engineDetails?.numberOfEngine) || 0,
-//           serialNo: formValues?.engineDetails?.serialNo || null,
-//           propellerType: formValues?.engineDetails?.propellerType || null,
-//           gearType: formValues?.engineDetails?.gearType || null,
-//           noOfGear: parseInt(formValues?.engineDetails?.noOfGear) || null,
-//           vesselSpeed: formValues?.engineDetails?.vesselSpeed || null,
-//           rpm: parseInt(formValues?.engineDetails?.rpm) || null,
-//           engineCylinder: parseFloat(formValues?.engineDetails?.engineCylinder) || null,
-//           stroke: parseFloat(formValues?.engineDetails?.stroke) || null,
-//           internalCombustionEngineNo: null,
-//           description: null,
-//           noOfCylindersPerSet: null,
-//           nhp: null,
-//           ihp: null,
-//           propulsionType: null,
-//           noOfCylinderPerSetRotaryEngine: parseInt(formValues?.engineDetails?.noOfCylinderPerSetRotaryEngine) || 0,
-//           noOfCylinderPerSetReciprocatingEngine: parseInt(formValues?.engineDetails?.noOfCylinderPerSetReciprocatingEngine) || 0,
-//           noOfShaft: parseInt(formValues?.engineDetails?.noOfShaft) || 0,
-//           lengthOfEngineRoom: parseFloat(formValues?.engineDetails?.lengthOfEngineRoom) || 0.00,
-//           boilderDescription: null,
-//           boilerNumber: null,
-//           loadedPressure: null
-//         }
-//       },
-//       initialSurveyRequest: {
-//         surveyId: "",
-//         BasicVesselInformation: {
-//           id: "",
-//           typeOfSurveyId: "Initial",
-//           placeYardNo: formValues?.basicVesselInfo?.proposedPortOfRegistry || "",
-//           netTonnage: parseFloat(formValues?.vesselDetails?.netTonnage) || 0,
-//           agentsName: "",
-//           agentsAddress: "",
-//           agentsTelephone: "",
-//           placeOfLastSurvey: formValues?.basicVesselInfo?.placeOfLastSurvey || "",
-//           dateOfLastSurvey: formValues?.basicDetails?.builderDetails?.dateOfLastSurvey || "",
-//           dateOfProposedVisitSurveyor: "",
-//           iwtVesRegBasicDetailsTFk: "",
-//           status: "NEW",
-//           lengthOfVessel: formValues?.vesselDetails?.lengthOfVessel || "",
-//           breadthOfVessel: formValues?.vesselDetails?.breadthOfVessel || "",
-//           depthOfVessel: formValues?.vesselDetails?.depthOfVessel || "",
-//           draft: formValues?.basicVesselInfo?.draft || "",
-//           numberofDecks: null,
-//           enableprovisonalsurveycert: false,
-//           enableprovisonalregistrationcert: false,
-//           totalNoOfDeckCrew: formValues?.crewDetails?.totalDeckCrew || "",
-//           totalNoOfEngineCrew: formValues?.crewDetails?.totalEngineCrew || ""
-//         },
-//         HullParticulars: {
-//           id: "",
-//           frameMaterial: formValues?.hullParticulars?.frameMaterial || "",
-//           frameThickness: formValues?.hullParticulars?.frameThickness || "",
-//           floorMaterial: formValues?.hullParticulars?.floorMaterial || "",
-//           hullMaterial: formValues?.hullParticulars?.hullMaterial || "",
-//           hullPlatingThickness: formValues?.hullParticulars?.hullPlattingThickness || "",
-//           keelLayingDate: formValues?.hullParticulars?.keelLayingDate || "",
-//           iwtVesBasicSurveyDetTFk: "",
-//           status: "NEW",
-//           hullPlatingMaterial: formValues?.hullParticulars?.hullPlatingMaterial || "",
-//           noOfBulkheads: formValues?.hullParticulars?.numberOfBulkheads || "",
-//           bulkheadPlacement: formValues?.hullParticulars?.bulkheadPlacement || "",
-//           bulkheadThickness: formValues?.hullParticulars?.bulkheadThickness || "",
-//           floorThickness: formValues?.hullParticulars?.floorThickness || "",
-//           stern: ""
-//         },
-//         RadioandNavigationEquipment: {
-//           id: "",
-//           magneticCompass: parseInt(formValues?.navigationEquipment?.magneticCompass) || null,
-//           vhfRadio: parseInt(formValues?.navigationEquipment?.vhfRadio) || null,
-//           aisIdentifiSystem: parseInt(formValues?.navigationEquipment?.classBAutoAIS) || null,
-//           gps: parseInt(formValues?.navigationEquipment?.gpsNavigator) || null,
-//           binocular: parseInt(formValues?.navigationEquipment?.binocular) || null,
-//           aldisLamp: parseInt(formValues?.navigationEquipment?.aldisLamp) || null,
-//           rudderAngleIndicator: parseInt(formValues?.navigationEquipment?.rudderAngleIndicator) || null,
-//           others: parseInt(formValues?.navigationEquipment?.othersNavigation) || null,
-//           iwtVesBasicSurveyDetTFk: "",
-//           status: "NEW"
-//         },
-//         PollutionControlDevices: {
-//           id: "",
-//           bilgeWaterSeperator: parseInt(formValues?.polutionControl?.bilgeWaterSeparator) || null,
-//           capacity: formValues?.polutionControl?.bilgeCapacity || "",
-//           makeModel: formValues?.polutionControl?.bilgeMakeModel || "",
-//           stp: parseInt(formValues?.polutionControl?.sewageTreatmentPlant) || null,
-//           stpCapacity: formValues?.polutionControl?.sewageCapacity || "",
-//           stpMakeModel: formValues?.polutionControl?.sewageMakeModel || "",
-//           owf: parseInt(formValues?.polutionControl?.oilyWaterFilter) || null,
-//           owfCapacity: formValues?.polutionControl?.oilyCapacity || "",
-//           owfMakeModel: formValues?.polutionControl?.oilyMakeModel || "",
-//           egasCleaningSystm: parseInt(formValues?.polutionControl?.exhaustGasCleaning) || null,
-//           egasCleaningSystmCapacity: formValues?.polutionControl?.exhaustCapacity || "",
-//           egasCleaningSystmMakeModel: formValues?.polutionControl?.exhaustMakeModel || "",
-//           other: parseInt(formValues?.polutionControl?.othersPollution) || null,
-//           otherCapacity: formValues?.polutionControl?.othersCapacity || "",
-//           otherMakeModel: formValues?.polutionControl?.othersMakeModel || "",
-//           status: "NEW",
-//           iwtVesBasicSurveyDetTFk: ""
-//         },
-//         CrewDetails: (formValues?.crewDetails?.crewDetails || []).map(crew => ({
-//           id: "",
-//           crewType: crew.crewType || "",
-//           name: crew.name || "",
-//           rank: crew.rank || "",
-//           cocNo: crew.cocNo || "",
-//           validity: crew.validity || "",
-//           experience: "",
-//           iwtVesBasicSurveyDetTFk: "",
-//           status: "NEW",
-//           placeOfIssue: crew.placeOfIssue || ""
-//         })),
-//         equipmentInventoryDetails: null
-//       },
-//       enclosers: extractAllEnclosures(formValues)
-//     };
-
-//    const apiUrl = SERVICE_BASE.IWT_REGISTRATION +
-//                           URLS_ENDPOINT.TRANSFER_OF_REGISTRY.TRANSFER_OF_REGISTRY_CREATE;
-   
-//     const response = await postData(apiUrl, payload);
-
-//     if (response?.status === 200 || response?.status === 201) {
-//       toast.success("Transfer of Registry application submitted successfully!");
-//       stepperRef.current?.goToNextStep();
-//     } else {
-//       toast.error("Failed to submit application");
-//     }
-//   } catch (err) {
-//     console.error("Error:", err);
-//     toast.error("Error submitting application");
-//   } finally {
-//     loaderRef?.current?.hide();
-//   }
-// };
-
-
-useEffect(() => {
-  const ownerDetails = getFromLocalStorage("ownerDetails") 
-    ? JSON.parse(getFromLocalStorage("ownerDetails")) 
-    : null;
-
-  if (ownerDetails) {
-    setValue("basicDetails.ownerDetails.nameOfOwner", ownerDetails.ownerCompanyName || "");
-    
-  
-    const address = [ownerDetails.addressLine1, ownerDetails.addressLine2]
-      .filter(Boolean)
-      .join(", ");
-    setValue("basicDetails.ownerDetails.addressLine1", address);
-    
-    setValue("basicDetails.ownerDetails.phoneNumber", ownerDetails.phoneNumber || "");
-  }
-}, [setValue]);
-
-const extractAllEnclosures = (formValues) => {
-  const enclosures = [];
-  
-  // Single file documents 
-  const singleFileTypes = [
-    { field: "certificateOfRegistration", type: "REGISTRATION_CERTIFICATE", name: "Certificate of Registration" },
-    { field: "NOCfromOriginalRegistrationAuthority", type: "NOC_FROM_ORIGINAL_REGISTRATION_AUTHORITY", name: "NOC from Original Registration Authority" },
-    { field: "lastSurveyCertificate", type: "SURVEY_COPY_OF_LAST_CERTIFICATE_OF_SURVEY", name: "Last Survey Certificate" },
-    { field: "tonnageBooklet", type: "TONNAGE_BOOKLETS", name: "Tonnage Booklet" },
-    { field: "stabilityBooklet", type: "STABILITY_BOOKLETS", name: "Stability Booklet" },
-    { field: "insuranceCertificate", type: "INSURANCE_CERTIFICATE", name: "Insurance Certificate" },
-    { field: "paymentChallan", type: "PAYMENT_CHALLAN_OR_ACKNOWLEDGEMENT", name: "Payment Challan" }
-  ];
-
-  singleFileTypes.forEach(({ field, type, name }) => {
-   
-    const fileStoreId = formValues.enclosure?.[`${field}FileStoreId`];
-    const fileName = formValues.enclosure?.[field]?.name || formValues.enclosure?.[`${field}OriginalName`];
-    
-    if (fileStoreId) {
-      enclosures.push({
-        id: "",
-        documentName: fileName || `${name}.pdf`,
-        documentType: type,
-        fileStoreId,
-        documentSource: "TRANSFER_OF_REGISTRY_ENCLOSURES",
-        description: name,
-        active: true
-      });
-    }
-  });
-
-  // Multi-file documents 
-  const multiFileTypes = ["MAIN_AND_OTHER_DRAWINGS", "RADIOGRAPHY_REPORT", "MATERIAL_TEST_REPORT", "OTHER_INSPECTION_REPORTS", "OTHER_TECHNICAL_DOCUMENT"];
-  
-  multiFileTypes.forEach(type => {
-    Object.keys(formValues)
-      .filter(key => key.startsWith(`${type}_fileStoreId_`))
-      .forEach(storeKey => {
-        const index = storeKey.split("_").pop();
-        const fileStoreId = formValues[storeKey];
-        const fileObj = formValues[`${type}_file_${index}`];
-        
-        if (fileStoreId) {
-          enclosures.push({
-            id: "",
-            documentName: fileObj?.name || `${type}_${index}.pdf`,
-            documentType: type,
-            fileStoreId,
-            documentSource: "TRANSFER_OF_REGISTRY_ENCLOSURES",
-            description: formValues[`${type}_desc_${index}`] || type,
-            active: true
-          });
-        }
-      });
-  });
-
-  return enclosures;
-};
- 
-const submitTransferData = async (formValues, stepIndex, stepInfo = null) => {
-  try {
-    loaderRef.current?.show();
-    
-    let payload;
-
-    if (stepIndex === 0) {
-      // Step 1: First time submission 
-      const ownerDetails = getFromLocalStorage("ownerDetails") 
-        ? JSON.parse(getFromLocalStorage("ownerDetails")) 
-        : null;
-
-      payload = {
-        registrationRequest: {
-          id: "",
-          applicationNumber: "",
-          applicationType: "TRANSFER_OF_REGISTRY",
-          basicDetails: {
-            id: "",
-            applicationNumber: "",
-            status: "",
-            ownerDetails: { id: ownerDetails?.id || "" },
-            builderDetails: { id: "" },
-            dateOfRegistration: formValues?.basicDetails?.dateOfRegistration || "",
-            occupation: formValues?.basicDetails?.occupation || "",
-            originalPlaceBusiness: formValues?.basicDetails?.originalPlaceOfBusiness || ""
-          },
-          vesselDetails: {
-            id: "",
-            typeOfVessel: formValues?.vesselDetails?.typeOfVessel || "",
-            categoryOfVessel: formValues?.vesselDetails?.categoryOfVessel || "",
-            zone: "",
-            grossTonnage: parseFloat(formValues?.vesselDetails?.grossTonnage) || 0,
-            workOrderValue: "",
-            purchaseType: "",
-            supervisionAuthority: "",
-            nameOfMaster: "",
-            certficateNumber: "",
-            nameOfRegistry: "",
-            registrationNumber: formValues?.basicVesselInfo?.officialNo || "",
-            vesselName: formValues?.vesselDetails?.vesselName || "",
-            kindOfVessel: "",
-            mortgage: "",
-            placeOfBuild: "",
-            insuranceDetails: "",
-            yearOfBuild: parseInt(formValues?.vesselDetails?.yearOfBuild) || 0,
-            pniClubNo: "",
-            pniClubName: "",
-            applicationNo: "",
-            nameOfClassificationSociety: "",
-            iwtVesselBasicDetailsTFk: "",
-            insuranceValidDate: "",
-            portOfRegistry: formValues?.vesselDetails?.previousPort || "",
-            surveyId: null,
-            lengthOfVessel: parseFloat(formValues?.vesselDetails?.lengthOfVessel) || 0,
-            breadthOfVessel: parseFloat(formValues?.vesselDetails?.breadthOfVessel) || 0,
-            depthOfVessel: parseFloat(formValues?.vesselDetails?.depthOfVessel) || 0,
-            hullMaterial: null,
-            noOfBulkheads: null,
-            declarationWorkOrderDate: null,
-            previousPort: formValues?.vesselDetails?.portOfRegistry || "",
-            reasonOfChange: formValues?.basicVesselInfo?.reasonForTransfer || ""
-          },
-          engineDetails: {
-            id: "",
-            yearOfBuild: formValues?.vesselDetails?.yearOfBuild || "",
-            engineType: formValues?.engineDetails?.engineType || "",
-            engineMake: formValues?.engineDetails?.engineMake || "",
-            makerAddress: formValues?.engineDetails?.makerAddress || "",
-            pin: "",
-            mobile: "",
-            email: "",
-            horsepower: parseFloat(formValues?.engineDetails?.horsepower) || 0.00,
-            speed: parseFloat(formValues?.engineDetails?.speed) || 0.00,
-            yearOfMake: formValues?.engineDetails?.yearOfMake || "",
-            applRegistrationTFk: "",
-            modelNo: formValues?.engineDetails?.modelNo || null,
-            noOfSet: parseInt(formValues?.engineDetails?.noOfSet) || null,
-            numberOfEngine: parseInt(formValues?.engineDetails?.numberOfEngine) || 0,
-            serialNo: formValues?.engineDetails?.serialNo || null,
-            propellerType: formValues?.engineDetails?.propellerType || null,
-            gearType: formValues?.engineDetails?.gearType || null,
-            noOfGear: parseInt(formValues?.engineDetails?.noOfGear) || null,
-            vesselSpeed: formValues?.engineDetails?.vesselSpeed || null,
-            rpm: parseInt(formValues?.engineDetails?.rpm) || null,
-            engineCylinder: parseFloat(formValues?.engineDetails?.engineCylinder) || null,
-            stroke: parseFloat(formValues?.engineDetails?.stroke) || null,
-            internalCombustionEngineNo: null,
-            description: null,
-            noOfCylindersPerSet: null,
-            nhp: null,
-            ihp: null,
-            propulsionType: null,
-            noOfCylinderPerSetRotaryEngine: parseInt(formValues?.engineDetails?.noOfCylinderPerSetRotaryEngine) || 0,
-            noOfCylinderPerSetReciprocatingEngine: parseInt(formValues?.engineDetails?.noOfCylinderPerSetReciprocatingEngine) || 0,
-            noOfShaft: parseInt(formValues?.engineDetails?.noOfShaft) || 0,
-            lengthOfEngineRoom: parseFloat(formValues?.engineDetails?.lengthOfEngineRoom) || 0.00,
-            boilderDescription: null,
-            boilerNumber: null,
-            loadedPressure: null
-          }
-        },
-        initialSurveyRequest: {
-          surveyId: "",
-          BasicVesselInformation: {
-            id: "",
-            typeOfSurveyId: "Initial",
-            placeYardNo: formValues?.basicVesselInfo?.proposedPortOfRegistry || "",
-            netTonnage: parseFloat(formValues?.vesselDetails?.netTonnage) || 0,
-            agentsName: "",
-            agentsAddress: "",
-            agentsTelephone: "",
-            placeOfLastSurvey: formValues?.basicVesselInfo?.placeOfLastSurvey || "",
-            dateOfLastSurvey: formValues?.basicDetails?.builderDetails?.dateOfLastSurvey || "",
-            dateOfProposedVisitSurveyor: "",
-            iwtVesRegBasicDetailsTFk: "",
-            status: "NEW",
-            lengthOfVessel: formValues?.vesselDetails?.lengthOfVessel || "",
-            breadthOfVessel: formValues?.vesselDetails?.breadthOfVessel || "",
-            depthOfVessel: formValues?.vesselDetails?.depthOfVessel || "",
-            draft: formValues?.basicVesselInfo?.draft || "",
-            numberOfDecks: null,
-            enableprovisonalsurveycert: false,
-            enableprovisonalregistrationcert: false,
-            totalNoOfDeckCrew: formValues?.crewDetails?.totalDeckCrew || "",
-            totalNoOfEngineCrew: formValues?.crewDetails?.totalEngineCrew || ""
-          },
-          HullParticulars: {
-            id: "",
-            frameMaterial: formValues?.hullParticulars?.frameMaterial || "",
-            frameThickness: formValues?.hullParticulars?.frameThickness || "",
-            floorMaterial: formValues?.hullParticulars?.floorMaterial || "",
-            hullMaterial: formValues?.hullParticulars?.hullMaterial || "",
-            hullPlatingThickness: formValues?.hullParticulars?.hullPlattingThickness || "",
-            keelLayingDate: formValues?.hullParticulars?.keelLayingDate || "",
-            iwtVesBasicSurveyDetTFk: "",
-            status: "NEW",
-            hullPlatingMaterial: formValues?.hullParticulars?.hullPlatingMaterial || "",
-            noOfBulkheads: formValues?.hullParticulars?.numberOfBulkheads || "",
-            bulkheadPlacement: formValues?.hullParticulars?.bulkheadPlacement || "",
-            bulkheadThickness: formValues?.hullParticulars?.bulkheadThickness || "",
-            floorThickness: formValues?.hullParticulars?.floorThickness || "",
-            stern: ""
-          },
-          RadioandNavigationEquipment: {
-            id: "",
-            magneticCompass: parseInt(formValues?.navigationEquipment?.magneticCompass) || null,
-            vhfRadio: parseInt(formValues?.navigationEquipment?.vhfRadio) || null,
-            aisIdentifiSystem: parseInt(formValues?.navigationEquipment?.classBAutoAIS) || null,
-            gps: parseInt(formValues?.navigationEquipment?.gpsNavigator) || null,
-            binocular: parseInt(formValues?.navigationEquipment?.binocular) || null,
-            aldisLamp: parseInt(formValues?.navigationEquipment?.aldisLamp) || null,
-            rudderAngleIndicator: parseInt(formValues?.navigationEquipment?.rudderAngleIndicator) || null,
-            others: parseInt(formValues?.navigationEquipment?.othersNavigation) || null,
-            iwtVesBasicSurveyDetTFk: "",
-            status: "NEW"
-          },
-          PollutionControlDevices: {
-            id: "",
-            bilgeWaterSeperator: parseInt(formValues?.polutionControl?.bilgeWaterSeparator) || null,
-            capacity: formValues?.polutionControl?.bilgeCapacity || "",
-            makeModel: formValues?.polutionControl?.bilgeMakeModel || "",
-            stp: parseInt(formValues?.polutionControl?.sewageTreatmentPlant) || null,
-            stpCapacity: formValues?.polutionControl?.sewageCapacity || "",
-            stpMakeModel: formValues?.polutionControl?.sewageMakeModel || "",
-            owf: parseInt(formValues?.polutionControl?.oilyWaterFilter) || null,
-            owfCapacity: formValues?.polutionControl?.oilyCapacity || "",
-            owfMakeModel: formValues?.polutionControl?.oilyMakeModel || "",
-            egasCleaningSystm: parseInt(formValues?.polutionControl?.exhaustGasCleaning) || null,
-            egasCleaningSystmCapacity: formValues?.polutionControl?.exhaustCapacity || "",
-            egasCleaningSystmMakeModel: formValues?.polutionControl?.exhaustMakeModel || "",
-            other: parseInt(formValues?.polutionControl?.othersPollution) || null,
-            otherCapacity: formValues?.polutionControl?.othersCapacity || "",
-            otherMakeModel: formValues?.polutionControl?.othersMakeModel || "",
-            status: "NEW",
-            iwtVesBasicSurveyDetTFk: ""
-          },
-          CrewDetails: (formValues?.crewDetails?.crewDetails || []).map(crew => ({
-            id: "",
-            crewType: crew.crewType || "",
-            name: crew.name || "",
-            rank: crew.rank || "",
-            cocNo: crew.cocNo || "",
-            validity: crew.validity || "",
-            experience: "",
-            iwtVesBasicSurveyDetTFk: "",
-            status: "NEW",
-            placeOfIssue: crew.placeOfIssue || ""
-          })),
-          equipmentInventoryDetails: null
-        },
-        enclosers: extractAllEnclosures(formValues)
-      };
-    } 
-    else if (stepIndex === 1) {
-   
-      const storedEnclosures = sessionStorage.getItem('step1Enclosures');
-      const step1Enclosures = storedEnclosures ? JSON.parse(storedEnclosures) : [];
-      
-      payload = {
-        registrationRequest: registrationData.RegistrationResponse,
-        initialSurveyRequest: {
-          ...initialRegistryData,
-          SurveyEquipments: buildEquipmentPayload(formValues, initialRegistryData)?.SurveyEquipments || initialRegistryData?.SurveyEquipments,
-          passengerDistributionMaxLoad: buildEquipmentPayload(formValues, initialRegistryData)?.passengerDistributionMaxLoad || initialRegistryData?.passengerDistributionMaxLoad,
-          vesselFreeboardData: buildEquipmentPayload(formValues, initialRegistryData)?.vesselFreeboardData || initialRegistryData?.vesselFreeboardData
-        },
-        enclosers: step1Enclosures 
-      };
+  const handleFormSubmit = async (stepInfo) => {
+    // Step 1: Initial Survey Form
+    if (stepInfo.index === 0) {
+      const formValues = stepInfo?.getFormData?.() || {};
+      const surveyPayload = buildSurveyPayload(formValues, registrationData);
+      submitIntialSurveyData(surveyPayload, stepInfo);
+      window.scrollTo({ top: 0, behavior: "smooth" });
     }
 
-    const apiUrl = SERVICE_BASE.IWT_REGISTRATION + URLS_ENDPOINT.TRANSFER_OF_REGISTRY.TRANSFER_OF_REGISTRY_CREATE;
-    const response = await postData(apiUrl, payload);
+    // Step 2: Equipment Form
+    if (stepInfo.index === 1) {
+       if(isOfficerLogin){
+         handleProvisionModalOpen("registration", false);
 
-    if (response?.status === 200 || response?.status === 201) {
-      const responseData = response?.data?.data;
-      
-      if (stepIndex === 0) {
-        // Store enclosures from step 1 response for step 2
-        if (responseData?.Enclosures) {
-          sessionStorage.setItem('step1Enclosures', JSON.stringify(responseData.Enclosures));
-        }
-        
-        setRegistrationData({
-          RegistrationResponse: responseData?.RegistrationResponse,
-          vessel: {
-            applicationNumber: responseData?.RegistrationResponse?.applicationNumber,
-            iwtVesselBasicDetailsTFk: responseData?.RegistrationResponse?.basicDetails?.id
-          }
-        });
-        setInitialRegistryData(responseData?.IwtInitialSurveyResponse);
       }
-      
-      if (stepIndex === 1 && responseData?.IwtInitialSurveyResponse) {
-        setInitialRegistryData(responseData.IwtInitialSurveyResponse);
-        // Clear stored enclosures after successful step 2
-        sessionStorage.removeItem('step1Enclosures');
-      }
-      
-      toast.success(stepIndex === 0 ? "Transfer application submitted successfully!" : "Equipment data updated successfully!");
+      const formValues = stepInfo?.getFormData?.() || {};
+      const equipmentPayload = buildEquipmentPayload(
+        formValues,
+        intialSurveyData
+      );
+      // console.log("=== EQUIPMENT PAYLOAD ===");
+      // console.log("Payload:equipment", equipmentPayload);
+      // console.log("========================");
+      // For officer save
+      if (isOfficerLogin && isViewMode) {
+        await submitIntialSurveyData(equipmentPayload, null);
 
-      if (stepInfo) {
+        // toast.success("Data saved successfully!");
+        return;
+      }
+      submitIntialSurveyData(equipmentPayload, stepInfo);
+     
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+
+    //-- Step 3 Book of registration Form Submission -- //
+    if (stepInfo.index === 2) {
+      // const isValid = await validateBookForm();
+      // if (!isValid) {
+      //   toast.error("Please fill all required fields before proceeding.");
+      //   return;
+      // }
+
+      const success = await handleBookOfRegistrationSubmit();
+      if (success) {
         stepperRef.current?.goToNextStep();
+        // handleProvisionModalOpen("registration", false);
       }
-    } else {
-      toast.error("Failed to submit data");
     }
-  } catch (err) {
-    console.error("Error:", err);
-    toast.error("Error submitting data");
-  } finally {
-    loaderRef?.current?.hide();
-  }
-};
 
-const handleFormSubmit = async (stepInfo) => {
-  window.scrollTo({ top: 0, behavior: "smooth" });
-  const formValues = stepInfo?.getFormData?.() || {};
-  
-  if (stepInfo.index === 0) {
-    await submitTransferData(formValues, 0, stepInfo);
-  } else if (stepInfo.index === 1) {
-    await submitTransferData(formValues, 1, stepInfo);
-  }
-};
-  // const handleFormSubmit = async (stepInfo) => {
-  //   window.scrollTo({ top: 0, behavior: "smooth" });
-  //   const formValues = stepInfo?.getFormData?.() || {};
-  //   const newFormVals = {
-  //     ...formValues, mainDrawingAndOtherDrawings: extractDocuments(formValues, ["DRAWING"]),
-  //     radiographyReport: extractDocuments(formValues, ["RADIOGRAPHY_REPORT"]),
-  //     materialTestReport: extractDocuments(formValues, ["MATERIAL_TEST_REPORT"]),
-  //     otherInspectionReport: extractDocuments(formValues, ["OTHER_INSPECTION_REPORT"]),
-  //     otherTechnicalDocument: extractDocuments(formValues, ["OTHER_TECH_DOC"]),
+    // Step 3: Certificate of Registration
+    if (stepInfo.index === 3) {
+      const formValues = stepInfo?.getFormData?.() || {};
+      console.log("=== CERTIFICATE PAYLOAD ===", formValues);
+      await handleGenerateProvisionalCertificate(
+        formValues,
+        "REGISTRATION_CERTIFICATE"
+      );
+    }
+  };
+
+  const handleCertificateSubmit = async () => {
+    const formValues = methods?.getValues();
+    console.log("=== CERTIFICATE SUBMIT ===", formValues);
+    await handleGenerateProvisionalCertificate(
+      formValues,
+      "REGISTRATION_CERTIFICATE"
+    );
+  };
+
+  // const validateBookForm = async () => {
+  //   console.log("validateBookForm -> ", methods?.getValues());
+
+  //   const requiredFields = [
+  //     "bookOfRegistration.engine.engineNo",
+  //     "bookOfRegistration.engine.description",
+  //     "bookOfRegistration.engine.cylindersPerSet",
+  //     "bookOfRegistration.engine.nhp",
+  //     "bookOfRegistration.engine.ihp",
+  //     "bookOfRegistration.propulsion.propulsionType",
+  //   ];
+
+  //   const isValid = await trigger(requiredFields);
+
+  //   if (!isValid) {
+  //     await trigger();
   //   }
-  //   if (stepInfo.index === 0) {
-  //     await submitSetp1(formValues);
-  //   }
-  //   console.log("=== STEP INFO new ===", newFormVals);
-  //   console.log("=== STEP INFO old ===", formValues);
-  //   stepperRef.current?.goToNextStep();
-  //   //-- Step 1  Initial Survey Form Submission -- //
-  //   // if (stepInfo.index === 0) {
-  //   //   const formValues = stepInfo?.getFormData?.() || {};
-  //   //   const surveyPayload = buildSurveyPayload(formValues, registrationData);
-  //   //   submitIntialSurveyData(surveyPayload, stepInfo);
-  //   // }
 
-  //   // //-- Step 2  Equipment Form Submission -- //
-  //   // if (stepInfo.index === 1) {
-  //   //   const formValues = stepInfo?.getFormData?.() || {};
-  //   //   const equipmentPayload = buildEquipmentPayload(
-  //   //     formValues,
-  //   //     initialRegistryData
-  //   //   );
-  //   //   console.log("=== EQUIPMENT PAYLOAD ===");
-  //   //   console.log("Payload:equipment", equipmentPayload);
-  //   //   console.log("========================");
-  //   //   // For officer save
-  //   //   if (isOfficerLogin && isViewMode) {
-  //   //     await submitIntialSurveyData(equipmentPayload, null);
-  //   //     // toast.success("Data saved successfully!");
-  //   //     return;
-  //   //   }
-
-  //   //   submitIntialSurveyData(equipmentPayload, stepInfo);
-  //   // }
-
-  //   // //-- Step 3 Book of registration Form Submission -- //
-  //   // if (stepInfo.index === 2 && steps?.length === 5) {
-  //   //   const formValues = stepInfo?.getFormData?.() || {};
-  //   //   console.log("=== BOOK PAYLOAD ===", formValues);
-  //   //   stepperRef.current?.goToNextStep();
-  //   // }
-
-  //   // //-- Step 4 Book of registration Form Submission -- //
-  //   // if (stepInfo.index === 3 && steps?.length === 5) {
-  //   //   const formValues = stepInfo?.getFormData?.() || {};
-  //   //   console.log("=== CERTIFICATE PAYLOAD ===", formValues);
-  //   //   stepperRef.current?.goToNextStep();
-  //   // }
+  //   return isValid;
   // };
 
   //-- SUBMIT INTIAL SURVEY DATA TO API -- //
   const submitIntialSurveyData = async (surveyPayload, stepInfo = null) => {
+   
     try {
       loaderRef.current?.show();
       const apiUrl =
@@ -1783,17 +1328,24 @@ const handleFormSubmit = async (stepInfo) => {
 
       const response = await postData(apiUrl, surveyPayload);
       if (response?.status === 200 || response?.status === 201) {
-        setInitialRegistryData(response?.data || []);
-
-        if (isOfficerLogin && isViewMode && !stepInfo) {
+        const surveyDataRes = response?.data;
+        surveyDataRes.processActionMapResponce =
+          intialSurveyData?.processActionMapResponce;
+        setIntialSurveyData(surveyDataRes || []);
+        const checkAction = response?.data?.processActionMapResponce?.[0]?.processs?.[0]?.actions?.length > 0;
+if(checkAction){
+    if (isOfficerLogin && isViewMode && !stepInfo) {
           toast.success("Survey Condtions/Remarks saved successfully!");
         } else {
           toast.success(
             response?.data?.responseStatus?.message ||
-            "Intial survey data submitted successfully!"
+              "Intial survey data submitted successfully!"
           );
         }
 
+  
+}
+      
         if (stepInfo) {
           stepperRef.current?.goToNextStep();
           if (stepInfo?.index === 1) {
@@ -1803,13 +1355,13 @@ const handleFormSubmit = async (stepInfo) => {
       } else {
         toast.error(
           response?.data?.responseStatus?.message ||
-          "Failed to submit initial survey data."
+            "Failed to submit initial survey data."
         );
       }
     } catch (err) {
       handleErrorMessage(
         err?.response?.data ||
-        "Failed to save survey. Check console for details."
+          "Failed to save survey. Check console for details."
       );
     } finally {
       loaderRef?.current?.hide();
@@ -1865,50 +1417,48 @@ const handleFormSubmit = async (stepInfo) => {
   };
 
   const handlePayNow = () => {
-    // navigate(`/payment?applicationNo=${registrationData?.vessel.applicationNumber}`, {
-    //   state: {
-    //     paymentData,
-    //     applicationNumber: registrationData?.vessel.applicationNumber,
-    //     fullPaymentData,
-    //   },
-    // });
+    navigate(
+      `/payment?applicationNo=${registrationData?.vessel?.applicationNumber}`,
+      {
+        state: {
+          paymentData,
+          applicationNumber: registrationData?.vessel?.applicationNumber,
+          fullPaymentData,
+        },
+      }
+    );
   };
-  useEffect(() => {
-    const vesselData = location.state?.vesselData;
-    if (vesselData) {
-        setVesselData(vesselData);
-    }
-}, [location.state]);
 
-  const handleSave = () => {
-    console.log("=== HANDLE SAVE ===");
-    setIsLoading(true);
-    setTimeout(() => {
-      setIsLoading(false);
-      navigate("/vessel-survey/success", {
-        state: { surveyId: "VS2024001" },
-      });
-    }, 1500);
-  };
+  // const handleSave = () => {
+  //   console.log("=== HANDLE SAVE ===");
+  //   setIsLoading(true);
+  //   setTimeout(() => {
+  //     setIsLoading(false);
+  //     navigate("/vessel-survey/success", {
+  //       state: { surveyId: "VS2024001" },
+  //     });
+  //   }, 1500);
+  // };
 
   const getSteps = () => {
     const baseSteps = [
       {
-        label: t("Vessel Details"),
+        id: 1,
+        label: t("Survey of Inland Vessel Details"),
         component: (
           <VesselSurveyForm
             formMethods={methods}
             viewMode={isViewMode}
             editMode={isEditMode}
             registrationData={registrationData}
-            initialRegistryData={initialRegistryData}
-            vesselData={vesselData}
+            intialSurveyData={intialSurveyData}
           />
         ),
         validate: validateSurveyForm,
         getFormData: () => methods?.getValues(),
       },
       {
+        id: 2,
         label: t("Equipment & Vessel Information"),
         component: (
           <VesselEquipmentForm
@@ -1916,7 +1466,7 @@ const handleFormSubmit = async (stepInfo) => {
             viewMode={isViewMode}
             editMode={isEditMode}
             registrationData={registrationData}
-            initialRegistryData={initialRegistryData}
+            intialSurveyData={intialSurveyData}
           />
         ),
         validate: validateEquipmentForm,
@@ -1924,31 +1474,50 @@ const handleFormSubmit = async (stepInfo) => {
       },
     ];
 
-    if (registrationData?.basicDetails?.initialSurveyCompleted && isOfficerLogin && userRole !== USER_ROLES.VESSEL_OWNER) {
+    if (
+      (registrationData?.basicDetails?.initialSurveyCompleted ||
+        registrationData?.basicDetails?.isRegistrationCertificateGenerated ||
+        registrationData?.basicDetails?.isRegistrationCompleted) &&
+      isOfficerLogin &&
+      userRole !== USER_ROLES.VESSEL_OWNER
+    ) {
       baseSteps.push({
+        id: 4,
         label: t("Book of Registration"),
         component: (
           <BookOfRegistrationForm
             formMethods={methods}
             viewMode={isOfficerLogin ? false : isViewMode}
             registrationData={registrationData}
+            intialSurveyData={intialSurveyData}
+            originalRegistrationData={originalRegistrationData}
+            provisionalRegCertData={provisionalRegCertData}
           />
         ),
-        validate: validateBookForm,
+        // validate: validateBookForm,
+        validate: () => true,
         getFormData: () => methods?.getValues(),
+        showSavaAndNextButton: true,
+        hasActions: !!provisionalRegCertData?.processActionMapResponce,
       });
 
       baseSteps.push({
+        id: 5,
         label: t("Certificate of Registration"),
         component: (
           <CertificateOfRegistrationForm8
             formMethods={methods}
             viewMode={isOfficerLogin ? false : isViewMode}
             registrationData={registrationData}
+            intialSurveyData={intialSurveyData}
+            originalRegistrationData={originalRegistrationData}
+            provisionalCertData={provisionalRegCertData}
           />
         ),
         validate: validateCertificateForm,
         getFormData: () => methods?.getValues(),
+        showSubmitButton: true,
+        hasActions: !!provisionalRegCertData?.processActionMapResponce,
       });
     }
 
@@ -1959,6 +1528,7 @@ const handleFormSubmit = async (stepInfo) => {
       !registrationData?.basicDetails?.initialSurveyCompleted
     ) {
       baseSteps.push({
+        id: 3,
         label: t("vesselDetails.Invoicing"),
         component: (
           <Invoicing
@@ -1967,100 +1537,127 @@ const handleFormSubmit = async (stepInfo) => {
               "CLASSIFICATION SOCIETY"
             }
             onPayNow={handlePayNow}
-            vesselData={registrationData}
+            vesselRegisData={registrationData}
             paymentData={paymentData}
           />
         ),
-        showPayBtn: true,
+        showPayBtn :  true,
         validate: () => true,
       });
     }
     return baseSteps;
   };
 
-  const extractDocuments = (formData, dynamicTypes) => {
-    const documents = [];
-    console.log("vesselData", vesselData);
-    const existingDocs = vesselData?.documents || [];
-    console.log("existingDocs", existingDocs);
+  const handleBookOfRegistrationSubmit = async () => {
+    try {
+      loaderRef.current?.show();
 
-    dynamicTypes.forEach((type) => {
-      Object.keys(formData)
-        .filter((key) => key.startsWith(`${type}_fileStoreId_`))
-        .forEach((storeKey) => {
-          const index = storeKey.split("_").pop();
-          const fileStoreId = formData[storeKey];
-          const description = formData[`${type}_desc_${index}`] || "";
-          const fileObj = formData?.[`${type}_file_${index}`];
-          const existingDoc = existingDocs.find(
-            (doc) =>
-              doc.documentType === type &&
-              doc.documentName?.includes(index.padStart(2, "0"))
-          );
+      const formData = methods?.getValues();
+      const payload = {
+        ...originalRegistrationData?.engineDetails,
+        internalCombustionEngineNo:
+          formData?.bookOfRegistration?.engine?.engineNo || "",
+        description: formData?.bookOfRegistration?.engine?.description || "",
+        noOfCylindersPerSet:
+          formData?.bookOfRegistration?.engine?.cylindersPerSet || "",
+        nhp: parseFloat(formData?.bookOfRegistration?.engine?.nhp) || null,
+        ihp: parseFloat(formData?.bookOfRegistration?.engine?.ihp) || null,
+        propulsionType:
+          formData?.bookOfRegistration?.propulsion?.propulsionType || "",
+      };
 
-          if (fileStoreId) {
-            documents.push({
-              //  id: "", /// --- UPDATE API CALL
-              id: existingDoc?.id || "",
-              fileStoreId,
-              documentName:
-                fileObj?.name || `${type}_${index.padStart(2, "0")}.pdf`,
-              documentType: type,
-              documentSource: type,
-              description,
-            });
-          }
-        });
-    });
-    return documents;
+      const apiUrl =
+        SERVICE_BASE.IWT_REGISTRATION +
+        URLS_ENDPOINT.VESSEL_SERVICE.SAVE_ENGINE_DETAILS;
+      const response = await postData(apiUrl, payload);
+
+      if (response?.status === 200 && response?.data?.responseStatus) {
+        toast.success(
+          response?.data?.responseStatus?.message ||
+            "Book of Registration saved successfully!"
+        );
+        return true;
+      } else {
+        toast.error(
+          response?.data?.responseStatus?.message ||
+            "Failed to save Book of Registration."
+        );
+        return false;
+      }
+    } catch (error) {
+      console.error("Book of Registration submission error:", error);
+      toast.error("Failed to save Book of Registration. Please try again.");
+      return false;
+    } finally {
+      loaderRef.current?.hide();
+    }
   };
 
-  const handleProvisionModalOpen = async (type) => {
-    // const isRegistration = type === "registration";
+  const handleProvisionModalOpen = async (type, openModal = true) => {
+    const isRegistration = type === "registration";
 
-    // const URL = isRegistration
-    //   ? SERVICE_BASE.IWT_REGISTRATION +
-    //   URLS_ENDPOINT.VESSEL_SERVICE.GET_REG_PROVISIONAL_CERT_DETAILS
-    //   : SERVICE_BASE.IWT_SURVEY_SERVICE +
-    //   URLS_ENDPOINT.SURVEY_SERVICE.GET_SURVEY_PROVISIONAL_CERT_DETAILS;
+    const URL = isRegistration
+      ? SERVICE_BASE.IWT_REGISTRATION +
+        URLS_ENDPOINT.VESSEL_SERVICE.GET_REG_PROVISIONAL_CERT_DETAILS
+      : SERVICE_BASE.IWT_SURVEY_SERVICE +
+        URLS_ENDPOINT.SURVEY_SERVICE.GET_SURVEY_PROVISIONAL_CERT_DETAILS;
 
-    // const payload = isRegistration
-    //   ? {
-    //     applicationNumbers: [
-    //       registrationData?.vessel?.applicationNumber || "",
-    //     ],
-    //   }
-    //   : { surveyId: initialRegistryData?.surveyId || "" };
+    const payload = isRegistration
+      ? {
+          applicationNumbers: [
+            registrationData?.vessel?.applicationNumber || "",
+          ],
+        }
+      : { surveyId: intialSurveyData?.surveyId || "" };
 
-    // try {
-    //   loaderRef?.current?.show();
+    try {
+      loaderRef?.current?.show();
 
-    //   const response = await postData(URL, payload);
-    //   const { status, data } = response || {};
+      const response = await postData(URL, payload);
+      const { status, data } = response || {};
 
-    //   if (
-    //     (isRegistration &&
-    //       status === 200 &&
-    //       data?.data?.registrationCertificateDetails) ||
-    //     (!isRegistration && (status === 200 || status === 201) && data)
-    //   ) {
-    //     setProvisionalCertData(
-    //       isRegistration ? data?.data?.registrationCertificateDetails : data
-    //     );
-    //     setModalType(type);
-    //     setOpenCertificateModal(true);
-    //     return;
-    //   }
+      if (
+        (isRegistration &&
+          status === 200 &&
+          data?.data?.registrationCertificateDetails) ||
+        (!isRegistration && (status === 200 || status === 201) && data)
+      ) {
+        const certData = isRegistration
+          ? data?.data?.registrationCertificateDetails
+          : data;
 
-    //   toast.info(data?.responseStatus?.message || "Something went wrong..", {
-    //     position: "top-right",
-    //   });
-    // } catch (err) {
-    //   console.error("Provision Modal Error:", err);
-    //   handleErrorMessage(err?.response?.data);
-    // } finally {
-    //   loaderRef?.current?.hide();
-    // }
+        if (isRegistration) {
+          setProvisionalRegCertData(certData);
+        }
+        
+
+        setProvisionalCertData(certData);
+      
+        if (openModal) {
+          setModalType(type);
+          setOpenCertificateModal(true);
+        } else {
+          if (steps[steps.length - 1]?.id === 5) {
+            const actionsItems =
+              certData?.processActionMapResponce?.[0]?.processs?.[0]?.actions ??
+              [];
+            if (actionsItems?.length > 0) {
+              setActionsFromAPI(actionsItems);
+            }
+          }
+        }
+        return;
+      }
+
+      toast.info(data?.responseStatus?.message || "Something went wrong..", {
+        position: "top-right",
+      });
+    } catch (err) {
+      console.error("Provision Modal Error:", err);
+      handleErrorMessage(err?.response?.data);
+    } finally {
+      loaderRef?.current?.hide();
+    }
   };
 
   const handleProvisionModalClose = (type) => {
@@ -2068,141 +1665,162 @@ const handleFormSubmit = async (stepInfo) => {
     setOpenCertificateModal(false);
   };
 
-  const handleGenerateProvisionalCertificate = async (formData) => {
+  const handleGenerateProvisionalCertificate = async (
+    formData,
+    certificateType = null
+  ) => {
     console.log("Certificate Type - ", modalType);
     console.log("Form Data - ", formData);
 
     const isRegistration = modalType === "registration";
     const URL = SERVICE_BASE.IWT_REGISTRATION + URLS_ENDPOINT.CERT.CREATE;
 
-    const request = {
+    let request = {
       certificateType: isRegistration
         ? "PROV_REGISTRATION_CERTIFICATE"
         : "PROV_SURVEY_CERTIFICATE",
     };
 
-    if (isRegistration) {
-      request.registrationCertificateDetails = {
-        certificateExpiryDate: formData?.expiryDate || "",
-        applicationNumber: registrationData?.vessel?.applicationNumber || "",
-        applicationId: registrationData?.applicationId || "",
-        registrationDate: formData?.registrationDate || "",
-        vesselName: provisionalCertData?.vesselName || "",
-        portOfRegistry: provisionalCertData?.portOfRegistry || "",
-        previousRegistrationNumber: formData?.previousRegistrationNo || "",
-        dateOfPreviousRegisty: formData?.dateOfPreviousRegistry || "",
-        portOfPreviousRegistry: formData?.portOfPreviousRegistry || "",
-        nameOfBuilder: provisionalCertData?.nameOfBuilder || "",
-        addressOfBuilder: provisionalCertData?.addressOfBuilder || "",
-        placeOfBuilt: provisionalCertData?.placeOfBuilt || "",
-        propulsionType: provisionalCertData?.propulsionType || "",
-        numberOfDeck: provisionalCertData?.numberOfDeck || 0,
-        materialDescription: provisionalCertData?.materialDescription || "",
-        numberOfBulkHeads: provisionalCertData?.numberOfBulkHeads || 0,
-        strengthOfDeck: provisionalCertData?.strengthOfDeck || "",
-        build: formData?.build || "",
-        length: provisionalCertData?.length || "0",
-        breadth: provisionalCertData?.breadth || "0",
-        depth: provisionalCertData?.depth || "0",
-        draft: provisionalCertData?.draft || "0",
-        lengthOfEngineRoom: parseFloat(formData?.lengthEngineRoom) || 0,
-        grossTonnage: provisionalCertData?.grossTonnage || 0,
-        netTonnage: provisionalCertData?.netTonnage || 0,
-        numberOfCrew: provisionalCertData?.numberOfCrew || 0,
-        numberOfEngines: provisionalCertData?.numberOfEngines || 0,
-        combinedPower: provisionalCertData?.combinedPower || 0,
-        nameOfEngineMaker: provisionalCertData?.nameOfEngineMaker || "",
-        addressOfEngineMaker: provisionalCertData?.addressOfEngineMaker || "",
-        summaryDescriptionOfTonnage:
-          formData?.summaryDescriptionOfTonnage || "",
-        state: provisionalCertData?.state || "",
-        nameOfMaster: provisionalCertData?.nameOfMaster || "",
-        cocNumber: provisionalCertData?.cocNumber || "",
-        ownerName: provisionalCertData?.ownerName || "",
-        addressOfOwner: provisionalCertData?.addressOfOwner || "",
-        officialNumber: provisionalCertData?.officialNumber || "",
-        numberOfTenthShares: formData?.numberOfTenthShares || "",
-      };
+    if (!certificateType) {
+      if (isRegistration) {
+        request.registrationCertificateDetails = {
+          certificateExpiryDate: formData?.expiryDate || "",
+          applicationNumber: registrationData?.vessel?.applicationNumber || "",
+          applicationId: registrationData?.applicationId || "",
+          registrationDate: formData?.registrationDate || "",
+          vesselName: provisionalCertData?.vesselName || "",
+          portOfRegistry: provisionalCertData?.portOfRegistry || "",
+          previousRegistrationNumber: formData?.previousRegistrationNo || "",
+          dateOfPreviousRegisty: formData?.dateOfPreviousRegistry || "",
+          portOfPreviousRegistry: formData?.portOfPreviousRegistry || "",
+          nameOfBuilder: provisionalCertData?.nameOfBuilder || "",
+          addressOfBuilder: provisionalCertData?.addressOfBuilder || "",
+          placeOfBuilt: provisionalCertData?.placeOfBuilt || "",
+          propulsionType: provisionalCertData?.propulsionType || "",
+          numberOfDeck: provisionalCertData?.numberOfDeck || 0,
+          materialDescription: provisionalCertData?.materialDescription || "",
+          numberOfBulkHeads: provisionalCertData?.numberOfBulkHeads || 0,
+          strengthOfDeck: provisionalCertData?.strengthOfDeck || "",
+          build: formData?.build || "",
+          length: provisionalCertData?.length || "0",
+          breadth: provisionalCertData?.breadth || "0",
+          depth: provisionalCertData?.depth || "0",
+          draft: provisionalCertData?.draft || "0",
+          lengthOfEngineRoom: parseFloat(formData?.lengthEngineRoom) || 0,
+          grossTonnage: provisionalCertData?.grossTonnage || 0,
+          netTonnage: provisionalCertData?.netTonnage || 0,
+          numberOfCrew: provisionalCertData?.numberOfCrew || 0,
+          numberOfEngines: provisionalCertData?.numberOfEngines || 0,
+          combinedPower: provisionalCertData?.combinedPower || 0,
+          nameOfEngineMaker: provisionalCertData?.nameOfEngineMaker || "",
+          addressOfEngineMaker: provisionalCertData?.addressOfEngineMaker || "",
+          summaryDescriptionOfTonnage:
+            formData?.summaryDescriptionOfTonnage || "",
+          state: provisionalCertData?.state || "",
+          nameOfMaster: provisionalCertData?.nameOfMaster || "",
+          cocNumber: provisionalCertData?.cocNumber || "",
+          ownerName: provisionalCertData?.ownerName || "",
+          addressOfOwner: provisionalCertData?.addressOfOwner || "",
+          officialNumber: provisionalCertData?.officialNumber || "",
+          numberOfTenthShares: formData?.numberOfTenthShares || "",
+        };
+      } else {
+        request.surveyProvisionalCertificate = {
+          surveyId: intialSurveyData?.surveyId || "",
+          surveyNumber: intialSurveyData?.surveyNumber || "",
+          category: provisionalCertData?.category || "",
+          expiryDay: formData?.expiryDay || "",
+          expiryMonth: formData?.expiryMonth || "",
+          expiryYear: formData?.expiryYear || "",
+          certificateNo: formData?.certificateNo || "",
+          zoneOfOperation: provisionalCertData?.zoneOfOperation || "",
+          dateOfIssue: provisionalCertData?.dateOfIssue || "",
+          dateOfExpiry: provisionalCertData?.dateOfExpiry || "",
+          vesselName: provisionalCertData?.vesselName || "",
+          officialNo: provisionalCertData?.officialNo || "",
+          portOfRegistry: provisionalCertData?.portOfRegistry || "",
+          certificateOfRegistryNo:
+            provisionalCertData?.certificateOfRegistryNo || "",
+          grossTonnage: provisionalCertData?.grossTonnage || "",
+          registeredTonnage: provisionalCertData?.registeredTonnage || "",
+          freeboardAssigned: provisionalCertData?.freeboardAssigned || "",
+          loadingMarksOnSide: formData?.loadingMarksOnSide || "N/A",
+          masterName: provisionalCertData?.masterName || "",
+          masterCocGrade: provisionalCertData?.masterCocGrade || "",
+          masterCocNo: provisionalCertData?.masterCocNo || "",
+          masterPlaceOfIssue: provisionalCertData?.masterPlaceOfIssue || "",
+          engineerName: provisionalCertData?.engineerName || "",
+          engineerCocGrade: provisionalCertData?.engineerCocGrade || "",
+          engineerCocNo: provisionalCertData?.engineerCocNo || "",
+          engineerPlaceOfIssue: provisionalCertData?.engineerPlaceOfIssue || "",
+          ownerName: provisionalCertData?.ownerName || "",
+          ownerAddress: provisionalCertData?.ownerAddress || "",
+          dateOfSurveyCarriedOut:
+            provisionalCertData?.dateOfSurveyCarriedOut || "",
+          placeOfSurveyCarriedOut:
+            provisionalCertData?.placeOfSurveyCarriedOut || "",
+          plyingLimits: formData?.plyingLimits || "",
+          notExtendingBeyondNauticalMiles:
+            formData?.notExtendingBeyondNauticalMiles || "",
+          cargoCapacity: provisionalCertData?.cargoCapacity || "",
+          passengerCapacity: provisionalCertData?.passengerCapacity || "",
+          crewCapacity: provisionalCertData?.crewCapacity || "",
+          noOfBoats:
+            formData?.safetyEquipment?.noOfBoats ||
+            provisionalCertData?.noOfBoats ||
+            "",
+          noOfBuoyantApparatus:
+            formData?.safetyEquipment?.noOfBuoyantApparatus ||
+            provisionalCertData?.noOfBuoyantApparatus ||
+            "",
+          noOfLifebuoys:
+            formData?.safetyEquipment?.noOfLifebuoys ||
+            provisionalCertData?.noOfLifebuoys ||
+            "",
+          noOfLifejackets:
+            formData?.safetyEquipment?.noOfLifejackets ||
+            provisionalCertData?.noOfLifejackets ||
+            "",
+          fireExtinguishersFoamType:
+            formData?.safetyEquipment?.fireExtinguishersFoamType ||
+            provisionalCertData?.fireExtinguishersFoamType ||
+            "",
+          fireExtinguishersSodaAcid:
+            formData?.safetyEquipment?.fireExtinguishersSodaAcid ||
+            provisionalCertData?.fireExtinguishersSodaAcid ||
+            "",
+          fireExtinguishersDryCarbonPowder:
+            formData?.safetyEquipment?.fireExtinguishersDryCarbonPowder ||
+            provisionalCertData?.fireExtinguishersDryCarbonPowder ||
+            "",
+          noOfAnchorsWithWeight:
+            formData?.safetyEquipment?.noOfAnchorsWithWeight ||
+            provisionalCertData?.noOfAnchorsWithWeight ||
+            "",
+          anchorCable:
+            formData?.safetyEquipment?.anchorCable ||
+            provisionalCertData?.anchorCable ||
+            "",
+          hose:
+            formData?.safetyEquipment?.hose || provisionalCertData?.hose || "",
+          iwtBasicDetailsAppNo:
+            registrationData?.vessel?.applicationNumber || "",
+        };
+      }
     } else {
-      request.surveyProvisionalCertificate = {
-        surveyId: initialRegistryData?.surveyId || "",
-        surveyNumber: initialRegistryData?.surveyNumber || "",
-        category: provisionalCertData?.category || "",
-        expiryDay: formData?.expiryDay || "",
-        expiryMonth: formData?.expiryMonth || "",
-        expiryYear: formData?.expiryYear || "",
-        certificateNo: formData?.certificateNo || "",
-        zoneOfOperation: provisionalCertData?.zoneOfOperation || "",
-        dateOfIssue: provisionalCertData?.dateOfIssue || "",
-        dateOfExpiry: provisionalCertData?.dateOfExpiry || "",
-        vesselName: provisionalCertData?.vesselName || "",
-        officialNo: provisionalCertData?.officialNo || "",
-        portOfRegistry: provisionalCertData?.portOfRegistry || "",
-        certificateOfRegistryNo:
-          provisionalCertData?.certificateOfRegistryNo || "",
-        grossTonnage: provisionalCertData?.grossTonnage || "",
-        registeredTonnage: provisionalCertData?.registeredTonnage || "",
-        freeboardAssigned: provisionalCertData?.freeboardAssigned || "",
-        loadingMarksOnSide: formData?.loadingMarksOnSide || "N/A",
-        masterName: provisionalCertData?.masterName || "",
-        masterCocGrade: provisionalCertData?.masterCocGrade || "",
-        masterCocNo: provisionalCertData?.masterCocNo || "",
-        masterPlaceOfIssue: provisionalCertData?.masterPlaceOfIssue || "",
-        engineerName: provisionalCertData?.engineerName || "",
-        engineerCocGrade: provisionalCertData?.engineerCocGrade || "",
-        engineerCocNo: provisionalCertData?.engineerCocNo || "",
-        engineerPlaceOfIssue: provisionalCertData?.engineerPlaceOfIssue || "",
-        ownerName: provisionalCertData?.ownerName || "",
-        ownerAddress: provisionalCertData?.ownerAddress || "",
-        dateOfSurveyCarriedOut:
-          provisionalCertData?.dateOfSurveyCarriedOut || "",
-        placeOfSurveyCarriedOut:
-          provisionalCertData?.placeOfSurveyCarriedOut || "",
-        plyingLimits: formData?.plyingLimits || "",
-        notExtendingBeyondNauticalMiles:
-          formData?.notExtendingBeyondNauticalMiles || "",
-        cargoCapacity: provisionalCertData?.cargoCapacity || "",
-        passengerCapacity: provisionalCertData?.passengerCapacity || "",
-        crewCapacity: provisionalCertData?.crewCapacity || "",
-        noOfBoats:
-          formData?.safetyEquipment?.noOfBoats ||
-          provisionalCertData?.noOfBoats ||
-          "",
-        noOfBuoyantApparatus:
-          formData?.safetyEquipment?.noOfBuoyantApparatus ||
-          provisionalCertData?.noOfBuoyantApparatus ||
-          "",
-        noOfLifebuoys:
-          formData?.safetyEquipment?.noOfLifebuoys ||
-          provisionalCertData?.noOfLifebuoys ||
-          "",
-        noOfLifejackets:
-          formData?.safetyEquipment?.noOfLifejackets ||
-          provisionalCertData?.noOfLifejackets ||
-          "",
-        fireExtinguishersFoamType:
-          formData?.safetyEquipment?.fireExtinguishersFoamType ||
-          provisionalCertData?.fireExtinguishersFoamType ||
-          "",
-        fireExtinguishersSodaAcid:
-          formData?.safetyEquipment?.fireExtinguishersSodaAcid ||
-          provisionalCertData?.fireExtinguishersSodaAcid ||
-          "",
-        fireExtinguishersDryCarbonPowder:
-          formData?.safetyEquipment?.fireExtinguishersDryCarbonPowder ||
-          provisionalCertData?.fireExtinguishersDryCarbonPowder ||
-          "",
-        noOfAnchorsWithWeight:
-          formData?.safetyEquipment?.noOfAnchorsWithWeight ||
-          provisionalCertData?.noOfAnchorsWithWeight ||
-          "",
-        anchorCable:
-          formData?.safetyEquipment?.anchorCable ||
-          provisionalCertData?.anchorCable ||
-          "",
-        hose:
-          formData?.safetyEquipment?.hose || provisionalCertData?.hose || "",
-        iwtBasicDetailsAppNo: registrationData?.vessel?.applicationNumber || "",
+      console.log(provisionalRegCertData, "provisionalRegCertData");
+      console.log(formData, "formData---CERT");
+      request = {
+        ...provisionalRegCertData?.certificateRequestWrapper,
+        certificateType: certificateType,
+        registrationCertificateDetails: {
+          ...provisionalRegCertData?.certificateRequestWrapper
+            ?.registrationCertificateDetails,
+          summaryDescriptionOfTonnage:
+            formData?.certificateOfRegistration?.summary ||
+            formData?.summary ||
+            "",
+        },
       };
     }
 
@@ -2211,22 +1829,19 @@ const handleFormSubmit = async (stepInfo) => {
       const response = await postData(URL, request);
       const { status, data } = response || {};
 
-      if ([200, 201, "200"].includes(status)) {
-        toast.success(
-          data?.responseStatus?.message ||
-          "Provisional certificate generated successfully",
-          { position: "top-right" }
-        );
+      if ([200, 201, "200", "201"].includes(status)) {
+        toast.success(data?.responseStatus?.message, { position: "top-right" });
+        if (!certificateType) {
+          // Hide the button after successful generation
+          setGeneratedCertificates((prev) => ({
+            ...prev,
+            [modalType]: false,
+          }));
 
-        // Hide the button after successful generation
-        setGeneratedCertificates((prev) => ({
-          ...prev,
-          [modalType]: false,
-        }));
-
-        // Close modal
-        setModalType("");
-        setOpenCertificateModal(false);
+          // Close modal
+          setModalType("");
+          setOpenCertificateModal(false);
+        }
 
         return Promise.resolve();
       } else {
@@ -2234,14 +1849,12 @@ const handleFormSubmit = async (stepInfo) => {
           data?.responseStatus?.message || "Failed to generate certificate",
           { position: "top-right" }
         );
-        return Promise.reject(new Error("Generation failed"));
       }
     } catch (err) {
       console.error("Certificate Generation Error:", err);
       handleErrorMessage(
         err?.response?.data || "Failed to generate certificate"
       );
-      return Promise.reject(err);
     } finally {
       loaderRef?.current?.hide();
     }
@@ -2253,78 +1866,63 @@ const handleFormSubmit = async (stepInfo) => {
   };
 
   const workflowApplicationSubmit = async (modalFormData) => {
-    try {
-      const URL =
-        SERVICE_BASE.IWT_WORKFLOW +
-        URLS_ENDPOINT.WORK_FLOW_SERVICE.WORKFLOW_ACTION;
+    const URL =
+      SERVICE_BASE.IWT_WORKFLOW +
+      URLS_ENDPOINT.WORK_FLOW_SERVICE.WORKFLOW_ACTION;
 
+    try {
       loaderRef?.current?.show();
 
-      let processId =
-        initialRegistryData?.processActionMapResponce?.[0]?.processs?.[0]
-          ?.processId;
+      const isFinalStep = steps?.[steps.length - 1]?.id === 5; //---Form 8
+      const processId = isFinalStep
+        ? provisionalRegCertData?.processActionMapResponce?.[0]?.processs?.[0]
+            ?.processId
+        : intialSurveyData?.processActionMapResponce?.[0]?.processs?.[0]
+            ?.processId;
 
-      if (!processId && registrationData?.vessel?.iwtVesselBasicDetailsTFk) {
-        try {
-          const apiUrl = SERVICE_BASE.IWT_SURVEY_SERVICE + URLS_ENDPOINT.SURVEY_SERVICE.SURVEY_SEARCH;
-          const response = await postData(apiUrl, {
-            iwtVesRegBasicDetailsTFk: [registrationData.vessel.iwtVesselBasicDetailsTFk],
-          });
-
-          if (response?.status === 200 || response?.status === 201) {
-            const surveyData = response?.data[0] || {};
-            processId = surveyData?.processActionMapResponce?.[0]?.processs?.[0]?.processId;
-          }
-        } catch (fetchError) {
-          console.error("Failed to fetch fresh survey data:", fetchError);
-        }
-      }
+      const isIntialSurvey = !isFinalStep;
 
       if (!processId) {
         toast.error("Process ID not found. Cannot submit workflow action.");
-        loaderRef?.current?.hide();
         return;
       }
 
       const payload = {
-        applicationNo: registrationData?.vessel?.applicationNumber,
-        processId: processId,
-        actionId: selectedAction?.actionId,
-        assignerRole: userRole,
+        applicationNo: registrationData?.vessel?.applicationNumber || "",
+        processId,
+        actionId: selectedAction?.actionId || "",
+        assignerRole: userRole || "",
         assignerName:
           userDetails?.userName ||
           JSON.parse(getFromLocalStorage("userDetails"))?.userName ||
           "",
         fileId: modalFormData?.document?.url || "",
-        remarks: modalFormData?.reason,
+        remarks: modalFormData?.reason || "",
+        surveyId:
+          isIntialSurvey && userRole === USER_ROLES.OFFICER_L5
+            ? intialSurveyData?.surveyId || ""
+            : "",
       };
 
       const response = await postData(URL, payload);
-      if (
-        response &&
-        response?.status === 200 &&
-        response?.data?.responseStatus?.status === "200"
-      ) {
-        toast.success(
-          response?.data?.responseStatus?.message ||
-          "Action submitted successfully"
-        );
+      const status = response?.status;
+      const resStatus = response?.data?.responseStatus?.status;
+      const resMessage = response?.data?.responseStatus?.message;
+
+      if ((status === 200 || status === 201) && resStatus === "200") {
+        toast.success(resMessage || "Action submitted successfully");
         handleCloseModal();
-        loaderRef?.current?.hide();
-        setTimeout(() => {
-          navigate("/dashboard");
-        }, 1000);
+        setTimeout(() => navigate("/dashboard"), 1000);
       } else {
-        loaderRef?.current?.hide();
-        toast.info(
-          response?.data?.responseStatus?.message || "Something went wrong..",
-          { position: "top-right" }
-        );
+        toast.info(resMessage || "Something went wrong..", {
+          position: "top-right",
+        });
       }
     } catch (err) {
-      console.log(err);
-      loaderRef?.current?.hide();
+      console.error("Workflow submit failed:", err);
       handleErrorMessage(err?.response?.data);
+    } finally {
+      loaderRef?.current?.hide();
     }
   };
 
@@ -2349,96 +1947,101 @@ const handleFormSubmit = async (stepInfo) => {
           {/* Certificate Buttons */}
           {userRole === USER_ROLES?.OFFICER_L3 && showOfficerActions && (
             <>
+              {generatedCertificates.survey &&
+                !registrationData?.basicDetails
+                  ?.isProvSurveyCertificateGenerated && (
+                  <Button
+                    variant="contained"
+                    onClick={() => handleProvisionModalOpen("survey")}
+                    data-tooltip-id="survey-cert-tooltip"
+                    data-tooltip-content="Generate Provisional Certificate of Survey for vessel inspection"
+                    style={{
+                      background: "#10b981",
+                      color: "#fff",
+                      fontWeight: "600",
+                      borderRadius: "6px",
+                      fontSize: "0.75rem",
+                      padding: "6px 12px",
+                      height: "32px",
+                      minWidth: "160px",
+                      maxWidth: "160px",
+                      textTransform: "none",
+                      border: "none",
+                      boxShadow: "0 1px 3px rgba(0,0,0,0.12)",
+                      transition: "all 0.2s ease",
+                      whiteSpace: "nowrap",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                    }}
+                  >
+                    Provisional Survey Certificate
+                  </Button>
+                )}
 
-              {generatedCertificates.survey && !registrationData?.basicDetails?.isProvSurveyCertificateGenerated && (
-                <Button
-                  variant="contained"
-                  onClick={() => handleProvisionModalOpen("survey")}
-                  data-tooltip-id="survey-cert-tooltip"
-                  data-tooltip-content="Generate Provisional Certificate of Survey for vessel inspection"
-                  style={{
-                    background: "#10b981",
-                    color: "#fff",
-                    fontWeight: "600",
-                    borderRadius: "6px",
-                    fontSize: "0.75rem",
-                    padding: "6px 12px",
-                    height: "32px",
-                    minWidth: "100px",
-                    maxWidth: "100px",
-                    textTransform: "none",
-                    border: "none",
-                    boxShadow: "0 1px 3px rgba(0,0,0,0.12)",
-                    transition: "all 0.2s ease",
-                    whiteSpace: "nowrap",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                  }}
-                >
-                  Survey Certificate
-                </Button>
-              )}
-
-              {generatedCertificates.registration && !registrationData?.basicDetails?.isProvisionalCertificate && (
-                <Button
-                  variant="contained"
-                  onClick={() => handleProvisionModalOpen("registration")}
-                  data-tooltip-id="reg-cert-tooltip"
-                  data-tooltip-content="Generate Provisional Certificate of Registration for vessel registry"
-                  style={{
-                    background: "#10b981",
-                    color: "#fff",
-                    fontWeight: "600",
-                    borderRadius: "6px",
-                    fontSize: "0.75rem",
-                    padding: "6px 12px",
-                    height: "32px",
-                    minWidth: "100px",
-                    maxWidth: "100px",
-                    textTransform: "none",
-                    border: "none",
-                    boxShadow: "0 1px 3px rgba(0,0,0,0.12)",
-                    transition: "all 0.2s ease",
-                    whiteSpace: "nowrap",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                  }}
-                >
-                  Registry Certificate
-                </Button>
-              )}
-
+              {generatedCertificates.registration &&
+                !registrationData?.basicDetails?.isProvisionalCertificate && (
+                  <Button
+                    variant="contained"
+                    onClick={() => handleProvisionModalOpen("registration")}
+                    data-tooltip-id="reg-cert-tooltip"
+                    data-tooltip-content="Generate Provisional Certificate of Registration for vessel registry"
+                    style={{
+                      background: "#10b981",
+                      color: "#fff",
+                      fontWeight: "600",
+                      borderRadius: "6px",
+                      fontSize: "0.75rem",
+                      padding: "6px 12px",
+                      height: "32px",
+                      minWidth: "180px",
+                      maxWidth: "180px",
+                      textTransform: "none",
+                      border: "none",
+                      boxShadow: "0 1px 3px rgba(0,0,0,0.12)",
+                      transition: "all 0.2s ease",
+                      whiteSpace: "nowrap",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                    }}
+                  >
+                    Provisional Registration Certificate
+                  </Button>
+                )}
             </>
           )}
 
           {/* Save Button */}
-          <Button
-            variant="contained"
-            onClick={() =>
-              handleFormSubmit({
-                index: 1,
-                getFormData: () => methods?.getValues(),
-              })
-            }
-            data-tooltip-id="save-tooltip"
-            data-tooltip-content="Save current form data and changes"
-            style={{
-              backgroundColor: "#2E57A7",
-              fontWeight: "600",
-              borderRadius: "6px",
-              fontSize: "0.75rem",
-              color: "#fff",
-              padding: "6px 12px",
-              height: "32px",
-              minWidth: "80px",
-              maxWidth: "80px",
-              textTransform: "none",
-              boxShadow: "0 1px 3px rgba(0,0,0,0.12)",
-              transition: "all 0.2s ease",
-            }}
-          >
-            Save
-          </Button>
+
+          {!originalRegistrationData?.basicDetails?.initialSurveyCompleted &&
+            steps[steps?.length - 1].id !== 5 && (
+              <Button
+                variant="contained"
+                onClick={() =>
+                  handleFormSubmit({
+                    index: 1,
+                    getFormData: () => methods?.getValues(),
+                  })
+                }
+                data-tooltip-id="save-tooltip"
+                data-tooltip-content="Save current form data and changes"
+                style={{
+                  backgroundColor: "#2E57A7",
+                  fontWeight: "600",
+                  borderRadius: "6px",
+                  fontSize: "0.75rem",
+                  color: "#fff",
+                  padding: "6px 12px",
+                  height: "32px",
+                  minWidth: "80px",
+                  maxWidth: "80px",
+                  textTransform: "none",
+                  boxShadow: "0 1px 3px rgba(0,0,0,0.12)",
+                  transition: "all 0.2s ease",
+                }}
+              >
+                Save
+              </Button>
+            )}
 
           {/* Action Dropdown */}
           <ActionDropdown
@@ -2489,6 +2092,7 @@ const handleFormSubmit = async (stepInfo) => {
         />
       </>
     ) : null;
+
   return (
     <>
       <NewLoader ref={loaderRef} />
@@ -2563,10 +2167,10 @@ const handleFormSubmit = async (stepInfo) => {
                       }}
                     >
                       {isViewMode
-                        ? t("Transfer Of Registry Details") + ` - ${id}`
+                        ? t("Vessel Intial Survey Details") + ` - ${id}`
                         : isEditMode
-                          ? t("Edit Transfer Of Registry Application") + ` - ${id}`
-                          : t("Application For Transfer Of Registry") + `  (${id})`}
+                        ? t("Edit Vessel Intial Survey") + ` - ${id}`
+                        : t("New Vessel - Intial Survey") + `  (${id})`}
                     </Typography>
                     <Typography
                       sx={{
@@ -2576,11 +2180,11 @@ const handleFormSubmit = async (stepInfo) => {
                       }}
                     >
                       {isViewMode
-                        ? t("(View transfer of registry details)")
+                        ? t("(View vessel survey details)")
                         : isEditMode
-                          ? t("(Update transfer of registry details)")
-                          : t(
-                            "(Fill in the transfer of registry details to complete registration)"
+                        ? t("(Update vessel survey details)")
+                        : t(
+                            "(Fill in the survey details to complete registration)"
                           )}
                     </Typography>
                   </Stack>
@@ -2591,10 +2195,11 @@ const handleFormSubmit = async (stepInfo) => {
             <Stepper
               ref={stepperRef}
               steps={steps}
-              onSave={handleSave}
+              // onSave={handleSave}
               actionComponent={actionDropdown}
               viewMode={isViewMode}
               onSyncData={handleFormSubmit}
+              onSubmit={handleCertificateSubmit}
               onPayNow={handlePayNow}
               // displayProvision={userRole === USER_ROLES?.OFFICER_L3 && showOfficerActions}
               handleProvisionModalOpen={handleProvisionModalOpen}
@@ -2642,4 +2247,4 @@ const handleFormSubmit = async (stepInfo) => {
   );
 };
 
-export default TransferOfRegistryApplication;
+export default VesselSurveyRegistration;
